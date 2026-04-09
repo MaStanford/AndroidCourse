@@ -2,15 +2,19 @@
   "id": "android-fundamentals",
   "title": "Android Fundamentals",
   "icon": "📱",
-  "description": "Core building blocks of Android applications",
+  "description": "Core components, lifecycle, configuration changes, resource system, source sets, drawable density, View layout (margin/padding/width/height), RTL, multi-screen, and lifecycle debugging",
   "references": [
     {"title": "Android Developers — Activity Lifecycle", "url": "https://developer.android.com/guide/components/activities/activity-lifecycle", "type": "docs"},
-    {"title": "Android Developers — Intents and Intent Filters", "url": "https://developer.android.com/guide/components/intents-filters", "type": "docs"},
-    {"title": "Android Developers — Tasks and Back Stack", "url": "https://developer.android.com/guide/components/activities/tasks-and-back-stack", "type": "docs"},
-    {"title": "Android Developers — App Components", "url": "https://developer.android.com/guide/components/fundamentals", "type": "docs"},
+    {"title": "Android Developers — Handle Configuration Changes", "url": "https://developer.android.com/guide/topics/resources/runtime-changes", "type": "docs"},
+    {"title": "Android Developers — App Resources Overview", "url": "https://developer.android.com/guide/topics/resources/providing-resources", "type": "docs"},
+    {"title": "Android Developers — How Android Finds the Best Resource", "url": "https://developer.android.com/guide/topics/resources/providing-resources#BestMatch", "type": "docs"},
+    {"title": "Android Developers — Support Different Screen Sizes", "url": "https://developer.android.com/training/multiscreen/screensizes", "type": "docs"},
+    {"title": "Android Developers — Layouts in Views", "url": "https://developer.android.com/develop/ui/views/layout/declaring-layout", "type": "docs"},
+    {"title": "Android Developers — Bidirectional Text (RTL)", "url": "https://developer.android.com/training/basics/supporting-devices/languages#RTL", "type": "docs"},
+    {"title": "Android Developers — Fragment Lifecycle", "url": "https://developer.android.com/guide/fragments/lifecycle", "type": "docs"},
     {"title": "AOSP ActivityManagerService", "url": "https://cs.android.com/android/platform/superproject/+/main:frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java", "type": "source"}
   ],
-  "lesson": "<h3>The Android Application Model</h3>\n<p>Android apps are built from <b>four core components</b> — Activity, Service, BroadcastReceiver, and ContentProvider. Unlike web apps with a single entry point, Android apps have <b>multiple entry points</b>.</p>\n<table>\n<tr><th>Component</th><th>Purpose</th><th>Managed By</th><th>Lifetime</th></tr>\n<tr><td><b>Activity</b></td><td>Single screen with UI</td><td>ActivityManagerService</td><td>Until finished or system destroys</td></tr>\n<tr><td><b>Service</b></td><td>Background work, no UI</td><td>ActiveServices (part of AMS)</td><td>Until stopped or killed</td></tr>\n<tr><td><b>BroadcastReceiver</b></td><td>Responds to system events</td><td>BroadcastQueue (part of AMS)</td><td>Duration of onReceive() only</td></tr>\n<tr><td><b>ContentProvider</b></td><td>Shared data interface</td><td>ContentProviderManager</td><td>While in use by clients</td></tr>\n</table>\n\n<h3>Activity Lifecycle</h3>\n<div class=\"diagram\">onCreate() → onStart() → onResume()\n                         [RUNNING - visible & interactive]\n              onPause() ← user partially obscured (dialog, multi-window)\n            onStop()    ← fully hidden (home button, new activity)\n          onDestroy()   ← finishing or system reclaiming memory\n\nRotation: onPause → onStop → onDestroy → onCreate → onStart → onResume\n          (entire Activity recreated! ViewModel survives this)</div>\n\n<hr class=\"section-divider\">\n<h3>How Intents Work — The System Path</h3>\n<p>When you call <code>startActivity(intent)</code>, the request travels via <b>Binder IPC</b> to <b>ActivityManagerService</b> in the system_server process:</p>\n<div class=\"diagram\">Your App Process                     system_server Process\n─────────────────                    ────────────────────\nstartActivity(intent)\n    │\n    └──► Binder IPC ──────────────► ActivityManagerService (AMS)\n                                        │\n                                        ├── resolveIntent()\n                                        │     └── PackageManagerService\n                                        │           └── scans all apps'\n                                        │               AndroidManifest.xml\n                                        │               for matching intent-filters\n                                        ├── Check permissions\n                                        ├── Find or create target Task\n                                        ├── Find or create target Process\n                                        │     └── Zygote forks if needed\n                                        └── Send to target app\n                                              │\nTarget App ◄──────────────────────────────────┘\n    ActivityThread.handleLaunchActivity()\n        └── activity.onCreate(bundle)</div>\n<ul>\n<li><b>Explicit Intent</b> — specifies exact target: <code>Intent(this, DetailActivity::class.java)</code></li>\n<li><b>Implicit Intent</b> — declares an action: <code>Intent(ACTION_SEND)</code>. PMS scans all manifests for matching <code>&lt;intent-filter&gt;</code>. Multiple matches → chooser dialog</li>\n</ul>\n\n<hr class=\"section-divider\">\n<h3>Tasks vs Activities vs Processes</h3>\n<p>These are three separate concepts that are commonly confused:</p>\n<div class=\"diagram\">Process (Linux process — one per app, has PID and memory)\n  └── Application (singleton, global state)\n       └── ActivityThread (main/UI thread)\n\nTask (logical back stack — can span processes!)\n  └── Activity A (bottom of stack)\n  └── Activity B\n  └── Activity C (top — foreground, visible)</div>\n<div class=\"info-box\"><b>Key insight:</b> A Task is NOT a process. Tasks can contain Activities from different apps/processes. When your app launches the Camera app, the Camera Activity joins YOUR task's back stack.</div>\n\n<h4>When Is a New Task Created?</h4>\n<ul>\n<li>User taps app icon → Launcher sends <code>FLAG_ACTIVITY_NEW_TASK</code> → new Task</li>\n<li>Code uses <code>FLAG_ACTIVITY_NEW_TASK</code></li>\n<li>Activity has <code>launchMode=\"singleTask\"</code> in manifest</li>\n<li>Deep link or notification with NEW_TASK flag</li>\n</ul>\n\n<h4>What Happens When Activity B Opens an Already-Existing Activity A?</h4>\n<table>\n<tr><th>launchMode</th><th>Behavior</th></tr>\n<tr><td><code>standard</code> (default)</td><td>New instance of A created in B's Task. Two copies of A now exist.</td></tr>\n<tr><td><code>singleTop</code></td><td>If A is on TOP of current Task → reuse + <code>onNewIntent()</code>. Otherwise → new instance.</td></tr>\n<tr><td><code>singleTask</code></td><td>A's Task comes to foreground. Activities above A are destroyed. A gets <code>onNewIntent()</code>.</td></tr>\n<tr><td><code>singleInstance</code></td><td>A is alone in its Task. Brought to front, gets <code>onNewIntent()</code>. No other Activity can join.</td></tr>\n</table>\n\n<hr class=\"section-divider\">\n<h3>Window Management & DecorView</h3>\n<div class=\"diagram\">┌─────────────────────────────────────────────────┐\n│                 SurfaceFlinger                   │\n│  (composites all surfaces into final frame)      │\n├──────────┬──────────────────┬────────────────────┤\n│ StatusBar│   App Surface    │  NavigationBar     │\n│ (SystemUI│   (DecorView)    │  (SystemUI)        │\n│  window) │                  │                    │\n└──────────┴──────────────────┴────────────────────┘\n\nWindowManagerService (WMS) — in system_server\n  ├── Manages all windows (Z-ordering, bounds)\n  ├── Input dispatching (touch → correct window)\n  └── Window animations\n\nActivityManagerService (AMS)\n  └── Activity lifecycle, tasks, back stack\n      └── Tells WMS to add/remove windows\n\nDecorView (in YOUR app process)\n  └── Root View of every Activity window\n      └── PhoneWindow creates it\n          └── Your setContentView() layout goes inside</div>\n<div class=\"info-box\"><b>Multi-window (AAOS/split-screen):</b> SystemUI doesn't modify your DecorView. Instead, WMS assigns bounds to each Task's window, and SystemUI adds separate <b>caption bar windows</b> (via WindowDecorService) positioned at the top of each Task's bounds. The app's window area is simply made smaller.</div>\n\n<h4>SurfaceView vs TextureView</h4>\n<table>\n<tr><th></th><th>SurfaceView</th><th>TextureView</th></tr>\n<tr><td>Surfaces</td><td>Own surface (2 total — punches a hole)</td><td>Uses app surface (1)</td></tr>\n<tr><td>Thread</td><td>Any thread</td><td>Any thread</td></tr>\n<tr><td>Alpha/rotation</td><td>No</td><td>Yes</td></tr>\n<tr><td>Performance</td><td>Best (HW overlay)</td><td>Good (GPU texture copy)</td></tr>\n<tr><td>Use case</td><td>Camera preview, video, maps</td><td>Video with alpha/effects</td></tr>\n</table>",
+  "lesson": "<h3>The Android Application Model</h3>\n<p>Android apps are built from <b>four core components</b> — Activity, Service, BroadcastReceiver, and ContentProvider. Unlike web apps with a single entry point, Android apps have <b>multiple entry points</b>.</p>\n<table>\n<tr><th>Component</th><th>Purpose</th><th>Managed By</th><th>Lifetime</th></tr>\n<tr><td><b>Activity</b></td><td>Single screen with UI</td><td>ActivityManagerService</td><td>Until finished or system destroys</td></tr>\n<tr><td><b>Service</b></td><td>Background work, no UI</td><td>ActiveServices (part of AMS)</td><td>Until stopped or killed</td></tr>\n<tr><td><b>BroadcastReceiver</b></td><td>Responds to system events</td><td>BroadcastQueue (part of AMS)</td><td>Duration of onReceive() only</td></tr>\n<tr><td><b>ContentProvider</b></td><td>Shared data interface</td><td>ContentProviderManager</td><td>While in use by clients</td></tr>\n</table>\n\n<hr class=\"section-divider\">\n<h3>Activity Lifecycle — The Full Picture</h3>\n<div class=\"diagram\">onCreate() → onStart() → onResume()\n                         [RUNNING — visible & interactive]\n              onPause() ← user partially obscured (dialog, multi-window)\n            onStop()    ← fully hidden (home button, new activity)\n          onDestroy()   ← finishing or system reclaiming memory\n\nRotation: onPause → onStop → onDestroy → onCreate → onStart → onResume\n          (entire Activity recreated! ViewModel survives this)\n\nProcess death: onStop → [killed] → onCreate (with savedInstanceState)\n               ViewModel is GONE. Only SavedStateHandle survives.</div>\n<table><tr><th>Callback</th><th>State</th><th>What To Do</th></tr>\n<tr><td><code>onCreate()</code></td><td>Created, not visible</td><td>Inflate layout, set up ViewModel, bind data. Called with <code>savedInstanceState</code> Bundle if restoring.</td></tr>\n<tr><td><code>onStart()</code></td><td>Visible, not interactive</td><td>Register UI-related observers (LiveData, Flow collection via <code>repeatOnLifecycle</code>)</td></tr>\n<tr><td><code>onResume()</code></td><td>Foreground, interactive</td><td>Start camera, resume animations, acquire exclusive resources</td></tr>\n<tr><td><code>onPause()</code></td><td>Partially visible</td><td>Release exclusive resources (camera). <b>Do NOT save data here</b> — onPause can be very brief.</td></tr>\n<tr><td><code>onStop()</code></td><td>Hidden</td><td>Release heavy resources. Save transient data. Unregister non-lifecycle-aware listeners.</td></tr>\n<tr><td><code>onDestroy()</code></td><td>Being destroyed</td><td>Clean up. Check <code>isFinishing</code> to distinguish finish() from config change.</td></tr></table>\n<div class=\"info-box\"><b>Multi-window lifecycle:</b> On API 29+, multiple Activities can be in <code>RESUMED</code> state simultaneously (multi-resume). Use <code>onTopResumedActivityChanged()</code> to know if you're the topmost resumed Activity — this is where you should acquire exclusive resources like the camera.</div>\n\n<hr class=\"section-divider\">\n<h3>Configuration Changes & Activity Recreation</h3>\n<p>A <b>configuration change</b> is any change to the device's runtime configuration — screen rotation, language switch, font size change, dark mode toggle, keyboard availability, screen resize (multi-window). By default, Android <b>destroys and recreates</b> the Activity to pick up new resources.</p>\n<div class=\"diagram\">User rotates phone\n    │\n    ▼\nSystem detects Configuration change\n    │\n    ├── Activity.onPause()\n    ├── Activity.onStop()\n    ├── Activity.onSaveInstanceState(bundle)  ← save transient UI state\n    ├── Activity.onDestroy()                  ← old Activity gone\n    │\n    ├── Activity.onCreate(savedInstanceState)  ← NEW Activity with new config\n    ├── Activity.onStart()\n    └── Activity.onResume()\n\nWhat survives:\n  ✓ ViewModel (config changes only, NOT process death)\n  ✓ SavedInstanceState Bundle (config changes AND process death)\n  ✗ Plain fields, lateinit vars, running coroutines (without viewModelScope)</div>\n<h4>android:configChanges — Opting Out</h4>\n<p>You can declare <code>android:configChanges</code> in the manifest to handle certain config changes yourself <b>without</b> recreation:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Manifest: handle orientation and screen size yourself</span>\n&lt;activity\n    android:name=\".VideoPlayerActivity\"\n    android:configChanges=\"orientation|screenSize|smallestScreenSize\" /&gt;\n\n<span class=\"cmt\">// Activity: system calls this instead of recreating</span>\noverride fun onConfigurationChanged(newConfig: Configuration) {\n    super.onConfigurationChanged(newConfig)\n    if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {\n        // Adjust layout without full recreation\n    }\n}</div>\n<div class=\"warn-box\"><b>When to use configChanges:</b> Almost never. It's tempting to avoid recreation, but you lose automatic resource re-selection (layout-land, values-night, etc.). Only use it for Activities that must maintain continuous state, like video players or OpenGL views. For everything else, let the system recreate and use ViewModel + SavedStateHandle to restore state.</div>\n<table><tr><th>Config Change</th><th>Triggers Recreation?</th><th>Common Cause</th></tr>\n<tr><td>Rotation</td><td>Yes</td><td>User rotates device</td></tr>\n<tr><td>Locale</td><td>Yes</td><td>User changes language in Settings</td></tr>\n<tr><td>UI mode (dark/light)</td><td>Yes</td><td>Dark mode toggle</td></tr>\n<tr><td>Font scale</td><td>Yes</td><td>User changes display size / font size</td></tr>\n<tr><td>Screen size</td><td>Yes</td><td>Multi-window: entering/exiting split screen</td></tr>\n<tr><td>Keyboard hidden/shown</td><td>Depends on manifest</td><td>Hardware keyboard attached/detached</td></tr></table>\n\n<hr class=\"section-divider\">\n<h3>The Resource System & Qualifier Matching</h3>\n<p>Android's resource system is how your app adapts to different devices, languages, screen sizes, and configurations <b>without writing conditional code</b>. Resources live in <code>res/</code> subdirectories with <b>qualifier suffixes</b>.</p>\n<div class=\"diagram\">res/\n├── drawable/           ← default drawables\n├── drawable-mdpi/      ← medium density (~160dpi)\n├── drawable-hdpi/      ← high density (~240dpi)\n├── drawable-xhdpi/     ← extra-high density (~320dpi)\n├── drawable-xxhdpi/    ← extra-extra-high (~480dpi)\n├── drawable-xxxhdpi/   ← extra-extra-extra-high (~640dpi)\n├── layout/             ← default layout\n├── layout-land/        ← landscape orientation\n├── layout-sw600dp/     ← smallest width ≥ 600dp (tablets)\n├── layout-w900dp/      ← current width ≥ 900dp\n├── values/             ← default strings, dimens, colors\n├── values-es/          ← Spanish strings\n├── values-ja/          ← Japanese strings\n├── values-night/       ← dark mode colors/themes\n├── values-v31/         ← API 31+ specific values\n└── values-sw600dp-land/ ← tablet + landscape (multiple qualifiers)</div>\n<h4>How Android Finds the Best-Matching Resource</h4>\n<p>When your code references <code>R.drawable.icon</code>, the system uses an <b>elimination algorithm</b>:</p>\n<div class=\"diagram\">Step 1: Eliminate qualifier groups that contradict the device config\n        Device is: en-US, portrait, xhdpi, sw411dp, API 34, night mode\n\n        drawable/          ← keep (no qualifiers = universal)\n        drawable-mdpi/     ← eliminate (density doesn't match)\n        drawable-hdpi/     ← eliminate\n        drawable-xhdpi/    ← keep (matches!)\n        drawable-xxhdpi/   ← keep for now (density can scale down)\n        drawable-land/     ← eliminate (not landscape)\n\nStep 2: Walk through qualifier precedence order (MCC → language →\n        layout direction → smallest width → width → height →\n        screen size → orientation → UI mode → night → density →\n        ... → API level)\n\n        At each step, eliminate dirs that don't match\n        the highest-priority qualifier.\n\nStep 3: Last directory standing wins.\n        If only default (no qualifier) remains, use that.</div>\n<div class=\"warn-box\"><b>Density is special:</b> If the exact density bucket doesn't exist, Android picks the <b>next higher</b> density and scales down (preferred) or the next lower and scales up. Scaling up is worse — it produces blurry images. Always provide <code>xxhdpi</code> at minimum, since most modern phones are xxhdpi or xxxhdpi. Or use <b>vector drawables</b> which scale perfectly.</div>\n<div class=\"info-box\"><b>Multiple qualifiers:</b> You can combine qualifiers: <code>values-es-night</code> matches Spanish + dark mode. Qualifiers must follow the <a href=\"https://developer.android.com/guide/topics/resources/providing-resources#table2\">fixed precedence order</a> — <code>values-night-es</code> is <b>invalid</b> (night must come before language? Actually language comes before night — the order matters!).</div>\n\n<hr class=\"section-divider\">\n<h3>Source Sets</h3>\n<p>Source sets control which code and resources are included in a particular build. They layer on top of each other:</p>\n<div class=\"diagram\">Build: freeDebug\n\n  main/           ← always included (your primary code + resources)\n    ├── java/\n    ├── res/\n    └── AndroidManifest.xml\n\n  debug/          ← included only in debug builds\n    ├── java/     (can add classes, NOT override main)\n    └── res/      (resources OVERLAY main — same name replaces)\n\n  free/           ← included only in 'free' flavor\n    ├── java/\n    └── res/\n\n  freeDebug/      ← included only in free + debug combination\n    └── res/\n\nOverlay priority (highest wins for resources):\n  freeDebug > free > debug > main\n\nFor Java/Kotlin: source sets are ADDITIVE (no overriding)\nFor resources: same-name resources in higher-priority sets REPLACE lower ones\nFor manifests: merged with manifest merger (higher priority wins conflicts)</div>\n<table><tr><th>Source Set</th><th>When Included</th><th>Use Case</th></tr>\n<tr><td><code>main</code></td><td>Always</td><td>Core app code and resources</td></tr>\n<tr><td><code>debug</code></td><td>Debug builds</td><td>Debug tools (LeakCanary, Flipper), test API URLs</td></tr>\n<tr><td><code>release</code></td><td>Release builds</td><td>Production API URLs, analytics config</td></tr>\n<tr><td><code>{flavor}</code></td><td>That flavor only</td><td>Free vs paid features, different branding</td></tr>\n<tr><td><code>test</code></td><td>Local unit tests</td><td>Test doubles, test data</td></tr>\n<tr><td><code>androidTest</code></td><td>Instrumented tests</td><td>UI test helpers, test rules</td></tr></table>\n\n<hr class=\"section-divider\">\n<h3>Drawable Density & Image Scaling</h3>\n<p>Android screens have different pixel densities (DPI). To make images look sharp on all devices, you provide different sizes in density-qualified drawable directories:</p>\n<table><tr><th>Density Bucket</th><th>DPI</th><th>Scale Factor</th><th>48dp icon =</th></tr>\n<tr><td>mdpi</td><td>~160</td><td>1x (baseline)</td><td>48×48 px</td></tr>\n<tr><td>hdpi</td><td>~240</td><td>1.5x</td><td>72×72 px</td></tr>\n<tr><td>xhdpi</td><td>~320</td><td>2x</td><td>96×96 px</td></tr>\n<tr><td>xxhdpi</td><td>~480</td><td>3x</td><td>144×144 px</td></tr>\n<tr><td>xxxhdpi</td><td>~640</td><td>4x</td><td>192×192 px</td></tr></table>\n<div class=\"lesson-code\"><span class=\"cmt\">// dp (density-independent pixels) → actual pixels</span>\npx = dp × (dpi / 160)\n\n<span class=\"cmt\">// On a 320dpi (xhdpi) screen:</span>\n48dp × (320/160) = 48 × 2 = 96px\n\n<span class=\"cmt\">// On a 480dpi (xxhdpi) screen:</span>\n48dp × (480/160) = 48 × 3 = 144px</div>\n<h4>What Happens When a Density Bucket Is Missing?</h4>\n<div class=\"diagram\">Device is xxhdpi (480dpi). Looking for R.drawable.photo:\n\n1. Check drawable-xxhdpi/  → found? Use it ✓\n2. Not found? Check drawable-xxxhdpi/ → scale DOWN (preferred)\n3. Not found? Check drawable-xhdpi/  → scale UP (blurry!)\n4. Not found? Check drawable-hdpi/   → scale UP more (blurrier!)\n5. Last resort: drawable/ (no qualifier) → treated as mdpi, scaled up 3x\n\nAlways scales from nearest. Higher density is preferred over lower.</div>\n<div class=\"info-box\"><b>Vector drawables</b> (<code>.xml</code>) scale to any size without quality loss. Use them for icons, logos, and simple graphics. For photos and complex images, provide raster assets in at least <code>xxhdpi</code>. Use <code>WebP</code> format over PNG for 25-35% smaller file sizes.</div>\n\n<hr class=\"section-divider\">\n<h3>View Layout Fundamentals: Size, Margin & Padding</h3>\n<p>Every View has a rectangular area defined by width, height, margin (outside), and padding (inside). Understanding the box model is critical for debugging layout issues on real devices.</p>\n<div class=\"diagram\">┌──────────────── Margin ────────────────┐\n│                                        │\n│   ┌──────────── Border ────────────┐   │\n│   │                                │   │\n│   │   ┌──── Padding ────┐         │   │\n│   │   │                 │         │   │\n│   │   │    CONTENT      │         │   │\n│   │   │   (text, image) │         │   │\n│   │   │                 │         │   │\n│   │   └─────────────────┘         │   │\n│   │                                │   │\n│   └────────────────────────────────┘   │\n│                                        │\n└────────────────────────────────────────┘\n\nMargin: space OUTSIDE the view (between this view and neighbors)\nPadding: space INSIDE the view (between border and content)\nBackground: fills the padding area but NOT margin</div>\n<h4>Width & Height</h4>\n<table><tr><th>Value</th><th>Meaning</th><th>Behavior</th></tr>\n<tr><td><code>match_parent</code></td><td>Fill parent's available space</td><td>View expands to parent's width/height minus parent's padding</td></tr>\n<tr><td><code>wrap_content</code></td><td>Shrink to fit content</td><td>View measures its content and becomes just big enough</td></tr>\n<tr><td><code>Fixed dp</code> (e.g. 200dp)</td><td>Exact size</td><td>Always this size regardless of content or parent</td></tr>\n<tr><td><code>0dp</code> (in ConstraintLayout)</td><td>Match constraints</td><td>Fills the space defined by constraints</td></tr>\n<tr><td><code>0dp</code> (in LinearLayout with weight)</td><td>Weighted distribution</td><td>Remaining space distributed by <code>layout_weight</code></td></tr></table>\n<h4>layout_weight in LinearLayout</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// Two buttons splitting width equally</span>\n&lt;LinearLayout android:orientation=\"horizontal\" ...&gt;\n    &lt;Button\n        android:layout_width=\"0dp\"\n        android:layout_height=\"wrap_content\"\n        android:layout_weight=\"1\" /&gt;   <span class=\"cmt\">// gets 1/(1+1) = 50%</span>\n    &lt;Button\n        android:layout_width=\"0dp\"\n        android:layout_height=\"wrap_content\"\n        android:layout_weight=\"1\" /&gt;   <span class=\"cmt\">// gets 1/(1+1) = 50%</span>\n&lt;/LinearLayout&gt;\n\n<span class=\"cmt\">// WRONG: using match_parent with weight — causes double-measurement!</span>\n<span class=\"cmt\">// The view is first measured at match_parent, then the weight is applied.</span>\n<span class=\"cmt\">// Use 0dp to avoid this performance hit (\"double taxation\").</span></div>\n<h4>gravity vs layout_gravity</h4>\n<table><tr><th>Attribute</th><th>Applied To</th><th>What It Does</th></tr>\n<tr><td><code>android:gravity</code></td><td>The View itself</td><td>Positions the View's <b>content</b> within its own bounds (like text alignment)</td></tr>\n<tr><td><code>android:layout_gravity</code></td><td>The View's <b>parent</b></td><td>Positions the View within its <b>parent's</b> remaining space</td></tr></table>\n<div class=\"info-box\"><b>Think of it this way:</b> <code>gravity</code> = \"where does my content sit inside me?\" <code>layout_gravity</code> = \"where do I sit inside my parent?\" In Compose, these map to <code>Alignment</code> on containers and <code>Modifier.align()</code> on children.</div>\n\n<hr class=\"section-divider\">\n<h3>RTL Support & Layout Direction</h3>\n<p>Languages like Arabic, Hebrew, Farsi, and Urdu read right-to-left (RTL). Android can mirror your entire layout automatically, but you must use direction-neutral attributes:</p>\n<table><tr><th>OLD (DO NOT USE)</th><th>NEW (USE THIS)</th><th>Why</th></tr>\n<tr><td><code>paddingLeft</code></td><td><code>paddingStart</code></td><td>Start = left in LTR, right in RTL</td></tr>\n<tr><td><code>paddingRight</code></td><td><code>paddingEnd</code></td><td>End = right in LTR, left in RTL</td></tr>\n<tr><td><code>marginLeft</code></td><td><code>marginStart</code></td><td>Auto-mirrors for RTL</td></tr>\n<tr><td><code>marginRight</code></td><td><code>marginEnd</code></td><td>Auto-mirrors for RTL</td></tr>\n<tr><td><code>layout_alignParentLeft</code></td><td><code>layout_alignParentStart</code></td><td>RelativeLayout auto-mirrors</td></tr>\n<tr><td><code>gravity=\"left\"</code></td><td><code>gravity=\"start\"</code></td><td>Text and content alignment</td></tr></table>\n<div class=\"lesson-code\"><span class=\"cmt\">// Enable RTL support in manifest</span>\n&lt;application\n    android:supportsRtl=\"true\"\n    ...&gt;\n\n<span class=\"cmt\">// Layout: use start/end instead of left/right</span>\n&lt;TextView\n    android:layout_width=\"match_parent\"\n    android:layout_height=\"wrap_content\"\n    android:paddingStart=\"16dp\"\n    android:paddingEnd=\"8dp\"\n    android:drawableStart=\"@drawable/ic_arrow\"\n    android:gravity=\"start\" /&gt;</div>\n<div class=\"warn-box\"><b>Common RTL bugs:</b><br>• Using <code>left/right</code> instead of <code>start/end</code> — layout doesn't mirror<br>• Hardcoded drawable arrows pointing → — should flip in RTL<br>• Progress bars filling left-to-right — should reverse in RTL<br>• Testing tip: Toggle <code>Force RTL layout direction</code> in Developer Options to test without changing language</div>\n\n<hr class=\"section-divider\">\n<h3>Multi-Screen & Display Adaptation</h3>\n<p>Android runs on phones, tablets, foldables, TVs, cars, watches, and Chromebooks. Your app must handle wildly different screen sizes:</p>\n<table><tr><th>Qualifier</th><th>Meaning</th><th>Example</th></tr>\n<tr><td><code>sw600dp</code></td><td>Smallest width ≥ 600dp</td><td>7\" tablets and larger</td></tr>\n<tr><td><code>sw720dp</code></td><td>Smallest width ≥ 720dp</td><td>10\" tablets</td></tr>\n<tr><td><code>w600dp</code></td><td>Current available width ≥ 600dp</td><td>Landscape phone, portrait tablet</td></tr>\n<tr><td><code>h480dp</code></td><td>Current available height ≥ 480dp</td><td>Rarely used</td></tr>\n<tr><td><code>land</code> / <code>port</code></td><td>Orientation</td><td>Landscape vs portrait layouts</td></tr></table>\n<p><code>sw</code> (smallest width) = the <b>shortest</b> side of the screen, regardless of orientation. A 7\" tablet has sw~600dp whether portrait or landscape. This makes it the most reliable qualifier for phone vs tablet distinction.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// res/layout/activity_main.xml — phone: single pane</span>\n&lt;FrameLayout&gt;\n    &lt;fragment android:id=\"@+id/list_fragment\" /&gt;\n&lt;/FrameLayout&gt;\n\n<span class=\"cmt\">// res/layout-sw600dp/activity_main.xml — tablet: two-pane</span>\n&lt;LinearLayout android:orientation=\"horizontal\"&gt;\n    &lt;fragment android:id=\"@+id/list_fragment\"\n        android:layout_width=\"0dp\"\n        android:layout_weight=\"1\" /&gt;\n    &lt;fragment android:id=\"@+id/detail_fragment\"\n        android:layout_width=\"0dp\"\n        android:layout_weight=\"2\" /&gt;\n&lt;/LinearLayout&gt;</div>\n<div class=\"info-box\"><b>Multi-window window size ≠ display size:</b> In split-screen mode, your app's window is smaller than the screen. Use <code>WindowMetricsCalculator</code> (Jetpack WindowManager) to get your actual window size, NOT <code>Display.getSize()</code>. In Compose, use <code>WindowSizeClass</code> to reactively adapt layout to compact/medium/expanded width.</div>\n\n<hr class=\"section-divider\">\n<h3>Fragment Lifecycle</h3>\n<p>Fragments have their own lifecycle that is <b>tied to but separate from</b> the hosting Activity's lifecycle. Fragments also have a <b>View lifecycle</b> which is shorter than the Fragment lifecycle:</p>\n<div class=\"diagram\">Fragment Lifecycle (attached to Activity)\n\nonAttach()\n  └── onCreate()                      ← Fragment created (no view yet)\n        └── onCreateView()            ← Inflate layout, return root view\n              └── onViewCreated()      ← View exists! Set up UI here\n                    └── onStart()      ← Visible\n                          └── onResume()  ← Interactive\n\n                          onPause()       ← Partially obscured\n                    onStop()              ← Hidden\n              onDestroyView()             ← VIEW destroyed (Fragment still alive!)\n        onDestroy()                       ← Fragment destroyed\nonDetach()                                ← Removed from Activity\n\n\nKey insight: Fragment can outlive its View!\n  Navigation: When you navigate forward, the Fragment stays in the\n  back stack (alive!) but its View is destroyed (onDestroyView).\n  Navigate back → onCreateView runs again with a NEW View.</div>\n<div class=\"warn-box\"><b>Fragment View Lifecycle trap:</b> If you observe LiveData or collect Flow in <code>onCreateView()</code>, you must use <code>viewLifecycleOwner</code> — not <code>this</code> (the Fragment). The Fragment outlives its View, so using <code>this</code> causes updates to a destroyed View and memory leaks.<br><br><code>viewLifecycleOwner.lifecycleScope.launch { ... }</code> — coroutine dies with the View<br><code>this.lifecycleScope.launch { ... }</code> — coroutine lives with the Fragment (bad for UI work)</div>\n\n<hr class=\"section-divider\">\n<h3>View Lifecycle (Attach, Measure, Layout, Draw)</h3>\n<p>Views have their own lifecycle independent of Activity/Fragment, driven by the window system:</p>\n<div class=\"diagram\">View Lifecycle\n\nconstructor()           ← View object created (from XML inflation or code)\n  └── onFinishInflate()  ← All children from XML are inflated\n        └── onAttachedToWindow()  ← View added to a window (has Surface)\n              └── onMeasure()      ← Parent asks: how big are you?\n                    └── onLayout()  ← Parent says: here's your position\n                          └── onDraw()  ← Draw yourself on the Canvas\n\n... user interacts, state changes ...\n\nonDetachedFromWindow()  ← View removed from window\n                           Release resources here (stop animations,\n                           unregister listeners, cancel ongoing work)</div>\n<table><tr><th>Callback</th><th>When</th><th>Do</th></tr>\n<tr><td><code>onAttachedToWindow</code></td><td>View added to window hierarchy</td><td>Start animations, register observers</td></tr>\n<tr><td><code>onDetachedFromWindow</code></td><td>View removed from window</td><td>Stop animations, release resources, cancel work</td></tr>\n<tr><td><code>onMeasure</code></td><td>Parent needs to know your size</td><td>Calculate desired width/height from content + MeasureSpec</td></tr>\n<tr><td><code>onSizeChanged</code></td><td>Size changed after measure/layout</td><td>Recalculate drawing coordinates, recreate bitmaps</td></tr>\n<tr><td><code>onDraw</code></td><td>Time to render</td><td>Canvas drawing operations. Keep fast — runs every frame!</td></tr></table>\n\n<hr class=\"section-divider\">\n<h3>Debugging Lifecycle Issues</h3>\n<p>Lifecycle bugs are the most common source of crashes and unexpected behavior on real devices. Here's how to find them:</p>\n<table><tr><th>Tool</th><th>What It Shows</th><th>Use For</th></tr>\n<tr><td><b>Logcat lifecycle filter</b></td><td>Log each lifecycle callback</td><td>Verify order and frequency of callbacks</td></tr>\n<tr><td><b>StrictMode</b></td><td>Policy violations on main thread</td><td>Detect disk/network IO on UI thread</td></tr>\n<tr><td><b>Layout Inspector</b></td><td>Live View hierarchy snapshot</td><td>Debug layout sizes, margins, padding on device</td></tr>\n<tr><td><b>Don't Keep Activities</b></td><td>Developer option that destroys every Activity on leave</td><td>Simulate aggressive process death to find state-loss bugs</td></tr>\n<tr><td><b>Force RTL</b></td><td>Developer option to mirror all layouts</td><td>Find hardcoded left/right layout issues</td></tr>\n<tr><td><b>Smallest width override</b></td><td>Developer option to simulate different screen sizes</td><td>Test tablet layouts on a phone</td></tr></table>\n<div class=\"lesson-code\"><span class=\"cmt\">// Add lifecycle logging to every Activity</span>\nclass BaseActivity : AppCompatActivity() {\n    override fun onCreate(s: Bundle?) {\n        super.onCreate(s)\n        Log.d(\"Lifecycle\", \"${this::class.simpleName}.onCreate\")\n    }\n    override fun onStart() {\n        super.onStart()\n        Log.d(\"Lifecycle\", \"${this::class.simpleName}.onStart\")\n    }\n    override fun onResume() {\n        super.onResume()\n        Log.d(\"Lifecycle\", \"${this::class.simpleName}.onResume\")\n    }\n    override fun onPause() {\n        super.onPause()\n        Log.d(\"Lifecycle\", \"${this::class.simpleName}.onPause\")\n    }\n    override fun onStop() {\n        super.onStop()\n        Log.d(\"Lifecycle\", \"${this::class.simpleName}.onStop\")\n    }\n    override fun onDestroy() {\n        super.onDestroy()\n        Log.d(\"Lifecycle\", \"${this::class.simpleName}.onDestroy isFinishing=$isFinishing\")\n    }\n    override fun onConfigurationChanged(c: Configuration) {\n        super.onConfigurationChanged(c)\n        Log.d(\"Lifecycle\", \"${this::class.simpleName}.onConfigurationChanged\")\n    }\n}</div>\n<div class=\"info-box\"><b>The #1 lifecycle debugging technique:</b> Enable <b>\"Don't Keep Activities\"</b> in Developer Options. This destroys your Activity the moment you leave it — simulating what happens when the system is under memory pressure. If your app loses state, your savedInstanceState or SavedStateHandle handling is wrong. Every professional Android developer should test with this enabled regularly.</div>\n\n<hr class=\"section-divider\">\n<h3>How Intents Work — The System Path</h3>\n<p>When you call <code>startActivity(intent)</code>, the request travels via <b>Binder IPC</b> to <b>ActivityManagerService</b> in the system_server process:</p>\n<div class=\"diagram\">Your App Process                     system_server Process\n─────────────────                    ────────────────────\nstartActivity(intent)\n    │\n    └──► Binder IPC ──────────────► ActivityManagerService (AMS)\n                                        │\n                                        ├── resolveIntent()\n                                        │     └── PackageManagerService\n                                        │           └── scans all apps'\n                                        │               AndroidManifest.xml\n                                        │               for matching intent-filters\n                                        ├── Check permissions\n                                        ├── Find or create target Task\n                                        ├── Find or create target Process\n                                        │     └── Zygote forks if needed\n                                        └── Send to target app\n                                              │\nTarget App ◄──────────────────────────────────┘\n    ActivityThread.handleLaunchActivity()\n        └── activity.onCreate(bundle)</div>\n<ul>\n<li><b>Explicit Intent</b> — specifies exact target: <code>Intent(this, DetailActivity::class.java)</code></li>\n<li><b>Implicit Intent</b> — declares an action: <code>Intent(ACTION_SEND)</code>. PMS scans all manifests for matching <code>&lt;intent-filter&gt;</code>. Multiple matches → chooser dialog</li>\n</ul>\n\n<hr class=\"section-divider\">\n<h3>Tasks vs Activities vs Processes</h3>\n<p>These are three separate concepts that are commonly confused:</p>\n<div class=\"diagram\">Process (Linux process — one per app, has PID and memory)\n  └── Application (singleton, global state)\n       └── ActivityThread (main/UI thread)\n\nTask (logical back stack — can span processes!)\n  └── Activity A (bottom of stack)\n  └── Activity B\n  └── Activity C (top — foreground, visible)</div>\n<div class=\"info-box\"><b>Key insight:</b> A Task is NOT a process. Tasks can contain Activities from different apps/processes. When your app launches the Camera app, the Camera Activity joins YOUR task's back stack.</div>\n\n<h4>Launch Modes</h4>\n<table>\n<tr><th>launchMode</th><th>Behavior</th></tr>\n<tr><td><code>standard</code> (default)</td><td>New instance every time</td></tr>\n<tr><td><code>singleTop</code></td><td>If on TOP → reuse + <code>onNewIntent()</code>. Otherwise → new instance.</td></tr>\n<tr><td><code>singleTask</code></td><td>One instance per task; clears above it when re-activated.</td></tr>\n<tr><td><code>singleInstance</code></td><td>Alone in its task. No other Activity can join.</td></tr>\n</table>\n\n<hr class=\"section-divider\">\n<h3>Window Management & DecorView</h3>\n<div class=\"diagram\">┌─────────────────────────────────────────────────┐\n│                 SurfaceFlinger                   │\n│  (composites all surfaces into final frame)      │\n├──────────┬──────────────────┬────────────────────┤\n│ StatusBar│   App Surface    │  NavigationBar     │\n│ (SystemUI│   (DecorView)    │  (SystemUI)        │\n│  window) │                  │                    │\n└──────────┴──────────────────┴────────────────────┘\n\nDecorView (in YOUR app process)\n  └── Root View of every Activity window\n      └── PhoneWindow creates it\n          └── Your setContentView() layout goes inside</div>",
   "questions": [
     {
       "id": "af-1",
@@ -59,15 +63,11 @@
       "code": "// Navigate to DetailActivity\nval intent = ___1___(this, DetailActivity::class.java)\nintent.putExtra(\"ITEM_ID\", itemId)\n___2___(intent)",
       "blanks": [
         {
-          "answer": [
-            "Intent"
-          ],
+          "answer": ["Intent"],
           "hint": "Constructor for the messaging object"
         },
         {
-          "answer": [
-            "startActivity"
-          ],
+          "answer": ["startActivity"],
           "hint": "Method to launch the new Activity"
         }
       ],
@@ -83,18 +83,7 @@
       "title": "What is an Intent?",
       "difficulty": "beginner",
       "description": "In your own words, explain what an Intent is in Android and give an example of when you would use one.",
-      "keywords": [
-        "message",
-        "messaging",
-        "action",
-        "component",
-        "start",
-        "launch",
-        "activity",
-        "communicate",
-        "request",
-        "navigate"
-      ],
+      "keywords": ["message", "messaging", "action", "component", "start", "launch", "activity", "communicate", "request", "navigate"],
       "answer": "An Intent is a messaging object used to request an action from another app component. It can be used to start an Activity, start a Service, or deliver a broadcast. For example, you use an explicit Intent to navigate between screens in your app, or an implicit Intent to open a URL in the browser.",
       "explanation": "Intents are the primary mechanism for inter-component communication in Android. <b>Explicit intents</b> specify the exact component to start. <b>Implicit intents</b> declare a general action, letting the system find a suitable component.",
       "hints": [
@@ -110,16 +99,8 @@
       "description": "This app crashes with a SecurityException when trying to fetch data from the internet. Fix the AndroidManifest.xml.",
       "starterCode": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n\n    <application\n        android:allowBackup=\"true\"\n        android:label=\"@string/app_name\"\n        android:theme=\"@style/Theme.MyApp\">\n\n        <activity\n            android:name=\".MainActivity\"\n            android:exported=\"true\">\n            <intent-filter>\n                <action android:name=\"android.intent.action.MAIN\" />\n                <category android:name=\"android.intent.category.LAUNCHER\" />\n            </intent-filter>\n        </activity>\n\n    </application>\n\n</manifest>",
       "checks": [
-        {
-          "pattern": "uses-permission",
-          "message": "Add a <uses-permission> tag",
-          "required": true
-        },
-        {
-          "pattern": "android\\.permission\\.INTERNET",
-          "message": "Specify the INTERNET permission",
-          "required": true
-        }
+        {"pattern": "uses-permission", "message": "Add a <uses-permission> tag", "required": true},
+        {"pattern": "android\\.permission\\.INTERNET", "message": "Specify the INTERNET permission", "required": true}
       ],
       "solution": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n\n    <uses-permission android:name=\"android.permission.INTERNET\" />\n\n    <application\n        android:allowBackup=\"true\"\n        android:label=\"@string/app_name\"\n        android:theme=\"@style/Theme.MyApp\">\n\n        <activity\n            android:name=\".MainActivity\"\n            android:exported=\"true\">\n            <intent-filter>\n                <action android:name=\"android.intent.action.MAIN\" />\n                <category android:name=\"android.intent.category.LAUNCHER\" />\n            </intent-filter>\n        </activity>\n\n    </application>\n\n</manifest>",
       "explanation": "Android requires explicit permission declarations. The <code>&lt;uses-permission android:name=\"android.permission.INTERNET\" /&gt;</code> tag must be added before <code>&lt;application&gt;</code>.",
@@ -142,9 +123,7 @@
       ],
       "correctIndex": 1,
       "explanation": "The <code>AndroidManifest.xml</code> is the app's identity card to the Android system. It declares all components (Activities, Services, etc.), required permissions, hardware features, and app metadata. The system reads it to know what your app contains and what it needs. Build settings go in <code>build.gradle</code>, themes in <code>themes.xml</code>, and strings in <code>strings.xml</code>.",
-      "hints": [
-        "Think about what the system needs to know about your app before launching it"
-      ]
+      "hints": ["Think about what the system needs to know about your app before launching it"]
     },
     {
       "id": "af-7",
@@ -160,7 +139,7 @@
         "It crashes because no target Activity is specified"
       ],
       "correctIndex": 1,
-      "explanation": "This creates an <b>implicit intent</b> with <code>ACTION_SEND</code> — it doesn't specify a target app. <code>createChooser()</code> wraps it in a chooser dialog that shows all apps capable of handling text/plain sharing (email, messaging, social media, etc.). The user picks which app to use. This is the standard Android sharing mechanism.",
+      "explanation": "This creates an <b>implicit intent</b> with <code>ACTION_SEND</code> — it doesn't specify a target app. <code>createChooser()</code> wraps it in a chooser dialog that shows all apps capable of handling text/plain sharing (email, messaging, social media, etc.). The user picks which app to use.",
       "hints": [
         "No specific Activity class is mentioned — how does the system know where to send it?",
         "createChooser shows a selection UI"
@@ -174,24 +153,9 @@
       "description": "Fill in the blanks to register a BroadcastReceiver that listens for airplane mode changes.",
       "code": "class AirplaneModeReceiver : ___1___() {\n    override fun ___2___(context: Context, intent: Intent) {\n        val isAirplaneMode = intent.getBooleanExtra(\"state\", false)\n        Log.d(\"Receiver\", \"Airplane mode: $isAirplaneMode\")\n    }\n}\n\n// In Activity onCreate:\nval filter = ___3___(Intent.ACTION_AIRPLANE_MODE_CHANGED)\nregisterReceiver(AirplaneModeReceiver(), filter)",
       "blanks": [
-        {
-          "answer": [
-            "BroadcastReceiver"
-          ],
-          "hint": "The base class for broadcast listeners"
-        },
-        {
-          "answer": [
-            "onReceive"
-          ],
-          "hint": "The callback method when a broadcast arrives"
-        },
-        {
-          "answer": [
-            "IntentFilter"
-          ],
-          "hint": "Specifies which broadcasts to receive"
-        }
+        {"answer": ["BroadcastReceiver"], "hint": "The base class for broadcast listeners"},
+        {"answer": ["onReceive"], "hint": "The callback method when a broadcast arrives"},
+        {"answer": ["IntentFilter"], "hint": "Specifies which broadcasts to receive"}
       ],
       "explanation": "<code>BroadcastReceiver</code> is the base class. <code>onReceive()</code> is called when a matching broadcast arrives. <code>IntentFilter</code> specifies which broadcasts to listen for. Remember to <code>unregisterReceiver()</code> in <code>onDestroy()</code> to prevent leaks.",
       "hints": [
@@ -207,22 +171,234 @@
       "description": "The app crashes with \"ActivityNotFoundException\" when navigating to SettingsActivity. The Activity class exists and compiles fine. Fix it.",
       "starterCode": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    <application\n        android:label=\"@string/app_name\"\n        android:theme=\"@style/Theme.MyApp\">\n\n        <activity\n            android:name=\".MainActivity\"\n            android:exported=\"true\">\n            <intent-filter>\n                <action android:name=\"android.intent.action.MAIN\" />\n                <category android:name=\"android.intent.category.LAUNCHER\" />\n            </intent-filter>\n        </activity>\n\n        <!-- SettingsActivity is missing! -->\n\n    </application>\n</manifest>",
       "checks": [
-        {
-          "pattern": "SettingsActivity",
-          "message": "Declare SettingsActivity in the manifest",
-          "required": true
-        },
-        {
-          "pattern": "<activity",
-          "message": "Add an <activity> tag for SettingsActivity",
-          "required": true
-        }
+        {"pattern": "SettingsActivity", "message": "Declare SettingsActivity in the manifest", "required": true},
+        {"pattern": "<activity", "message": "Add an <activity> tag for SettingsActivity", "required": true}
       ],
       "solution": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    <application\n        android:label=\"@string/app_name\"\n        android:theme=\"@style/Theme.MyApp\">\n\n        <activity\n            android:name=\".MainActivity\"\n            android:exported=\"true\">\n            <intent-filter>\n                <action android:name=\"android.intent.action.MAIN\" />\n                <category android:name=\"android.intent.category.LAUNCHER\" />\n            </intent-filter>\n        </activity>\n\n        <activity android:name=\".SettingsActivity\" />\n\n    </application>\n</manifest>",
-      "explanation": "Every Activity must be declared in <code>AndroidManifest.xml</code>. Even though the class compiles, the Android system doesn't know about it without a manifest entry. Add <code>&lt;activity android:name=\".SettingsActivity\" /&gt;</code> inside <code>&lt;application&gt;</code>.",
+      "explanation": "Every Activity must be declared in <code>AndroidManifest.xml</code>. Even though the class compiles, the Android system doesn't know about it without a manifest entry.",
       "hints": [
         "All Android components must be declared somewhere the system can find them",
         "Check what's missing between the application tags"
+      ]
+    },
+    {
+      "id": "af-10",
+      "type": "multiple-choice",
+      "title": "Configuration Change Behavior",
+      "difficulty": "intermediate",
+      "description": "The user rotates their phone while filling out a form in your Activity. What happens by default (without any special handling)?",
+      "options": [
+        "The Activity pauses and resumes — nothing is lost",
+        "The Activity is destroyed and recreated. ViewModel state survives but plain member variables are reset to defaults.",
+        "The Activity is destroyed and recreated. All state including ViewModel is lost.",
+        "The system asks the user if they want to restart the Activity"
+      ],
+      "correctIndex": 1,
+      "explanation": "On rotation, the system <b>destroys</b> the Activity (onPause → onStop → onSaveInstanceState → onDestroy) and <b>recreates</b> it (onCreate with savedInstanceState → onStart → onResume). <code>ViewModel</code> survives configuration changes (it's stored in ViewModelStore, which is retained). But plain fields (<code>var count = 0</code>) are reset. <code>SavedStateHandle</code> survives both config changes AND process death.",
+      "hints": [
+        "The system needs to reload resources for the new configuration (layout-land, etc.)",
+        "ViewModel was specifically designed to survive this scenario"
+      ],
+      "learnMore": [
+        {"title": "Android Developers — Handle Configuration Changes", "url": "https://developer.android.com/guide/topics/resources/runtime-changes"}
+      ]
+    },
+    {
+      "id": "af-11",
+      "type": "what-does-this-do",
+      "title": "Resource Qualifier Matching",
+      "difficulty": "advanced",
+      "description": "Your app has these resource directories. The device is a Pixel 7 with: English (US), portrait orientation, xxhdpi (480dpi), sw411dp, API 34, dark mode. Which <code>strings.xml</code> is used?",
+      "code": "res/\n├── values/strings.xml            // default\n├── values-es/strings.xml         // Spanish\n├── values-night/strings.xml      // dark mode\n├── values-en-night/strings.xml   // English + dark mode\n├── values-v31/strings.xml        // API 31+\n├── values-sw600dp/strings.xml    // tablet",
+      "options": [
+        "values/strings.xml — the default always wins when multiple match",
+        "values-night/strings.xml — dark mode is the most specific qualifier",
+        "values-en-night/strings.xml — matches both language (en) and UI mode (night), most specific",
+        "values-v31/strings.xml — API version has highest priority"
+      ],
+      "correctIndex": 2,
+      "explanation": "The system eliminates non-matching directories: <code>values-es</code> (wrong language), <code>values-sw600dp</code> (phone is only 411dp). Then it walks the qualifier precedence order. <b>Language</b> has higher precedence than UI mode or API level. <code>values-en-night</code> matches English (the device locale) AND dark mode — it's the most specific match. <code>values-v31</code> matches but is less specific because language qualifiers take precedence over API version.",
+      "hints": [
+        "Language/locale has very high priority in the qualifier precedence order",
+        "More qualifiers = more specific = wins when all match"
+      ],
+      "learnMore": [
+        {"title": "Android Developers — How the Best Resource Is Found", "url": "https://developer.android.com/guide/topics/resources/providing-resources#BestMatch"}
+      ]
+    },
+    {
+      "id": "af-12",
+      "type": "multiple-choice",
+      "title": "Drawable Density Selection",
+      "difficulty": "intermediate",
+      "description": "Your app provides <code>drawable-hdpi/icon.png</code> and <code>drawable-xxxhdpi/icon.png</code>, but NOT xhdpi or xxhdpi. The device is xxhdpi (480dpi). What happens?",
+      "options": [
+        "The app crashes because drawable-xxhdpi is missing",
+        "Android uses drawable-hdpi and scales it UP to xxhdpi size (blurry)",
+        "Android uses drawable-xxxhdpi and scales it DOWN to xxhdpi size (sharp, slightly more memory)",
+        "Android uses the default drawable/ directory"
+      ],
+      "correctIndex": 2,
+      "explanation": "When the exact density bucket is missing, Android prefers the <b>next higher density</b> and scales down. Scaling down preserves quality (sharp). Scaling up produces blurry results. So <code>drawable-xxxhdpi</code> (640dpi → scaled to 480dpi) is preferred over <code>drawable-hdpi</code> (240dpi → scaled up to 480dpi). This is why you should always provide at least xxhdpi assets — or better, use vector drawables.",
+      "hints": [
+        "Think about image quality: is scaling up or scaling down better?",
+        "The system picks the closest density that avoids enlarging the image"
+      ],
+      "learnMore": [
+        {"title": "Android Developers — Provide Alternative Bitmaps", "url": "https://developer.android.com/training/multiscreen/screendensities#provide-bitmaps"}
+      ]
+    },
+    {
+      "id": "af-13",
+      "type": "fill-blank",
+      "title": "View Layout: Margin & Padding",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to create a TextView with 16dp inner spacing, 8dp outer spacing from siblings, that fills the parent width and wraps its content height.",
+      "code": "<TextView\n    android:layout_width=\"___1___\"\n    android:layout_height=\"___2___\"\n    android:___3___=\"16dp\"\n    android:___4___=\"8dp\"\n    android:text=\"Hello World\" />",
+      "blanks": [
+        {"answer": ["match_parent"], "hint": "Fill the parent's width"},
+        {"answer": ["wrap_content"], "hint": "Size to fit the text"},
+        {"answer": ["padding"], "hint": "Space INSIDE the view"},
+        {"answer": ["layout_margin", "layout_marginStart"], "hint": "Space OUTSIDE the view"}
+      ],
+      "explanation": "<code>match_parent</code> fills the parent's available space. <code>wrap_content</code> sizes the View to fit its content. <code>padding</code> adds space inside the View (between border and content — background fills this area). <code>layout_margin</code> adds space outside the View (between this View and its neighbors).",
+      "hints": [
+        "Inner spacing = padding, outer spacing = margin",
+        "The width fills the parent, the height adjusts to content"
+      ]
+    },
+    {
+      "id": "af-14",
+      "type": "fix-bug",
+      "title": "RTL Layout Bug",
+      "difficulty": "intermediate",
+      "description": "This layout looks correct in English (LTR) but the icon and text overlap in Arabic (RTL). The icon should be at the leading edge and text should have spacing from it. Fix the hardcoded left/right attributes.",
+      "starterCode": "<LinearLayout\n    android:layout_width=\"match_parent\"\n    android:layout_height=\"wrap_content\"\n    android:orientation=\"horizontal\"\n    android:paddingLeft=\"16dp\"\n    android:paddingRight=\"16dp\">\n\n    <ImageView\n        android:layout_width=\"24dp\"\n        android:layout_height=\"24dp\"\n        android:src=\"@drawable/ic_info\"\n        android:layout_gravity=\"center_vertical\" />\n\n    <TextView\n        android:layout_width=\"wrap_content\"\n        android:layout_height=\"wrap_content\"\n        android:paddingLeft=\"12dp\"\n        android:text=\"@string/info_text\"\n        android:gravity=\"left\" />\n\n</LinearLayout>",
+      "checks": [
+        {"pattern": "paddingStart|marginStart", "message": "Use paddingStart/marginStart instead of paddingLeft/marginLeft", "required": true},
+        {"pattern": "paddingEnd|marginEnd", "message": "Use paddingEnd/marginEnd instead of paddingRight/marginRight", "required": true},
+        {"pattern": "\"start\"", "message": "Use gravity=\"start\" instead of gravity=\"left\"", "required": true}
+      ],
+      "solution": "<LinearLayout\n    android:layout_width=\"match_parent\"\n    android:layout_height=\"wrap_content\"\n    android:orientation=\"horizontal\"\n    android:paddingStart=\"16dp\"\n    android:paddingEnd=\"16dp\">\n\n    <ImageView\n        android:layout_width=\"24dp\"\n        android:layout_height=\"24dp\"\n        android:src=\"@drawable/ic_info\"\n        android:layout_gravity=\"center_vertical\" />\n\n    <TextView\n        android:layout_width=\"wrap_content\"\n        android:layout_height=\"wrap_content\"\n        android:paddingStart=\"12dp\"\n        android:text=\"@string/info_text\"\n        android:gravity=\"start\" />\n\n</LinearLayout>",
+      "explanation": "In RTL languages, <code>left</code> and <code>right</code> are absolute — they don't flip. <code>start</code> and <code>end</code> are direction-aware: start = left in LTR, right in RTL. Replace all <code>paddingLeft → paddingStart</code>, <code>paddingRight → paddingEnd</code>, <code>gravity=\"left\" → gravity=\"start\"</code>. Also ensure <code>android:supportsRtl=\"true\"</code> is in your manifest.",
+      "hints": [
+        "In Arabic, the 'start' of a line is the RIGHT side",
+        "Replace left/right with start/end throughout"
+      ],
+      "learnMore": [
+        {"title": "Android Developers — RTL Layout Support", "url": "https://developer.android.com/training/basics/supporting-devices/languages#RTL"}
+      ]
+    },
+    {
+      "id": "af-15",
+      "type": "multiple-choice",
+      "title": "Fragment Lifecycle vs Activity",
+      "difficulty": "intermediate",
+      "description": "A Fragment is displayed inside an Activity. The user presses the Home button. Which lifecycle callbacks run and in what order?",
+      "options": [
+        "Activity.onPause → Activity.onStop (Fragment callbacks don't run)",
+        "Fragment.onPause → Activity.onPause → Fragment.onStop → Activity.onStop",
+        "Activity.onPause → Fragment.onPause → Activity.onStop → Fragment.onStop",
+        "Fragment.onPause → Fragment.onStop → Activity.onPause → Activity.onStop"
+      ],
+      "correctIndex": 2,
+      "explanation": "When the Activity is pausing, the <b>Activity's</b> callback runs first, then the Fragment's. The order is: <code>Activity.onPause()</code> → <code>Fragment.onPause()</code> → <code>Activity.onStop()</code> → <code>Fragment.onStop()</code>. The Activity drives the lifecycle — Fragments follow. On the way back up (resume), it's reversed: Fragment.onStart → Activity.onStart → Fragment.onResume → Activity.onResume.",
+      "hints": [
+        "The Activity is the parent — it drives the lifecycle",
+        "Fragment lifecycle callbacks run after the corresponding Activity callback"
+      ],
+      "learnMore": [
+        {"title": "Android Developers — Fragment Lifecycle", "url": "https://developer.android.com/guide/fragments/lifecycle"}
+      ]
+    },
+    {
+      "id": "af-16",
+      "type": "what-does-this-do",
+      "title": "configChanges Attribute",
+      "difficulty": "advanced",
+      "description": "What happens when the user rotates their phone while this Activity is displayed?",
+      "code": "<!-- AndroidManifest.xml -->\n<activity\n    android:name=\".VideoPlayerActivity\"\n    android:configChanges=\"orientation|screenSize\" />\n\n// In VideoPlayerActivity:\noverride fun onConfigurationChanged(newConfig: Configuration) {\n    super.onConfigurationChanged(newConfig)\n    if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {\n        enterFullScreen()\n    } else {\n        exitFullScreen()\n    }\n}",
+      "options": [
+        "The Activity is destroyed and recreated normally — configChanges has no effect",
+        "The Activity is NOT destroyed. Instead, onConfigurationChanged() is called, and the Activity switches to/from fullscreen without interrupting video playback",
+        "The Activity crashes because you cannot handle orientation changes manually",
+        "The Activity is recreated, but onConfigurationChanged is also called before recreation"
+      ],
+      "correctIndex": 1,
+      "explanation": "Declaring <code>android:configChanges=\"orientation|screenSize\"</code> tells the system: \"I'll handle rotation myself.\" The Activity is <b>not</b> destroyed or recreated. Instead, <code>onConfigurationChanged()</code> is called with the new Configuration. This is ideal for video players — playback continues uninterrupted. The tradeoff: you lose automatic resource re-selection (e.g., <code>layout-land</code> is not automatically loaded).",
+      "hints": [
+        "configChanges is specifically designed to prevent Activity recreation",
+        "Video players use this to avoid interrupting playback on rotation"
+      ]
+    },
+    {
+      "id": "af-17",
+      "type": "multiple-choice",
+      "title": "match_parent vs wrap_content vs 0dp with weight",
+      "difficulty": "intermediate",
+      "description": "In a horizontal LinearLayout, you want two Buttons to each take exactly half the width. Which setup is correct and most efficient?",
+      "options": [
+        "Both buttons: layout_width=\"match_parent\" with layout_weight=\"1\"",
+        "Both buttons: layout_width=\"wrap_content\" with layout_weight=\"1\"",
+        "Both buttons: layout_width=\"0dp\" with layout_weight=\"1\"",
+        "Both buttons: layout_width=\"50%\" (percentage is supported)"
+      ],
+      "correctIndex": 2,
+      "explanation": "<code>layout_width=\"0dp\"</code> with <code>layout_weight=\"1\"</code> is the correct and most efficient approach. Setting width to 0dp tells LinearLayout to skip the initial measurement and go directly to weight-based distribution. Using <code>match_parent</code> with weight causes <b>double measurement</b> — each child is first measured at full width, then remeasured to distribute by weight. Using <code>wrap_content</code> with weight is unpredictable because remaining space depends on content size. Android does not support percentage-based widths in LinearLayout.",
+      "hints": [
+        "0dp tells LinearLayout: 'my initial size is nothing, just give me my weighted share'",
+        "match_parent with weight is a known performance anti-pattern"
+      ]
+    },
+    {
+      "id": "af-18",
+      "type": "fix-bug",
+      "title": "Blurry Images on High-DPI Device",
+      "difficulty": "intermediate",
+      "description": "Users on xxhdpi devices report blurry app icons. The app only provides icons in <code>drawable/</code> (no density qualifier). Fix the resource structure so icons are crisp on all screen densities.",
+      "starterCode": "// Current project structure:\n// res/drawable/ic_logo.png   (48x48 px)\n//\n// The icon looks fine on mdpi devices but is blurry on\n// xxhdpi and xxxhdpi phones.\n//\n// Fix: show the correct resource directory structure\n// and pixel sizes for each density bucket.\n\n// res/drawable/ic_logo.png (48x48)\n// TODO: Add density-specific versions",
+      "checks": [
+        {"pattern": "xxhdpi|xxxhdpi", "message": "Provide high-density versions of the icon", "required": true},
+        {"pattern": "144|192|96", "message": "Use correct pixel dimensions for density buckets", "required": true}
+      ],
+      "solution": "// Fixed project structure:\n// res/drawable-mdpi/ic_logo.png     (48x48 px)   — 1x baseline\n// res/drawable-hdpi/ic_logo.png     (72x72 px)   — 1.5x\n// res/drawable-xhdpi/ic_logo.png    (96x96 px)   — 2x\n// res/drawable-xxhdpi/ic_logo.png   (144x144 px) — 3x\n// res/drawable-xxxhdpi/ic_logo.png  (192x192 px) — 4x\n//\n// Or better: use a vector drawable that scales perfectly:\n// res/drawable/ic_logo.xml (VectorDrawable — any size, no blur)",
+      "explanation": "When you put images in <code>drawable/</code> (no qualifier), Android treats them as <b>mdpi</b> (160dpi, 1x). On an xxhdpi (3x) device, the system scales this 48px image up to 144px — resulting in blur. The fix: provide pre-scaled versions in each density bucket, or use a <b>VectorDrawable</b> (<code>.xml</code>) which renders at perfect quality at any size.",
+      "hints": [
+        "drawable/ without a qualifier is treated as mdpi (baseline density)",
+        "Multiply the mdpi size by each density's scale factor"
+      ]
+    },
+    {
+      "id": "af-19",
+      "type": "multiple-choice",
+      "title": "Source Set Priority",
+      "difficulty": "advanced",
+      "description": "Your app has a <code>strings.xml</code> with <code>app_name</code> defined in both <code>main/res/values/</code> and <code>debug/res/values/</code>. You're building a debug variant. Which string is used?",
+      "options": [
+        "main — it always has highest priority",
+        "debug — build-type source sets overlay main, so same-name resources in debug replace main",
+        "The build fails due to a duplicate resource error",
+        "It depends on alphabetical order of the source sets"
+      ],
+      "correctIndex": 1,
+      "explanation": "Source sets have a <b>priority order</b> for resources: build-type + flavor combination > flavor > build type > main. The <code>debug</code> source set overlays <code>main</code> — a resource with the same name and type in <code>debug/</code> replaces the one in <code>main/</code>. This is how you provide different app names (e.g., \"MyApp DEBUG\") or API URLs per build type. Note: Java/Kotlin source files are <b>additive</b> (no overriding) — only resources overlay.",
+      "hints": [
+        "Resources in source sets can overlay (replace) each other",
+        "Think about why you'd put a different app_name in your debug build"
+      ]
+    },
+    {
+      "id": "af-20",
+      "type": "trivia",
+      "title": "Debugging Lifecycle Issues",
+      "difficulty": "intermediate",
+      "description": "Your app loses user input after the screen rotates, and users report data loss when switching between apps. Describe the tools and developer options you would use to diagnose and fix this.",
+      "keywords": ["don't keep activities", "developer options", "logcat", "lifecycle", "savedInstanceState", "SavedStateHandle", "ViewModel", "rotation", "configuration", "process death", "Bundle", "Layout Inspector", "StrictMode"],
+      "answer": "1) Enable 'Don't Keep Activities' in Developer Options to simulate process death on every navigation — this reveals state-loss bugs immediately. 2) Add lifecycle logging (Log.d in each callback) to see the exact callback order. 3) Check that essential UI state is saved in SavedStateHandle (survives process death) or at minimum onSaveInstanceState. 4) Verify ViewModel handles configuration changes (rotation). 5) Use Layout Inspector to verify layouts resize correctly. 6) Test rotation with the app in different states.",
+      "explanation": "<b>Don't Keep Activities</b> is the single most important developer option for finding lifecycle bugs. It forces Activity destruction every time you navigate away, simulating aggressive memory pressure. If your app loses data with this enabled, your state management is broken. ViewModel survives rotation but NOT process death — use <code>SavedStateHandle</code> for the latter. Test with: rotation, Home button, app switcher, split-screen entry/exit.",
+      "hints": [
+        "There's a Developer Option that simulates the worst-case lifecycle scenario",
+        "ViewModel survives configuration changes but what survives process death?"
       ]
     }
   ]
