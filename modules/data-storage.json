@@ -1,0 +1,266 @@
+{
+  "id": "data-storage",
+  "title": "Data & Storage",
+  "icon": "💾",
+  "description": "Room database, DataStore, auto-migrations, indexing, WAL mode, and offline-first sync",
+  "references": [
+    {"title": "Android Developers — Room Persistence Library", "url": "https://developer.android.com/training/data-storage/room", "type": "docs"},
+    {"title": "Android Developers — DataStore", "url": "https://developer.android.com/topic/libraries/architecture/datastore", "type": "docs"},
+    {"title": "Android Developers — Room Auto-Migrations", "url": "https://developer.android.com/training/data-storage/room/migrating-db-versions#automated", "type": "docs"},
+    {"title": "SQLite WAL Mode Explained", "url": "https://www.sqlite.org/wal.html", "type": "article"}
+  ],
+  "lesson": "<h3>Local Data Persistence</h3>\n<p>Android offers several storage options, each suited for different use cases:</p>\n<ul>\n<li><b>Room</b> — SQLite abstraction for structured data with compile-time query verification</li>\n<li><b>DataStore</b> — Key-value or typed data storage, replacing SharedPreferences</li>\n<li><b>File storage</b> — For large files (images, downloads)</li>\n</ul>\n<h3>Room Architecture</h3>\n<div class=\"lesson-code\">@Entity → defines a table\n@Dao   → defines queries (interface)\n@Database → ties it together (abstract class)</div>\n<p>Room validates SQL at compile time, supports reactive queries with Flow, and handles migrations for schema changes.</p>\n<hr class=\"section-divider\">\n<h3>Room Auto-Migrations</h3>\n<p>Room 2.4+ can auto-generate migrations for simple schema changes (add column, add table, add index):</p>\n<div class=\"lesson-code\">@Database(\n    version = 3,\n    entities = [User::class, Post::class],\n    autoMigrations = [\n        AutoMigration(from = 1, to = 2),\n        AutoMigration(from = 2, to = 3, spec = Migration2To3::class)\n    ]\n)\nabstract class AppDatabase : RoomDatabase() { ... }\n\n<span class=\"cmt\">// Spec needed for ambiguous changes (rename, delete)</span>\n@RenameColumn(tableName = \"users\", fromColumnName = \"name\", toColumnName = \"full_name\")\nclass Migration2To3 : AutoMigrationSpec</div>\n<div class=\"info-box\"><b>When auto-migration works:</b> Adding columns, tables, indices. <b>When you need manual migration:</b> Complex data transforms, renaming columns (needs spec), changing column types.</div>\n<hr class=\"section-divider\">\n<h3>Room Indexing</h3>\n<div class=\"lesson-code\">@Entity(\n    indices = [\n        Index(\"email\", unique = true),\n        Index(\"lastName\", \"firstName\")\n    ]\n)\ndata class User(\n    @PrimaryKey val id: Long,\n    val email: String,\n    val firstName: String,\n    val lastName: String\n)</div>\n<p>Indices speed up WHERE and ORDER BY queries but slow down INSERT/UPDATE (index must be maintained). Add them for columns you query frequently.</p>\n<hr class=\"section-divider\">\n<h3>WAL Mode</h3>\n<p>Room uses <b>Write-Ahead Logging (WAL)</b> by default. This allows concurrent reads and writes — readers don't block writers and vice versa. WAL writes changes to a log file first, then merges into the main database during checkpoints.</p>\n<hr class=\"section-divider\">\n<h3>Offline-First Sync</h3>\n<p>The offline-first pattern: write to local DB first, sync to server in background:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Repository pattern for offline-first</span>\nclass ArticleRepository(\n    private val localDao: ArticleDao,\n    private val remoteApi: ArticleApi\n) {\n    fun getArticles(): Flow&lt;List&lt;Article&gt;&gt; = localDao.observeAll()\n\n    suspend fun refresh() {\n        val remote = remoteApi.fetchAll()\n        localDao.upsertAll(remote)  <span class=\"cmt\">// Local DB is source of truth</span>\n    }\n}</div>\n<div class=\"info-box\"><b>Conflict resolution:</b> When local and remote both change the same record, common strategies are: <b>last-write-wins</b> (simple, may lose data), <b>server-wins</b> (safe default), or <b>merge</b> (complex but preserves both changes).</div>",
+  "questions": [
+    {
+      "id": "ds-1",
+      "type": "fill-blank",
+      "title": "Room DAO",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to define a Room DAO.",
+      "code": "@___1___\ninterface UserDao {\n    @___2___(\"SELECT * FROM users WHERE id = :userId\")\n    suspend fun getUserById(userId: String): User?\n\n    @___3___\n    suspend fun insertUser(user: User)\n\n    @___3___(onConflict = OnConflictStrategy.REPLACE)\n    suspend fun upsertUser(user: User)\n\n    @___4___\n    suspend fun deleteUser(user: User)\n}",
+      "blanks": [
+        {
+          "answer": [
+            "Dao"
+          ],
+          "hint": "Data Access Object"
+        },
+        {
+          "answer": [
+            "Query"
+          ],
+          "hint": "Custom SQL"
+        },
+        {
+          "answer": [
+            "Insert"
+          ],
+          "hint": "Insert records"
+        },
+        {
+          "answer": [
+            "Delete"
+          ],
+          "hint": "Delete records"
+        }
+      ],
+      "explanation": "<code>@Dao</code> marks the interface. <code>@Query</code> allows custom SQL with <code>:paramName</code> binding. <code>@Insert</code> and <code>@Delete</code> handle common operations. <code>onConflict = REPLACE</code> creates an upsert.",
+      "hints": [
+        "Room uses annotations to generate SQL boilerplate"
+      ]
+    },
+    {
+      "id": "ds-2",
+      "type": "fix-bug",
+      "title": "Room on Main Thread",
+      "difficulty": "beginner",
+      "description": "This code crashes: \"Cannot access database on the main thread.\" Fix it.",
+      "starterCode": "@Composable\nfun UserScreen(userDao: UserDao) {\n    var users by remember { mutableStateOf<List<User>>(emptyList()) }\n\n    LaunchedEffect(Unit) {\n        users = userDao.getAllUsers()\n    }\n\n    LazyColumn {\n        items(users) { user -> Text(user.name) }\n    }\n}",
+      "checks": [
+        {
+          "pattern": "Dispatchers\\.IO|withContext|flowOn|Flow|collectAsState",
+          "message": "Use Dispatchers.IO or collect a Flow for database operations",
+          "required": true
+        }
+      ],
+      "solution": "@Composable\nfun UserScreen(userDao: UserDao) {\n    val users by userDao.observeAllUsers()\n        .collectAsState(initial = emptyList())\n\n    LazyColumn {\n        items(users) { user -> Text(user.name) }\n    }\n}\n// DAO: fun observeAllUsers(): Flow<List<User>>",
+      "explanation": "Room throws if you access the database on the main thread. Use a <code>Flow</code> return type in the DAO — Room runs the query on a background thread and emits updates reactively. <code>collectAsState()</code> converts it to Compose state.",
+      "hints": [
+        "Room can return Flow<List<T>> for reactive queries"
+      ]
+    },
+    {
+      "id": "ds-3",
+      "type": "multiple-choice",
+      "title": "DataStore vs SharedPreferences",
+      "difficulty": "intermediate",
+      "description": "Why does Google recommend DataStore over SharedPreferences?",
+      "options": [
+        "DataStore is faster for large datasets",
+        "DataStore is async, type-safe (Proto), handles errors, and does not block the UI thread",
+        "DataStore encrypts data by default",
+        "DataStore supports SQL queries"
+      ],
+      "correctIndex": 1,
+      "explanation": "SharedPreferences blocks the calling thread, can fail silently, and has no type safety. DataStore is fully async via Coroutines/Flow, has proper error handling, and Proto DataStore adds type safety with Protocol Buffers.",
+      "hints": [
+        "What happens when you call SharedPreferences.getString() on the main thread?"
+      ]
+    },
+    {
+      "id": "ds-4",
+      "type": "what-does-this-do",
+      "title": "Room Migration",
+      "difficulty": "advanced",
+      "description": "What does this Room migration do?",
+      "code": "val MIGRATION_2_3 = object : Migration(2, 3) {\n    override fun migrate(db: SupportSQLiteDatabase) {\n        db.execSQL(\n            \"ALTER TABLE users ADD COLUMN email TEXT DEFAULT '' NOT NULL\"\n        )\n        db.execSQL(\n            \"CREATE INDEX index_users_email ON users(email)\"\n        )\n    }\n}\n\nRoom.databaseBuilder(context, AppDatabase::class.java, \"app.db\")\n    .addMigrations(MIGRATION_2_3)\n    .build()",
+      "options": [
+        "Renames the users table to version 3",
+        "Adds an email column and index when upgrading from DB version 2 to 3",
+        "Creates a completely new users table",
+        "Backs up the database"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>Migration(2, 3)</code> runs when upgrading from version 2 to 3. It adds a non-null email column with a default value (so existing rows are valid) and creates an index for faster queries. Without migrations, Room would drop and recreate the database, losing all data.",
+      "hints": [
+        "The two numbers represent source and target versions"
+      ]
+    },
+    {
+      "id": "ds-5",
+      "type": "write-code",
+      "title": "Preferences DataStore",
+      "difficulty": "intermediate",
+      "description": "Write a DataStore-backed class that stores and retrieves a user's preferred theme (dark/light) as a string.",
+      "starterCode": "// Define the DataStore and create a ThemePreferences class:\n// - Property: themeFlow (Flow<String>) that emits the current theme\n// - Function: setTheme(theme: String) that saves the theme\n\nclass ThemePreferences(private val context: Context) {\n    // TODO\n}",
+      "checks": [
+        {
+          "pattern": "dataStore|DataStore",
+          "message": "Use Preferences DataStore",
+          "required": true
+        },
+        {
+          "pattern": "Flow|flow",
+          "message": "Expose a Flow for reactive reading",
+          "required": true
+        },
+        {
+          "pattern": "edit|suspend",
+          "message": "Use suspend edit function for writing",
+          "required": true
+        }
+      ],
+      "solution": "private val Context.dataStore by preferencesDataStore(name = \"settings\")\n\nclass ThemePreferences(private val context: Context) {\n    private val THEME_KEY = stringPreferencesKey(\"theme\")\n\n    val themeFlow: Flow<String> = context.dataStore.data\n        .map { preferences ->\n            preferences[THEME_KEY] ?: \"dark\"\n        }\n\n    suspend fun setTheme(theme: String) {\n        context.dataStore.edit { preferences ->\n            preferences[THEME_KEY] = theme\n        }\n    }\n}",
+      "explanation": "<code>preferencesDataStore</code> creates a DataStore delegate. <code>stringPreferencesKey</code> creates a typed key. Reading returns a <code>Flow</code> that emits on changes. Writing uses <code>edit { }</code> which is a suspend function handling transactions atomically.",
+      "hints": [
+        "DataStore uses typed keys: stringPreferencesKey, intPreferencesKey, etc.",
+        "Reading is a Flow, writing is a suspend function"
+      ]
+    },
+    {
+      "id": "ds-6",
+      "type": "fill-blank",
+      "title": "Room Relationship",
+      "difficulty": "advanced",
+      "description": "Fill in the blanks to define a one-to-many relationship between User and their Posts in Room.",
+      "code": "@Entity\ndata class User(\n    @___1___ val userId: Long,\n    val name: String\n)\n\n@Entity(foreignKeys = [ForeignKey(\n    entity = User::class,\n    parentColumns = [\"userId\"],\n    childColumns = [\"authorId\"],\n    onDelete = ForeignKey.CASCADE\n)])\ndata class Post(\n    @___1___ val postId: Long,\n    val authorId: Long,\n    val title: String\n)\n\ndata class UserWithPosts(\n    @___2___ val user: User,\n    @___3___(parentColumn = \"userId\", entityColumn = \"authorId\")\n    val posts: List<Post>\n)",
+      "blanks": [
+        {
+          "answer": [
+            "PrimaryKey"
+          ],
+          "hint": "Marks the primary key column"
+        },
+        {
+          "answer": [
+            "Embedded"
+          ],
+          "hint": "Includes all columns of the nested entity"
+        },
+        {
+          "answer": [
+            "Relation"
+          ],
+          "hint": "Defines the one-to-many relationship"
+        }
+      ],
+      "explanation": "<code>@PrimaryKey</code> marks primary key fields. <code>@Embedded</code> includes the parent entity's columns. <code>@Relation</code> defines how child entities relate via <code>parentColumn</code> and <code>entityColumn</code>. Room automatically joins the tables when querying UserWithPosts.",
+      "hints": [
+        "Room uses annotations to define relationships between entities",
+        "The relationship connects a parent column to a child column"
+      ]
+    },
+    {
+      "id": "ds-7",
+      "type": "what-does-this-do",
+      "title": "Room Auto-Migration",
+      "difficulty": "advanced",
+      "description": "What does this auto-migration configuration do?",
+      "code": "@Database(\n    version = 3,\n    entities = [User::class],\n    autoMigrations = [\n        AutoMigration(from = 1, to = 2),\n        AutoMigration(\n            from = 2, to = 3,\n            spec = V2ToV3::class\n        )\n    ]\n)\nabstract class AppDatabase : RoomDatabase()\n\n@RenameColumn(\n    tableName = \"users\",\n    fromColumnName = \"name\",\n    toColumnName = \"full_name\"\n)\nclass V2ToV3 : AutoMigrationSpec",
+      "options": [
+        "It creates the database from scratch with version 3",
+        "It defines two auto-migrations: v1→v2 is fully automatic, v2→v3 renames the 'name' column to 'full_name' using a migration spec",
+        "It deletes all data when upgrading from v1 to v3",
+        "It only works on new installations, not upgrades"
+      ],
+      "correctIndex": 1,
+      "explanation": "Room auto-migrations handle simple schema changes automatically. The v1→v2 migration needs no spec (probably just adds a column or table). The v2→v3 migration uses <code>@RenameColumn</code> in a spec class because Room can't guess that \"name\" became \"full_name\" (it looks like a delete + add). Without the spec, Room would drop the old column and add a new empty one, losing data.",
+      "hints": [
+        "Renames are ambiguous — Room sees a column disappear and a new one appear",
+        "The spec resolves ambiguity by telling Room it's the same column with a new name"
+      ]
+    },
+    {
+      "id": "ds-8",
+      "type": "multiple-choice",
+      "title": "Room Indexing",
+      "difficulty": "intermediate",
+      "description": "When should you add an <code>@Index</code> to a Room entity column?",
+      "options": [
+        "Always — indices make everything faster",
+        "When you frequently query or sort by that column — indices speed up reads but slow down writes because the index must be maintained",
+        "Only for primary key columns",
+        "Never — Room automatically indexes everything"
+      ],
+      "correctIndex": 1,
+      "explanation": "Indices are a read/write tradeoff. They create a sorted data structure that speeds up WHERE clauses and ORDER BY on the indexed column(s). But every INSERT/UPDATE/DELETE must also update the index, slowing writes. Add indices for columns used in: frequent queries, JOIN conditions, foreign keys, and ORDER BY. Don't index columns that are rarely queried or on tables with heavy write traffic.",
+      "hints": [
+        "Indices are like a book's index — fast lookups, but costs space and maintenance"
+      ]
+    },
+    {
+      "id": "ds-9",
+      "type": "multiple-choice",
+      "title": "WAL Mode",
+      "difficulty": "advanced",
+      "description": "What advantage does WAL (Write-Ahead Logging) provide in Room, and why is it the default?",
+      "options": [
+        "WAL encrypts all database writes for security",
+        "WAL allows concurrent reads and writes — readers don't block writers, improving performance in multi-threaded apps",
+        "WAL compresses the database file to save storage",
+        "WAL prevents data loss by writing to two databases simultaneously"
+      ],
+      "correctIndex": 1,
+      "explanation": "WAL mode writes changes to a separate log file instead of modifying the database directly. This means readers see a consistent snapshot while writers append to the log — no locking conflicts. Without WAL (journal mode), writes lock the entire database, blocking all readers. WAL is ideal for Android where coroutines may read and write concurrently. Checkpoints periodically merge the WAL file into the main database.",
+      "hints": [
+        "Think about what happens when one coroutine reads while another writes"
+      ]
+    },
+    {
+      "id": "ds-10",
+      "type": "write-code",
+      "title": "Offline-First Repository",
+      "difficulty": "advanced",
+      "description": "Write a repository that follows the offline-first pattern: always read from the local database, sync from network in the background, and expose data as a Flow.",
+      "starterCode": "// Implement offline-first:\n// - observeArticles(): Flow<List<Article>> from local DB\n// - refresh(): fetch from API, save to local DB\n// - Local DB is the single source of truth\n\nclass ArticleRepository(\n    private val articleDao: ArticleDao,\n    private val articleApi: ArticleApi\n) {\n    // TODO\n}",
+      "checks": [
+        {
+          "pattern": "Flow|flow",
+          "message": "Return a Flow for reactive updates",
+          "required": true
+        },
+        {
+          "pattern": "dao|Dao|localDao|articleDao",
+          "message": "Read from local database",
+          "required": true
+        },
+        {
+          "pattern": "api|Api|remote|fetch|articleApi",
+          "message": "Fetch from remote API",
+          "required": true
+        },
+        {
+          "pattern": "upsert|insert|insertAll|upsertAll",
+          "message": "Save remote data to local DB",
+          "required": true
+        }
+      ],
+      "solution": "class ArticleRepository(\n    private val articleDao: ArticleDao,\n    private val articleApi: ArticleApi\n) {\n    // Single source of truth: local database\n    fun observeArticles(): Flow<List<Article>> = articleDao.observeAll()\n\n    suspend fun refresh() {\n        try {\n            val remoteArticles = articleApi.fetchArticles()\n            articleDao.upsertAll(remoteArticles)\n        } catch (e: IOException) {\n            // Network failed — local data is still available\n            // Optionally emit an error state\n        }\n    }\n\n    // Convenience: observe + trigger refresh\n    fun observeAndRefresh(): Flow<List<Article>> = flow {\n        // Emit local data immediately\n        emitAll(articleDao.observeAll())\n    }.onStart {\n        // Trigger background sync\n        try { refresh() } catch (_: Exception) {}\n    }\n}",
+      "explanation": "The offline-first pattern: (1) UI observes the local database via Flow — always has data to show, even offline. (2) <code>refresh()</code> fetches from the network and upserts into the local DB. (3) Because the UI observes the DB, it automatically updates when new data is inserted. The local DB is the <b>single source of truth</b> — the UI never reads from the network directly. This pattern is recommended by Google's architecture guide.",
+      "hints": [
+        "The UI should never read from the network directly",
+        "Room Flow queries automatically emit when data changes"
+      ]
+    }
+  ]
+}

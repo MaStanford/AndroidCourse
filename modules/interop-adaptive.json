@@ -1,0 +1,181 @@
+{
+  "id": "interop-adaptive",
+  "title": "View-Compose Interop & Adaptive Layouts",
+  "icon": "🔄",
+  "description": "ComposeView, AndroidView, ViewCompositionStrategy, WindowSizeClass, foldables, and predictive back",
+  "references": [
+    {"title": "Android Developers — Interop with Views", "url": "https://developer.android.com/develop/ui/compose/migrate/interoperability-apis", "type": "docs"},
+    {"title": "Android Developers — WindowSizeClass", "url": "https://developer.android.com/develop/ui/compose/layouts/adaptive/window-size-classes", "type": "docs"},
+    {"title": "Android Developers — Predictive Back", "url": "https://developer.android.com/guide/navigation/custom-back/predictive-back-gesture", "type": "docs"},
+    {"title": "Android Developers — Support Foldables", "url": "https://developer.android.com/develop/ui/compose/layouts/adaptive/foldables", "type": "docs"}
+  ],
+  "lesson": "<h3>Migrating to Compose</h3>\n<p>Most real-world apps aren't greenfield — they have existing View-based code. Understanding interop patterns is essential for senior engineers managing migrations.</p>\n<hr class=\"section-divider\">\n<h3>Views in Compose: AndroidView</h3>\n<div class=\"lesson-code\">@Composable\nfun MapScreen() {\n    AndroidView(\n        factory = { context ->\n            MapView(context).apply {\n                onCreate(null)\n                getMapAsync { map ->\n                    map.moveCamera(CameraUpdateFactory.newLatLngZoom(nyc, 12f))\n                }\n            }\n        },\n        update = { mapView ->\n            <span class=\"cmt\">// Called on every recomposition — update the view here</span>\n        },\n        modifier = Modifier.fillMaxSize()\n    )\n}</div>\n<div class=\"info-box\"><code>AndroidViewBinding</code> works the same way but with ViewBinding — use it for inflating XML layouts inside Compose.</div>\n<hr class=\"section-divider\">\n<h3>Compose in Views: ComposeView</h3>\n<div class=\"lesson-code\"><span class=\"cmt\">// In a Fragment</span>\nclass ProfileFragment : Fragment() {\n    override fun onCreateView(\n        inflater: LayoutInflater, container: ViewGroup?,\n        savedInstanceState: Bundle?\n    ): View {\n        return ComposeView(requireContext()).apply {\n            setViewCompositionStrategy(\n                ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed\n            )\n            setContent {\n                MaterialTheme {\n                    ProfileScreen()\n                }\n            }\n        }\n    }\n}</div>\n<hr class=\"section-divider\">\n<h3>ViewCompositionStrategy</h3>\n<p>Controls when Compose disposes its composition (releases resources):</p>\n<table><tr><th>Strategy</th><th>Disposes when</th><th>Use case</th></tr><tr><td><code>DisposeOnDetachedFromWindow</code></td><td>View detaches from window</td><td>Default. Activities, simple views</td></tr><tr><td><code>DisposeOnViewTreeLifecycleDestroyed</code></td><td>Fragment's view lifecycle ends</td><td><b>Fragments</b> — handles view/fragment lifecycle mismatch</td></tr><tr><td><code>DisposeOnLifecycleDestroyed</code></td><td>Specific lifecycle destroyed</td><td>Dialogs, custom lifecycle owners</td></tr></table>\n<div class=\"warn-box\"><b>Fragment gotcha:</b> Without <code>DisposeOnViewTreeLifecycleDestroyed</code>, Compose may leak resources because Fragment's view can be destroyed while the Fragment itself lives on (e.g., on the back stack).</div>\n<hr class=\"section-divider\">\n<h3>State Bridging</h3>\n<div class=\"lesson-code\"><span class=\"cmt\">// LiveData → Compose State</span>\nval users by viewModel.users.observeAsState(initial = emptyList())\n\n<span class=\"cmt\">// Flow → Compose State</span>\nval uiState by viewModel.uiState.collectAsState()\n\n<span class=\"cmt\">// Compose State → LiveData (less common, for interop)</span>\nval liveData = snapshotFlow { composeState.value }.asLiveData()</div>\n<hr class=\"section-divider\">\n<h3>Migration Strategy</h3>\n<p>Google recommends <b>bottom-up migration</b>:</p>\n<ol>\n<li>Start with leaf composables (buttons, cards, list items)</li>\n<li>Move up to screen-level composables</li>\n<li>Replace Fragments with full Compose screens</li>\n<li>Replace Navigation Component with Navigation Compose</li>\n</ol>\n<hr class=\"section-divider\">\n<h3>Adaptive Layouts</h3>\n<h4>WindowSizeClass</h4>\n<div class=\"lesson-code\">@Composable\nfun MyApp() {\n    val windowSizeClass = calculateWindowSizeClass(this)\n    \n    when (windowSizeClass.widthSizeClass) {\n        WindowWidthSizeClass.Compact  ->\n            PhoneLayout()        <span class=\"cmt\">// &lt; 600dp — phone</span>\n        WindowWidthSizeClass.Medium   ->\n            TabletLayout()       <span class=\"cmt\">// 600-840dp — small tablet, foldable</span>\n        WindowWidthSizeClass.Expanded ->\n            DesktopLayout()      <span class=\"cmt\">// &gt; 840dp — large tablet, desktop</span>\n    }\n}</div>\n<h4>NavigationSuiteScaffold</h4>\n<p>Automatically switches between bottom navigation (phone), navigation rail (tablet), and navigation drawer (desktop) based on window size.</p>\n<hr class=\"section-divider\">\n<h3>Predictive Back Gesture</h3>\n<p>Mandatory in Android 15+. Shows a preview of the previous screen as the user swipes back:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Enable in manifest (required for Android 15+)</span>\n&lt;application android:enableOnBackInvokedCallback=\"true\"&gt;\n\n<span class=\"cmt\">// In Compose — handle custom back logic</span>\n@Composable\nfun EditScreen(onBack: () -&gt; Unit) {\n    var showDialog by remember { mutableStateOf(false) }\n    \n    BackHandler(enabled = hasUnsavedChanges) {\n        showDialog = true  <span class=\"cmt\">// Show \"discard changes?\" dialog</span>\n    }\n}</div>",
+  "questions": [
+    {
+      "id": "ia-1",
+      "type": "multiple-choice",
+      "title": "ViewCompositionStrategy in Fragments",
+      "difficulty": "advanced",
+      "description": "Why should you use <code>DisposeOnViewTreeLifecycleDestroyed</code> when using ComposeView inside a Fragment?",
+      "options": [
+        "It makes composition faster by caching the view tree",
+        "Fragments have separate view and fragment lifecycles — without it, Compose may not dispose when the Fragment's view is destroyed (e.g., on the back stack), causing resource leaks",
+        "It enables predictive back gesture support in the ComposeView",
+        "It's required for AndroidView interop to work correctly"
+      ],
+      "correctIndex": 1,
+      "explanation": "Fragments have a subtle lifecycle issue: the Fragment's view can be destroyed while the Fragment itself remains alive (e.g., when added to the back stack). The default strategy (<code>DisposeOnDetachedFromWindow</code>) may not align with this. <code>DisposeOnViewTreeLifecycleDestroyed</code> ties disposal to the Fragment's <b>view</b> lifecycle, ensuring proper cleanup.",
+      "hints": [
+        "Fragment has TWO lifecycles — the fragment itself and its view",
+        "What happens when a Fragment goes on the back stack?"
+      ]
+    },
+    {
+      "id": "ia-2",
+      "type": "fill-blank",
+      "title": "AndroidView Factory",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to embed a traditional WebView inside a Compose screen.",
+      "code": "@Composable\nfun WebContent(url: String) {\n    ___1___(\n        ___2___ = { context ->\n            WebView(context).apply {\n                settings.javaScriptEnabled = true\n                loadUrl(url)\n            }\n        },\n        ___3___ = { webView ->\n            webView.loadUrl(url)\n        },\n        modifier = Modifier.fillMaxSize()\n    )\n}",
+      "blanks": [
+        {
+          "answer": ["AndroidView"],
+          "hint": "Compose function that wraps Android Views"
+        },
+        {
+          "answer": ["factory"],
+          "hint": "Creates the View — called once"
+        },
+        {
+          "answer": ["update"],
+          "hint": "Called on every recomposition to update the View"
+        }
+      ],
+      "explanation": "<code>AndroidView</code> bridges traditional Android Views into Compose. <code>factory</code> creates the view once. <code>update</code> runs on each recomposition — use it to push new state to the view. The view's lifecycle is managed by Compose's composition lifecycle.",
+      "hints": [
+        "factory is like onCreate — runs once",
+        "update is like onBind — runs with new data"
+      ]
+    },
+    {
+      "id": "ia-3",
+      "type": "what-does-this-do",
+      "title": "State Bridging",
+      "difficulty": "intermediate",
+      "description": "What does <code>observeAsState</code> do in this code?",
+      "code": "@Composable\nfun UserList(viewModel: UserViewModel) {\n    val users by viewModel.usersLiveData.observeAsState(initial = emptyList())\n\n    LazyColumn {\n        items(users) { user ->\n            Text(user.name)\n        }\n    }\n}",
+      "options": [
+        "It converts the Compose state back to LiveData for the ViewModel",
+        "It creates a snapshot of the LiveData that never updates",
+        "It converts LiveData to Compose State, automatically triggering recomposition when LiveData emits new values",
+        "It observes the LiveData on a background thread"
+      ],
+      "correctIndex": 2,
+      "explanation": "<code>observeAsState()</code> bridges <code>LiveData</code> into Compose's state system. It subscribes to the LiveData lifecycle-aware and converts each emission into a Compose <code>State</code>. When LiveData posts a new value, the State updates and triggers recomposition. <code>initial</code> provides the value before the first emission. The equivalent for Flow is <code>collectAsState()</code>.",
+      "hints": [
+        "It's a bridge between two reactive systems: LiveData and Compose State"
+      ]
+    },
+    {
+      "id": "ia-4",
+      "type": "multiple-choice",
+      "title": "WindowSizeClass",
+      "difficulty": "intermediate",
+      "description": "Which <code>WindowWidthSizeClass</code> breakpoint represents a typical phone in portrait mode?",
+      "options": [
+        "Compact (< 600dp)",
+        "Medium (600-840dp)",
+        "Expanded (> 840dp)",
+        "WindowSizeClass doesn't have predefined breakpoints"
+      ],
+      "correctIndex": 0,
+      "explanation": "<code>Compact</code> (< 600dp) = phones in portrait. <code>Medium</code> (600-840dp) = small tablets, foldables unfolded, phones in landscape. <code>Expanded</code> (> 840dp) = large tablets, desktop. These replace hardcoded device-type checks. Use them to choose between canonical layouts (single-pane vs list-detail vs supporting pane).",
+      "hints": [
+        "Most phones are under 600dp wide in portrait"
+      ]
+    },
+    {
+      "id": "ia-5",
+      "type": "fix-bug",
+      "title": "ComposeView Leak in Fragment",
+      "difficulty": "advanced",
+      "description": "This Fragment leaks Compose resources when placed on the back stack. Fix it.",
+      "starterCode": "class DetailFragment : Fragment() {\n    override fun onCreateView(\n        inflater: LayoutInflater,\n        container: ViewGroup?,\n        savedInstanceState: Bundle?\n    ): View {\n        return ComposeView(requireContext()).apply {\n            setContent {\n                DetailScreen()\n            }\n        }\n    }\n}",
+      "checks": [
+        {
+          "pattern": "ViewCompositionStrategy|setViewCompositionStrategy|DisposeOnViewTreeLifecycleDestroyed",
+          "message": "Set the correct ViewCompositionStrategy",
+          "required": true
+        }
+      ],
+      "solution": "class DetailFragment : Fragment() {\n    override fun onCreateView(\n        inflater: LayoutInflater,\n        container: ViewGroup?,\n        savedInstanceState: Bundle?\n    ): View {\n        return ComposeView(requireContext()).apply {\n            setViewCompositionStrategy(\n                ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed\n            )\n            setContent {\n                DetailScreen()\n            }\n        }\n    }\n}",
+      "explanation": "When a Fragment goes on the back stack, its view is destroyed but the Fragment lives on. Without <code>DisposeOnViewTreeLifecycleDestroyed</code>, the Compose composition stays alive, holding references to views and resources. This strategy disposes the composition when the Fragment's view lifecycle is destroyed, matching the Fragment transaction behavior.",
+      "hints": [
+        "What happens to a Fragment's view when another Fragment is pushed on top?",
+        "The default strategy doesn't handle Fragment back stack correctly"
+      ]
+    },
+    {
+      "id": "ia-6",
+      "type": "write-code",
+      "title": "Adaptive Layout",
+      "difficulty": "advanced",
+      "description": "Write a composable that shows a single-pane list on phones and a list-detail layout on tablets, using WindowSizeClass.",
+      "starterCode": "// Create an adaptive layout:\n// - Compact: show only the list\n// - Medium/Expanded: show list + detail side by side\n\n@Composable\nfun AdaptiveMessageScreen(\n    windowSizeClass: WindowWidthSizeClass,\n    messages: List<Message>,\n    selectedId: String?,\n    onSelect: (String) -> Unit\n) {\n    // TODO\n}",
+      "checks": [
+        {
+          "pattern": "when|Compact|Medium|Expanded",
+          "message": "Branch on WindowSizeClass",
+          "required": true
+        },
+        {
+          "pattern": "Row|Column|Box",
+          "message": "Use layout composables for the split view",
+          "required": true
+        }
+      ],
+      "solution": "@Composable\nfun AdaptiveMessageScreen(\n    windowSizeClass: WindowWidthSizeClass,\n    messages: List<Message>,\n    selectedId: String?,\n    onSelect: (String) -> Unit\n) {\n    when (windowSizeClass) {\n        WindowWidthSizeClass.Compact -> {\n            // Phone: show list only (navigate to detail on tap)\n            MessageList(messages, selectedId, onSelect)\n        }\n        else -> {\n            // Tablet: side-by-side list + detail\n            Row(modifier = Modifier.fillMaxSize()) {\n                MessageList(\n                    messages, selectedId, onSelect,\n                    modifier = Modifier.weight(1f)\n                )\n                val selected = messages.find { it.id == selectedId }\n                if (selected != null) {\n                    MessageDetail(\n                        message = selected,\n                        modifier = Modifier.weight(2f)\n                    )\n                }\n            }\n        }\n    }\n}",
+      "explanation": "The list-detail canonical layout uses <code>WindowSizeClass</code> to choose between a single-pane (Compact) and two-pane (Medium/Expanded) layout. On tablets, <code>Row</code> with <code>weight</code> modifiers creates the split. On phones, only the list shows — tapping navigates to a separate detail screen. This is one of Google's three canonical layouts (list-detail, supporting pane, feed).",
+      "hints": [
+        "Row with weight() modifiers creates the split view",
+        "On Compact, only show the list — detail is a separate screen"
+      ]
+    },
+    {
+      "id": "ia-7",
+      "type": "multiple-choice",
+      "title": "Predictive Back Gesture",
+      "difficulty": "intermediate",
+      "description": "What must you do to support predictive back gesture in Android 15+?",
+      "options": [
+        "Override onBackPressed() in every Activity",
+        "Set android:enableOnBackInvokedCallback=\"true\" in the manifest and use BackHandler or OnBackInvokedCallback instead of onBackPressed()",
+        "Add a SwipeRefreshLayout to each screen",
+        "Nothing — it's automatic in all apps"
+      ],
+      "correctIndex": 1,
+      "explanation": "Predictive back requires opting in via <code>android:enableOnBackInvokedCallback=\"true\"</code> in the manifest. Then use <code>BackHandler</code> (Compose) or <code>OnBackInvokedCallback</code> (Views) instead of the deprecated <code>onBackPressed()</code>. The system previews the previous screen as the user swipes. Legacy <code>onBackPressed()</code> breaks the preview animation.",
+      "hints": [
+        "onBackPressed() is deprecated — the new system needs to know about back handling ahead of time"
+      ]
+    },
+    {
+      "id": "ia-8",
+      "type": "multiple-choice",
+      "title": "Migration Strategy",
+      "difficulty": "intermediate",
+      "description": "Google recommends which migration strategy for adopting Compose in an existing View-based app?",
+      "options": [
+        "Top-down: replace Activities and Fragments first, then individual views",
+        "Bottom-up: start with leaf composables (buttons, cards), then screens, then navigation",
+        "Full rewrite: pause features and convert everything at once",
+        "Side-by-side: maintain both View and Compose versions permanently"
+      ],
+      "correctIndex": 1,
+      "explanation": "Bottom-up migration is recommended: start with small, leaf UI components (buttons, list items, cards), then compose entire screens, then replace Fragment/Activity navigation with Navigation Compose. This approach is incremental, low-risk, and lets the team learn Compose gradually while shipping features.",
+      "hints": [
+        "Which approach lets you ship features while migrating gradually?"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,200 @@
+{
+  "id": "flow-stateflow",
+  "title": "Flow & StateFlow",
+  "icon": "🌊",
+  "description": "Cold flows, hot flows, StateFlow, SharedFlow, operators, and testing",
+  "references": [
+    {"title": "Kotlin Flow Guide", "url": "https://kotlinlang.org/docs/flow.html", "type": "docs"},
+    {"title": "Android Developers — StateFlow and SharedFlow", "url": "https://developer.android.com/kotlin/flow/stateflow-and-sharedflow", "type": "docs"},
+    {"title": "Android Developers — Flows in Practice", "url": "https://developer.android.com/kotlin/flow", "type": "docs"},
+    {"title": "Kotlin StateIn and ShareIn Operators", "url": "https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.flow/state-in.html", "type": "docs"}
+  ],
+  "lesson": "<h3>Kotlin Flow: Reactive Streams</h3>\n<p>Flow is Kotlin's answer to reactive streams (like RxJava). It produces values <b>asynchronously</b> over time.</p>\n<h3>Cold vs Hot Flows</h3>\n<ul>\n<li><b>Cold flow</b> (<code>flow { }</code>) — runs the producer code each time it's collected. Each collector gets its own emission. Like a vending machine: nothing happens until you press the button</li>\n<li><b>Hot flow</b> (<code>StateFlow</code>, <code>SharedFlow</code>) — emits values regardless of collectors. Like a radio: it broadcasts whether anyone is listening or not</li>\n</ul>\n<div class=\"lesson-code\">// Cold flow — producer runs per collector\nfun fetchUsers(): Flow&lt;User&gt; = flow {\n    val users = api.getUsers()\n    users.forEach { emit(it) }\n}\n\n// StateFlow — holds current value, hot\nprivate val _count = MutableStateFlow(0)\nval count: StateFlow&lt;Int&gt; = _count.asStateFlow()</div>\n<h3>StateFlow vs SharedFlow vs LiveData</h3>\n<table style=\"width:100%;border-collapse:collapse;margin:10px 0;font-size:13px\">\n<tr style=\"border-bottom:1px solid var(--border)\"><th style=\"text-align:left;padding:4px\">Feature</th><th>StateFlow</th><th>SharedFlow</th><th>LiveData</th></tr>\n<tr style=\"border-bottom:1px solid var(--border)\"><td style=\"padding:4px\">Initial value</td><td>Required</td><td>No</td><td>No</td></tr>\n<tr style=\"border-bottom:1px solid var(--border)\"><td style=\"padding:4px\">Replays</td><td>Latest (1)</td><td>Configurable</td><td>Latest (1)</td></tr>\n<tr style=\"border-bottom:1px solid var(--border)\"><td style=\"padding:4px\">Equality check</td><td>Yes (skips dupes)</td><td>No</td><td>No</td></tr>\n<tr style=\"border-bottom:1px solid var(--border)\"><td style=\"padding:4px\">Lifecycle aware</td><td>No (use collectAsStateWithLifecycle)</td><td>No</td><td>Yes</td></tr>\n<tr><td style=\"padding:4px\">Android dependency</td><td>Kotlin-only</td><td>Kotlin-only</td><td>Android-only</td></tr>\n</table>\n<h3>Collecting in Compose</h3>\n<div class=\"lesson-code\">// In a @Composable:\nval uiState by viewModel.uiState.collectAsStateWithLifecycle()\n// Lifecycle-aware: stops collecting when app is backgrounded</div>\n<h3>Key Operators</h3>\n<ul>\n<li><code>.map { }</code> — transform each emission</li>\n<li><code>.filter { }</code> — keep only matching emissions</li>\n<li><code>.combine(otherFlow) { a, b -> }</code> — merge latest values of two flows</li>\n<li><code>.flatMapLatest { }</code> — on new emission, cancel previous inner flow</li>\n<li><code>.debounce(300)</code> — wait for pause in emissions (great for search)</li>\n<li><code>.catch { }</code> — handle upstream errors</li>\n<li><code>.stateIn(scope)</code> — convert cold flow to StateFlow</li>\n</ul>",
+  "questions": [
+    {
+      "id": "fs-1",
+      "type": "multiple-choice",
+      "title": "Cold vs Hot Flow",
+      "difficulty": "intermediate",
+      "description": "What is the key difference between a cold <code>Flow</code> and a <code>StateFlow</code>?",
+      "options": [
+        "Cold flows are faster than hot flows",
+        "A cold flow runs its producer code on each new collector. StateFlow is hot — it holds a current value and emits to all collectors regardless of when they start",
+        "Cold flows can only emit once, StateFlow emits multiple times",
+        "StateFlow is a Compose-only API"
+      ],
+      "correctIndex": 1,
+      "explanation": "A <b>cold</b> flow is lazy: the <code>flow { }</code> block only executes when collected, and each collector triggers a fresh execution. A <b>hot</b> StateFlow holds a current value (like LiveData), emits to all collectors, and skips duplicate values. Use cold flows for one-shot or per-request data; use StateFlow for UI state that multiple composables observe.",
+      "hints": [
+        "Think: does the producer run without any collectors?",
+        "Cold = lazy/on-demand, Hot = always active"
+      ]
+    },
+    {
+      "id": "fs-2",
+      "type": "fill-blank",
+      "title": "Creating a StateFlow",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to expose a read-only StateFlow from a ViewModel.",
+      "code": "class SearchViewModel : ViewModel() {\n    private val _searchResults = ___1___(emptyList<SearchResult>())\n    val searchResults: ___2___ = _searchResults.___3___()\n\n    fun search(query: String) {\n        viewModelScope.launch {\n            val results = repository.search(query)\n            _searchResults.___4___ = results\n        }\n    }\n}",
+      "blanks": [
+        {
+          "answer": [
+            "MutableStateFlow"
+          ],
+          "hint": "Mutable version of StateFlow"
+        },
+        {
+          "answer": [
+            "StateFlow<List<SearchResult>>",
+            "StateFlow"
+          ],
+          "hint": "Read-only public type"
+        },
+        {
+          "answer": [
+            "asStateFlow"
+          ],
+          "hint": "Converts Mutable to read-only"
+        },
+        {
+          "answer": [
+            "value"
+          ],
+          "hint": "Property to update the current value"
+        }
+      ],
+      "explanation": "The pattern: private <code>MutableStateFlow</code> for internal writes, public <code>StateFlow</code> (via <code>.asStateFlow()</code>) for external reads. This encapsulates mutations inside the ViewModel. Update via <code>.value = newValue</code> or <code>.update { }</code> for atomic read-modify-write.",
+      "hints": [
+        "Same pattern as MutableLiveData/LiveData but with StateFlow",
+        "asStateFlow() prevents external code from modifying the state"
+      ]
+    },
+    {
+      "id": "fs-3",
+      "type": "what-does-this-do",
+      "title": "Search with debounce + flatMapLatest",
+      "difficulty": "advanced",
+      "description": "Trace through what happens when the user types \"K\", \"Ko\", \"Kot\" quickly, then pauses.",
+      "code": "class SearchViewModel : ViewModel() {\n    private val _query = MutableStateFlow(\"\")\n    \n    val results = _query\n        .debounce(300) // Wait 300ms after last keystroke\n        .filter { it.length >= 2 }\n        .flatMapLatest { query ->\n            repository.search(query) // Returns Flow<List<Result>>\n        }\n        .stateIn(\n            scope = viewModelScope,\n            started = SharingStarted.WhileSubscribed(5000),\n            initialValue = emptyList()\n        )\n    \n    fun onQueryChanged(query: String) {\n        _query.value = query\n    }\n}",
+      "options": [
+        "All three searches run: \"K\", \"Ko\", \"Kot\"",
+        "Only \"Kot\" triggers a search — debounce waits 300ms, \"K\" is filtered out (<2 chars), \"Ko\" is replaced by \"Kot\" via flatMapLatest",
+        "Only \"K\" runs because it was first",
+        "All are filtered out because they are too short"
+      ],
+      "correctIndex": 1,
+      "explanation": "Step by step: \"K\" and \"Ko\" and \"Kot\" arrive rapidly. <code>debounce(300)</code> waits for 300ms of silence — only \"Kot\" (the last value after the pause) passes through. <code>filter { it.length >= 2 }</code> passes \"Kot\" (length 3). <code>flatMapLatest</code> starts searching for \"Kot\" — if a new query arrived, it would cancel this search and start a new one. This is the canonical search-as-you-type pattern.",
+      "hints": [
+        "debounce waits for a pause in emissions — rapid typing means only the last value survives",
+        "flatMapLatest cancels the previous search when a new query arrives"
+      ]
+    },
+    {
+      "id": "fs-4",
+      "type": "fix-bug",
+      "title": "Flow Not Lifecycle-Aware",
+      "difficulty": "intermediate",
+      "description": "This flow collection continues even when the app is in the background, wasting battery on location updates. Fix it.",
+      "starterCode": "@Composable\nfun LocationScreen(viewModel: LocationViewModel) {\n    // BUG: keeps collecting even when app is backgrounded!\n    val location by viewModel.locationFlow.collectAsState(initial = null)\n    \n    location?.let {\n        Text(\"Lat: ${it.latitude}, Lng: ${it.longitude}\")\n    }\n}",
+      "checks": [
+        {
+          "pattern": "collectAsStateWithLifecycle",
+          "message": "Use collectAsStateWithLifecycle() which stops collecting when the app is not visible",
+          "required": true
+        }
+      ],
+      "solution": "@Composable\nfun LocationScreen(viewModel: LocationViewModel) {\n    val location by viewModel.locationFlow.collectAsStateWithLifecycle(initialValue = null)\n    \n    location?.let {\n        Text(\"Lat: ${it.latitude}, Lng: ${it.longitude}\")\n    }\n}",
+      "explanation": "<code>collectAsState()</code> collects forever — even when the app is in the background. <code>collectAsStateWithLifecycle()</code> (from <code>lifecycle-runtime-compose</code>) stops collection when the lifecycle drops below STARTED (app backgrounded). This is <b>critical</b> for location, sensor data, or any continuous flow. Google recommends always using <code>collectAsStateWithLifecycle</code> in Compose.",
+      "hints": [
+        "What happens to battery if you track GPS while the app is minimized?",
+        "There is a lifecycle-aware version of collectAsState"
+      ]
+    },
+    {
+      "id": "fs-5",
+      "type": "multiple-choice",
+      "title": "StateFlow vs SharedFlow",
+      "difficulty": "advanced",
+      "description": "When should you use <code>SharedFlow</code> instead of <code>StateFlow</code>?",
+      "options": [
+        "SharedFlow is always better — it replaces StateFlow",
+        "Use SharedFlow for one-time events (navigation, snackbars, toasts) that should not be replayed on configuration change",
+        "SharedFlow is for UI state, StateFlow is for events",
+        "Use SharedFlow only for testing"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>StateFlow</code> holds a current value and replays it to new collectors — perfect for UI state. <code>SharedFlow</code> (with replay=0) does NOT replay — perfect for one-time events like \"show snackbar\" or \"navigate to screen\". If you used StateFlow for events, rotating the phone would re-trigger the event. <code>SharedFlow</code> also doesn't skip duplicates and doesn't require an initial value.",
+      "hints": [
+        "What happens if a \"show error toast\" StateFlow value is replayed after rotation?",
+        "One-time events vs ongoing state — different tools"
+      ]
+    },
+    {
+      "id": "fs-6",
+      "type": "write-code",
+      "title": "Combine Two Flows",
+      "difficulty": "intermediate",
+      "description": "Write a ViewModel that combines a search query flow and a filter selection flow into a single UI state flow.",
+      "starterCode": "class ProductViewModel(private val repo: ProductRepository) : ViewModel() {\n    private val _query = MutableStateFlow(\"\")\n    private val _category = MutableStateFlow(Category.ALL)\n\n    // TODO: Combine both flows into a single uiState StateFlow\n    // When either query or category changes, fetch filtered products\n    val uiState: StateFlow<ProductUiState> = TODO()\n\n    fun onQueryChanged(q: String) { _query.value = q }\n    fun onCategoryChanged(c: Category) { _category.value = c }\n}",
+      "checks": [
+        {
+          "pattern": "combine",
+          "message": "Use combine() to merge multiple flows",
+          "required": true
+        },
+        {
+          "pattern": "stateIn",
+          "message": "Convert to StateFlow with stateIn()",
+          "required": true
+        }
+      ],
+      "solution": "class ProductViewModel(private val repo: ProductRepository) : ViewModel() {\n    private val _query = MutableStateFlow(\"\")\n    private val _category = MutableStateFlow(Category.ALL)\n\n    val uiState: StateFlow<ProductUiState> = combine(\n        _query.debounce(300),\n        _category\n    ) { query, category ->\n        val products = repo.getProducts(query, category)\n        ProductUiState(products = products, query = query, category = category)\n    }.stateIn(\n        scope = viewModelScope,\n        started = SharingStarted.WhileSubscribed(5000),\n        initialValue = ProductUiState()\n    )\n\n    fun onQueryChanged(q: String) { _query.value = q }\n    fun onCategoryChanged(c: Category) { _category.value = c }\n}",
+      "explanation": "<code>combine()</code> merges the latest values from multiple flows — whenever EITHER changes, the transform runs with both latest values. <code>stateIn()</code> converts the cold combined flow into a hot StateFlow. <code>WhileSubscribed(5000)</code> keeps it active for 5 seconds after the last collector disappears (survives rotation).",
+      "hints": [
+        "combine emits when ANY of its source flows emit",
+        "stateIn converts a cold flow to hot StateFlow with caching"
+      ]
+    },
+    {
+      "id": "fs-7",
+      "type": "multiple-choice",
+      "title": "SharingStarted Strategies",
+      "difficulty": "advanced",
+      "description": "What does <code>SharingStarted.WhileSubscribed(5000)</code> do when used with <code>stateIn()</code>?",
+      "options": [
+        "Shares the flow for exactly 5 seconds",
+        "Starts the upstream flow when the first subscriber appears, stops it 5 seconds after the last subscriber disappears — surviving rotation but stopping when truly unused",
+        "Delays the first emission by 5 seconds",
+        "Replays the last 5 seconds of emissions"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>WhileSubscribed(5000)</code> means: start the upstream flow when there's at least one subscriber, and keep it running for 5000ms after the last subscriber disappears. The 5-second window lets it survive configuration changes (rotation takes ~1 second) without restarting the upstream. Compare: <code>Eagerly</code> (never stops), <code>Lazily</code> (starts on first sub, never stops), <code>WhileSubscribed(0)</code> (stops immediately).",
+      "hints": [
+        "Think about what happens during screen rotation — the collector briefly disappears",
+        "5000ms is enough to survive a configuration change"
+      ]
+    },
+    {
+      "id": "fs-8",
+      "type": "fix-bug",
+      "title": "StateFlow Not Emitting Updates",
+      "difficulty": "intermediate",
+      "description": "The UI never updates even though the ViewModel is updating the list. Find and fix the bug.",
+      "starterCode": "class TaskViewModel : ViewModel() {\n    private val _tasks = MutableStateFlow(mutableListOf<Task>())\n    val tasks: StateFlow<List<Task>> = _tasks.asStateFlow()\n\n    fun addTask(task: Task) {\n        // BUG: UI never updates!\n        _tasks.value.add(task)\n    }\n}",
+      "checks": [
+        {
+          "pattern": "copy|toMutableList|listOf|\\+|_tasks\\.value\\s*=|_tasks\\.update",
+          "message": "Create a new list instance — StateFlow uses equality check and skips same reference",
+          "required": true
+        }
+      ],
+      "solution": "class TaskViewModel : ViewModel() {\n    private val _tasks = MutableStateFlow<List<Task>>(emptyList())\n    val tasks: StateFlow<List<Task>> = _tasks.asStateFlow()\n\n    fun addTask(task: Task) {\n        _tasks.update { currentList -> currentList + task }\n    }\n}",
+      "explanation": "<b>StateFlow uses structural equality</b> to skip duplicate emissions. Mutating the same list reference (<code>.add(task)</code>) does not change the reference — StateFlow sees the same object and skips the emission. You must create a <b>new list instance</b>. <code>_tasks.update { it + task }</code> creates a new list (the <code>+</code> operator returns a new list) and atomically updates the value. This is one of the most common StateFlow bugs.",
+      "hints": [
+        "StateFlow checks if old value == new value. What happens when you mutate a list in place?",
+        "You need a new object reference, not a mutation of the existing one"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,190 @@
+{
+  "id": "compose-advanced",
+  "title": "Compose Advanced",
+  "icon": "🚀",
+  "description": "LazyColumn, side effects, animations, and performance",
+  "references": [
+    {"title": "Android Developers — Lazy Lists", "url": "https://developer.android.com/develop/ui/compose/lists", "type": "docs"},
+    {"title": "Android Developers — Side Effects in Compose", "url": "https://developer.android.com/develop/ui/compose/side-effects", "type": "docs"},
+    {"title": "Android Developers — Animations in Compose", "url": "https://developer.android.com/develop/ui/compose/animation/introduction", "type": "docs"},
+    {"title": "Android Developers — Compose Performance", "url": "https://developer.android.com/develop/ui/compose/performance", "type": "docs"}
+  ],
+  "lesson": "<h3>Advanced Compose Patterns</h3>\n<p>Beyond basics, Compose offers powerful tools for lists, side effects, animations, and performance optimization.</p>\n<h3>LazyColumn & Keys</h3>\n<p>Always provide <code>key</code> to <code>items()</code> — it tells Compose which remembered state belongs to which item during scrolling and reordering. Without keys, state follows <b>position</b> not <b>identity</b>.</p>\n<h3>Side Effects</h3>\n<ul>\n<li><code>LaunchedEffect(key)</code> — runs a coroutine, relaunches when key changes</li>\n<li><code>DisposableEffect(key)</code> — runs code with cleanup (onDispose), for register/unregister patterns</li>\n<li><code>derivedStateOf</code> — creates computed state that only recomposes when the result changes</li>\n</ul>\n<h3>Recomposition Performance</h3>\n<p>Compose skips recomposition when all parameters are <b>stable</b> and unchanged. Use <code>data class</code>, <code>@Immutable</code>, or <code>@Stable</code> annotations. Extract composables into smaller functions to narrow the recomposition scope.</p>",
+  "questions": [
+    {
+      "id": "ca-1",
+      "type": "fix-bug",
+      "title": "LazyColumn Item Reuse Bug",
+      "difficulty": "intermediate",
+      "description": "This LazyColumn shows a list of messages, but when you scroll, the wrong items show checked states. Fix the issue.",
+      "starterCode": "@Composable\nfun MessageList(messages: List<Message>) {\n    LazyColumn {\n        items(messages) { message ->\n            var isChecked by remember { mutableStateOf(false) }\n            Row(\n                modifier = Modifier.fillMaxWidth().padding(8.dp)\n            ) {\n                Checkbox(checked = isChecked, onCheckedChange = { isChecked = it })\n                Text(text = message.text, modifier = Modifier.padding(start = 8.dp))\n            }\n        }\n    }\n}",
+      "checks": [
+        {
+          "pattern": "key\\s*[=(]",
+          "message": "Add a key parameter to items() to uniquely identify each item",
+          "required": true
+        }
+      ],
+      "solution": "@Composable\nfun MessageList(messages: List<Message>) {\n    LazyColumn {\n        items(items = messages, key = { it.id }) { message ->\n            var isChecked by remember { mutableStateOf(false) }\n            Row(\n                modifier = Modifier.fillMaxWidth().padding(8.dp)\n            ) {\n                Checkbox(checked = isChecked, onCheckedChange = { isChecked = it })\n                Text(text = message.text, modifier = Modifier.padding(start = 8.dp))\n            }\n        }\n    }\n}",
+      "explanation": "Without a <code>key</code>, LazyColumn associates <code>remember</code> state with position, not identity. When items are recycled during scrolling, state stays at the position. Adding <code>key = { it.id }</code> binds state to each message's unique ID.",
+      "hints": [
+        "When items move or recycle, how does Compose know which state belongs to which item?"
+      ]
+    },
+    {
+      "id": "ca-2",
+      "type": "optimize",
+      "title": "Unnecessary Recomposition",
+      "difficulty": "advanced",
+      "description": "This composable recomposes the entire list every time the timestamp updates (every second). Optimize it so only the timestamp text recomposes.",
+      "starterCode": "@Composable\nfun DashboardScreen(viewModel: DashboardViewModel) {\n    val items by viewModel.items.collectAsState()\n    val currentTime by viewModel.currentTime.collectAsState()\n\n    Column {\n        Text(\n            text = \"Last updated: $currentTime\",\n            style = MaterialTheme.typography.bodySmall\n        )\n\n        items.forEach { item ->\n            ExpensiveItemCard(item = item)\n        }\n    }\n}",
+      "checks": [
+        {
+          "pattern": "@Composable\\s+fun\\s+\\w+.*\\{[\\s\\S]*@Composable\\s+fun|TimestampHeader|Timestamp",
+          "message": "Extract the timestamp into a separate composable",
+          "required": false
+        }
+      ],
+      "solution": "@Composable\nfun DashboardScreen(viewModel: DashboardViewModel) {\n    val items by viewModel.items.collectAsState()\n    Column {\n        TimestampHeader(viewModel)\n        LazyColumn {\n            items(items, key = { it.id }) { ExpensiveItemCard(item = it) }\n        }\n    }\n}\n\n@Composable\nfun TimestampHeader(viewModel: DashboardViewModel) {\n    val currentTime by viewModel.currentTime.collectAsState()\n    Text(text = \"Last updated: $currentTime\", style = MaterialTheme.typography.bodySmall)\n}",
+      "explanation": "When <code>currentTime</code> changes, Compose recomposes any composable reading it. By extracting the timestamp into its own composable, only <code>TimestampHeader</code> recomposes. This is the <b>principle of narrow recomposition scope</b>.",
+      "hints": [
+        "Which state is changing frequently? Which part of the UI needs it?",
+        "Compose recomposes at the composable function boundary"
+      ]
+    },
+    {
+      "id": "ca-3",
+      "type": "fill-blank",
+      "title": "LaunchedEffect",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to show a snackbar when an error occurs.",
+      "code": "@Composable\nfun ErrorScreen(\n    errorMessage: String?,\n    snackbarHostState: SnackbarHostState\n) {\n    ___1___(___2___) {\n        if (errorMessage != null) {\n            snackbarHostState.showSnackbar(message = errorMessage)\n        }\n    }\n}",
+      "blanks": [
+        {
+          "answer": [
+            "LaunchedEffect"
+          ],
+          "hint": "Side effect that launches a coroutine"
+        },
+        {
+          "answer": [
+            "errorMessage"
+          ],
+          "hint": "Key that triggers re-launch when changed"
+        }
+      ],
+      "explanation": "<code>LaunchedEffect(key)</code> launches a coroutine when entering composition and re-launches when the key changes. <code>showSnackbar()</code> is a suspend function, requiring the coroutine scope.",
+      "hints": [
+        "This side effect runs a coroutine tied to composition lifecycle"
+      ]
+    },
+    {
+      "id": "ca-4",
+      "type": "multiple-choice",
+      "title": "Side Effects in Compose",
+      "difficulty": "intermediate",
+      "description": "Which side effect API should you use to register and unregister a broadcast receiver while the composable is in the composition?",
+      "options": [
+        "LaunchedEffect",
+        "DisposableEffect",
+        "SideEffect",
+        "rememberCoroutineScope"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>DisposableEffect</code> is designed for effects needing cleanup — it provides an <code>onDispose</code> block. Perfect for register/unregister patterns. <code>LaunchedEffect</code> is for coroutines. <code>SideEffect</code> runs after every recomposition with no cleanup.",
+      "hints": [
+        "Which effect gives you a cleanup callback?"
+      ]
+    },
+    {
+      "id": "ca-5",
+      "type": "what-does-this-do",
+      "title": "derivedStateOf",
+      "difficulty": "advanced",
+      "description": "What does <code>derivedStateOf</code> do in this code?",
+      "code": "@Composable\nfun MessageList(messages: List<Message>) {\n    val listState = rememberLazyListState()\n    val showScrollToTop by remember {\n        derivedStateOf { listState.firstVisibleItemIndex > 5 }\n    }\n\n    Box {\n        LazyColumn(state = listState) {\n            items(messages) { MessageRow(it) }\n        }\n        if (showScrollToTop) {\n            FloatingActionButton(onClick = { /* scroll */ }) {\n                Icon(Icons.Default.ArrowUpward, null)\n            }\n        }\n    }\n}",
+      "options": [
+        "Caches computation and only triggers recomposition when its result changes (true/false), not on every scroll pixel",
+        "Runs the computation on a background thread",
+        "Same as remember{} — just caches the initial value",
+        "Delays computation until layout is complete"
+      ],
+      "correctIndex": 0,
+      "explanation": "<code>derivedStateOf</code> creates derived state that only triggers recomposition when its <b>result</b> changes. Without it, reading scroll position directly would recompose on every pixel. With it, the boolean only changes when crossing the threshold, dramatically reducing recompositions.",
+      "hints": [
+        "Think about how often scroll position changes vs how often the boolean changes"
+      ]
+    },
+    {
+      "id": "ca-6",
+      "type": "fill-blank",
+      "title": "AnimatedVisibility",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to animate a panel sliding in and out based on a boolean state.",
+      "code": "@Composable\nfun ExpandablePanel(title: String, content: String) {\n    var expanded by remember { mutableStateOf(false) }\n\n    Column {\n        Row(\n            modifier = Modifier.clickable { expanded = !expanded }\n        ) {\n            Text(title)\n            Icon(\n                if (expanded) Icons.Default.ExpandLess\n                else Icons.Default.ExpandMore,\n                contentDescription = null\n            )\n        }\n\n        ___1___(visible = ___2___) {\n            Text(content, modifier = Modifier.padding(8.dp))\n        }\n    }\n}",
+      "blanks": [
+        {
+          "answer": [
+            "AnimatedVisibility"
+          ],
+          "hint": "Composable that animates show/hide"
+        },
+        {
+          "answer": [
+            "expanded"
+          ],
+          "hint": "Boolean that controls visibility"
+        }
+      ],
+      "explanation": "<code>AnimatedVisibility</code> animates the appearance and disappearance of its content based on a boolean. By default it uses fade + expand animations. You can customize with <code>enter</code> and <code>exit</code> parameters.",
+      "hints": [
+        "This composable handles the animation automatically based on a boolean",
+        "The boolean state controls whether content is shown or hidden"
+      ]
+    },
+    {
+      "id": "ca-7",
+      "type": "fix-bug",
+      "title": "DisposableEffect Missing Cleanup",
+      "difficulty": "intermediate",
+      "description": "This code registers a lifecycle observer but never removes it, causing a memory leak. Fix it.",
+      "starterCode": "@Composable\nfun LifecycleLogger(lifecycleOwner: LifecycleOwner) {\n    val observer = LifecycleEventObserver { _, event ->\n        Log.d(\"Lifecycle\", \"Event: $event\")\n    }\n\n    LaunchedEffect(lifecycleOwner) {\n        lifecycleOwner.lifecycle.addObserver(observer)\n    }\n}",
+      "checks": [
+        {
+          "pattern": "DisposableEffect",
+          "message": "Use DisposableEffect for register/unregister patterns",
+          "required": true
+        },
+        {
+          "pattern": "onDispose|removeObserver",
+          "message": "Clean up the observer in onDispose",
+          "required": true
+        }
+      ],
+      "solution": "@Composable\nfun LifecycleLogger(lifecycleOwner: LifecycleOwner) {\n    DisposableEffect(lifecycleOwner) {\n        val observer = LifecycleEventObserver { _, event ->\n            Log.d(\"Lifecycle\", \"Event: $event\")\n        }\n        lifecycleOwner.lifecycle.addObserver(observer)\n\n        onDispose {\n            lifecycleOwner.lifecycle.removeObserver(observer)\n        }\n    }\n}",
+      "explanation": "<code>LaunchedEffect</code> provides no cleanup mechanism. <code>DisposableEffect</code> provides <code>onDispose { }</code> which runs when the composable leaves composition or the key changes. Always remove observers, unregister receivers, and close resources in onDispose.",
+      "hints": [
+        "LaunchedEffect is for coroutines, not register/unregister patterns",
+        "What happens to the observer when this composable is removed from the tree?"
+      ]
+    },
+    {
+      "id": "ca-8",
+      "type": "multiple-choice",
+      "title": "Composition over Inheritance",
+      "difficulty": "intermediate",
+      "description": "Why does Jetpack Compose use <b>composition</b> (small composable functions) instead of <b>inheritance</b> (extending View classes)?",
+      "options": [
+        "Composition is faster at runtime",
+        "Composition allows mixing and matching behaviors freely without rigid class hierarchies",
+        "Composition uses less memory",
+        "Composition was easier for Google to implement"
+      ],
+      "correctIndex": 1,
+      "explanation": "Inheritance creates rigid hierarchies — you can't have a Button that's also a TextField. Composition lets you freely combine behaviors: wrap any content in any container, add any modifier to any composable. A <code>Button</code> is just a composable that takes content as a lambda — the content can be anything. This is far more flexible than the old View class hierarchy.",
+      "hints": [
+        "Think about the old View system: Button extends TextView extends View — what if you want something that doesn't fit?"
+      ]
+    }
+  ]
+}

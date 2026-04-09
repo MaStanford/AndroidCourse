@@ -1,0 +1,255 @@
+{
+  "id": "dependency-injection",
+  "title": "Dependency Injection Deep Dive",
+  "icon": "💉",
+  "description": "Hilt component hierarchy, scoping, assisted inject, multi-module DI, and testing",
+  "references": [
+    {"title": "Android Developers — Hilt", "url": "https://developer.android.com/training/dependency-injection/hilt-android", "type": "docs"},
+    {"title": "Dagger Hilt Documentation", "url": "https://dagger.dev/hilt/", "type": "docs"},
+    {"title": "Android Developers — Hilt Testing", "url": "https://developer.android.com/training/dependency-injection/hilt-testing", "type": "docs"},
+    {"title": "Android Developers — DI with Hilt (Codelab)", "url": "https://developer.android.com/codelabs/android-hilt", "type": "article"}
+  ],
+  "lesson": "<h3>Why Dependency Injection?</h3>\n<p>DI means a class <b>receives</b> its dependencies from outside instead of creating them itself. This enables: testability (inject fakes), swappability (debug vs release implementations), and loose coupling.</p>\n<hr class=\"section-divider\">\n<h3>Hilt Component Hierarchy</h3>\n<p>Hilt (built on Dagger) defines a hierarchy of components that mirror Android's lifecycle scopes. Each component can access bindings from its parent.</p>\n<div class=\"diagram\">SingletonComponent          (@Singleton)\n       │\n       ├── ActivityRetainedComponent  (@ActivityRetainedScoped)\n       │          │\n       │          └── ViewModelComponent  (@ViewModelScoped)\n       │                    │\n       │                    └── ActivityComponent  (@ActivityScoped)\n       │                              │\n       │                              ├── FragmentComponent  (@FragmentScoped)\n       │                              │\n       │                              └── ViewComponent\n       │\n       └── ServiceComponent  (@ServiceScoped)</div>\n<div class=\"info-box\"><b>Key insight:</b> <code>@ViewModelScoped</code> survives configuration changes (backed by ViewModel). <code>@ActivityScoped</code> does NOT — it's destroyed on rotation. Choose scopes based on the data's lifetime, not convenience.</div>\n<hr class=\"section-divider\">\n<h3>@Binds vs @Provides</h3>\n<p>Both tell Hilt how to create an instance, but they serve different purposes:</p>\n<table><tr><th>@Binds</th><th>@Provides</th></tr><tr><td>Maps interface → implementation</td><td>Creates instances with custom logic</td></tr><tr><td>Must be <code>abstract fun</code> in <code>abstract class</code></td><td>Regular fun in <code>object</code> or class</td></tr><tr><td>No code body — Hilt generates the binding</td><td>Has a body that constructs the object</td></tr><tr><td>More efficient (less generated code)</td><td>Required when construction has logic</td></tr></table>\n<div class=\"lesson-code\"><span class=\"cmt\">// @Binds — mapping interface to implementation</span>\n@Module\n@InstallIn(SingletonComponent::class)\nabstract class RepositoryModule {\n    @Binds\n    @Singleton\n    abstract fun bindUserRepo(impl: UserRepositoryImpl): UserRepository\n}\n\n<span class=\"cmt\">// @Provides — when you need construction logic</span>\n@Module\n@InstallIn(SingletonComponent::class)\nobject NetworkModule {\n    @Provides\n    @Singleton\n    fun provideRetrofit(): Retrofit = Retrofit.Builder()\n        .baseUrl(\"https://api.example.com/\")\n        .addConverterFactory(MoshiConverterFactory.create())\n        .build()\n}</div>\n<div class=\"warn-box\"><b>When MUST you use @Provides?</b> When the class is from a library (you can't annotate it with <code>@Inject</code>), when construction requires a builder pattern, or when you need to configure the instance.</div>\n<hr class=\"section-divider\">\n<h3>Assisted Injection</h3>\n<p>When a class needs <b>both</b> DI-provided and runtime parameters (e.g., a ViewModel that needs a userId passed from navigation):</p>\n<div class=\"lesson-code\">class DetailViewModel @AssistedInject constructor(\n    private val repository: UserRepository,   <span class=\"cmt\">// DI-provided</span>\n    @Assisted private val userId: String       <span class=\"cmt\">// Runtime parameter</span>\n) : ViewModel() { ... }\n\n@AssistedFactory\ninterface DetailViewModelFactory {\n    fun create(userId: String): DetailViewModel\n}</div>\n<hr class=\"section-divider\">\n<h3>Multi-Module DI with @EntryPoint</h3>\n<p><code>@EntryPoint</code> provides an escape hatch for injecting into classes that Hilt doesn't manage (ContentProviders, 3rd-party classes, dynamic feature modules):</p>\n<div class=\"lesson-code\">@EntryPoint\n@InstallIn(SingletonComponent::class)\ninterface AnalyticsEntryPoint {\n    fun getAnalytics(): AnalyticsService\n}\n\n<span class=\"cmt\">// Usage from a non-Hilt class:</span>\nval entryPoint = EntryPointAccessors.fromApplication(\n    context, AnalyticsEntryPoint::class.java\n)\nval analytics = entryPoint.getAnalytics()</div>\n<hr class=\"section-divider\">\n<h3>Multibinding</h3>\n<p>Collect multiple implementations into a <code>Set</code> or <code>Map</code> — perfect for plugin architectures:</p>\n<div class=\"lesson-code\">@Module\n@InstallIn(SingletonComponent::class)\nabstract class AnalyticsModule {\n    @Binds @IntoSet\n    abstract fun bindFirebase(impl: FirebaseTracker): AnalyticsTracker\n\n    @Binds @IntoSet\n    abstract fun bindMixpanel(impl: MixpanelTracker): AnalyticsTracker\n}\n\n<span class=\"cmt\">// Inject the whole set:</span>\nclass AnalyticsManager @Inject constructor(\n    private val trackers: Set&lt;@JvmSuppressWildcards AnalyticsTracker&gt;\n) {\n    fun track(event: Event) = trackers.forEach { it.track(event) }\n}</div>\n<hr class=\"section-divider\">\n<h3>Testing with Hilt</h3>\n<div class=\"lesson-code\">@HiltAndroidTest\n@UninstallModules(RepositoryModule::class)\nclass SearchScreenTest {\n    @get:Rule val hiltRule = HiltAndroidRule(this)\n\n    @BindValue\n    val fakeRepo: UserRepository = FakeUserRepository()\n\n    @Test\n    fun showsResults() { ... }\n}</div>\n<div class=\"info-box\"><code>@UninstallModules</code> removes the real module. <code>@BindValue</code> injects your fake directly. This lets you test with controlled data without mocking frameworks.</div>",
+  "questions": [
+    {
+      "id": "di-1",
+      "type": "multiple-choice",
+      "title": "Hilt Component Hierarchy",
+      "difficulty": "intermediate",
+      "description": "In Hilt's component hierarchy, which component is the direct parent of <code>ViewModelComponent</code>?",
+      "options": [
+        "SingletonComponent",
+        "ActivityRetainedComponent",
+        "ActivityComponent",
+        "FragmentComponent"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>ViewModelComponent</code> is a child of <code>ActivityRetainedComponent</code>. This means ViewModelScoped bindings can access ActivityRetainedScoped and Singleton bindings, but NOT ActivityScoped or FragmentScoped bindings. The hierarchy mirrors lifecycle: Singleton > ActivityRetained > ViewModel > Activity > Fragment.",
+      "hints": [
+        "Think about what survives configuration changes",
+        "ViewModels survive rotation — their parent component must too"
+      ]
+    },
+    {
+      "id": "di-2",
+      "type": "fill-blank",
+      "title": "@Binds Interface Binding",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to bind the <code>UserRepositoryImpl</code> to the <code>UserRepository</code> interface using Hilt.",
+      "code": "@Module\n@InstallIn(SingletonComponent::class)\n___1___ class RepositoryModule {\n    @___2___\n    @Singleton\n    abstract fun bindUserRepo(\n        impl: UserRepositoryImpl\n    ): ___3___\n}",
+      "blanks": [
+        {
+          "answer": ["abstract"],
+          "hint": "@Binds requires this class modifier"
+        },
+        {
+          "answer": ["Binds"],
+          "hint": "Maps interface to implementation"
+        },
+        {
+          "answer": ["UserRepository"],
+          "hint": "The interface being bound to"
+        }
+      ],
+      "explanation": "<code>@Binds</code> must be an <code>abstract fun</code> in an <code>abstract class</code>. It tells Hilt: whenever someone requests <code>UserRepository</code>, provide <code>UserRepositoryImpl</code>. This generates less code than <code>@Provides</code> and is preferred for simple interface-to-implementation mappings.",
+      "hints": [
+        "@Binds functions have no body — they're abstract",
+        "The return type is the interface, the parameter is the implementation"
+      ]
+    },
+    {
+      "id": "di-3",
+      "type": "fix-bug",
+      "title": "Wrong Scope — Data Lost on Rotation",
+      "difficulty": "intermediate",
+      "description": "This app loses its cached search results every time the user rotates the device. The ViewModel survives rotation, but the repository doesn't retain its in-memory cache. Fix the scoping issue.",
+      "starterCode": "@Module\n@InstallIn(ActivityComponent::class)\nobject DataModule {\n    @Provides\n    @ActivityScoped\n    fun provideSearchRepository(\n        api: SearchApi\n    ): SearchRepository {\n        return SearchRepositoryImpl(api)\n    }\n}\n\n@HiltViewModel\nclass SearchViewModel @Inject constructor(\n    private val repository: SearchRepository\n) : ViewModel() {\n    // repository's in-memory cache is lost on rotation!\n}",
+      "checks": [
+        {
+          "pattern": "SingletonComponent|ActivityRetainedComponent",
+          "message": "Install in a component that survives configuration changes",
+          "required": true
+        },
+        {
+          "pattern": "@Singleton|@ActivityRetainedScoped",
+          "message": "Use a scope that survives rotation",
+          "required": true
+        }
+      ],
+      "solution": "@Module\n@InstallIn(SingletonComponent::class)\nobject DataModule {\n    @Provides\n    @Singleton\n    fun provideSearchRepository(\n        api: SearchApi\n    ): SearchRepository {\n        return SearchRepositoryImpl(api)\n    }\n}\n\n@HiltViewModel\nclass SearchViewModel @Inject constructor(\n    private val repository: SearchRepository\n) : ViewModel() {\n    // repository now survives rotation!\n}",
+      "explanation": "<code>@ActivityScoped</code> bindings are destroyed when the Activity is destroyed — including on rotation. Since repositories typically hold app-wide cached data, they should be <code>@Singleton</code> (in <code>SingletonComponent</code>) or at minimum <code>@ActivityRetainedScoped</code> (survives config changes). The general rule: scope data based on its <b>lifetime</b>, not the component that uses it.",
+      "hints": [
+        "ActivityComponent is destroyed on every configuration change",
+        "What component survives rotation? What scope goes with it?"
+      ]
+    },
+    {
+      "id": "di-4",
+      "type": "write-code",
+      "title": "Assisted Injection for ViewModel",
+      "difficulty": "advanced",
+      "description": "Write a ViewModel that uses assisted injection to receive a <code>userId: String</code> at runtime (from navigation arguments) while also getting a <code>UserRepository</code> from Hilt. Include the factory interface.",
+      "starterCode": "// Write a ViewModel with:\n// - UserRepository injected by Hilt\n// - userId: String passed at runtime\n// - A factory interface for creating instances\n\nclass UserDetailViewModel(\n    // TODO\n) : ViewModel() {\n    // TODO\n}\n\n// TODO: Factory interface",
+      "checks": [
+        {
+          "pattern": "@AssistedInject",
+          "message": "Use @AssistedInject on the constructor",
+          "required": true
+        },
+        {
+          "pattern": "@Assisted",
+          "message": "Mark runtime parameters with @Assisted",
+          "required": true
+        },
+        {
+          "pattern": "@AssistedFactory",
+          "message": "Create an @AssistedFactory interface",
+          "required": true
+        }
+      ],
+      "solution": "class UserDetailViewModel @AssistedInject constructor(\n    private val repository: UserRepository,\n    @Assisted private val userId: String\n) : ViewModel() {\n\n    private val _user = MutableStateFlow<User?>(null)\n    val user: StateFlow<User?> = _user.asStateFlow()\n\n    init {\n        viewModelScope.launch {\n            _user.value = repository.getUser(userId)\n        }\n    }\n}\n\n@AssistedFactory\ninterface UserDetailViewModelFactory {\n    fun create(userId: String): UserDetailViewModel\n}",
+      "explanation": "<code>@AssistedInject</code> tells Dagger/Hilt this class has a mix of DI-provided and runtime parameters. <code>@Assisted</code> marks the runtime ones. The <code>@AssistedFactory</code> interface defines how to create instances with the runtime parameter. Hilt generates the implementation.",
+      "hints": [
+        "@AssistedInject goes on the constructor, @Assisted on the runtime parameter",
+        "The factory interface has a single create() method returning the ViewModel"
+      ]
+    },
+    {
+      "id": "di-5",
+      "type": "what-does-this-do",
+      "title": "@EntryPoint Access Pattern",
+      "difficulty": "intermediate",
+      "description": "What does this code accomplish and when would you use this pattern?",
+      "code": "@EntryPoint\n@InstallIn(SingletonComponent::class)\ninterface ImageLoaderEntryPoint {\n    fun getImageLoader(): ImageLoader\n}\n\nclass MyContentProvider : ContentProvider() {\n    override fun onCreate(): Boolean {\n        val entryPoint = EntryPointAccessors.fromApplication(\n            context!!, ImageLoaderEntryPoint::class.java\n        )\n        val loader = entryPoint.getImageLoader()\n        loader.preloadThumbnails()\n        return true\n    }\n    // ... other methods\n}",
+      "options": [
+        "It creates a new Hilt component specifically for the ContentProvider",
+        "It accesses Hilt-managed dependencies from a class that Hilt doesn't manage (ContentProvider)",
+        "It replaces the ImageLoader binding for testing purposes",
+        "It installs a new module into the SingletonComponent at runtime"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>@EntryPoint</code> provides an escape hatch for accessing Hilt-managed dependencies from classes that Hilt doesn't control. ContentProviders can't use <code>@AndroidEntryPoint</code> because they're initialized before the Application. <code>EntryPointAccessors.fromApplication()</code> reaches into the existing Hilt graph to get the dependency.",
+      "hints": [
+        "ContentProviders are initialized before Hilt is set up",
+        "This is about accessing the DI graph from outside the normal injection flow"
+      ]
+    },
+    {
+      "id": "di-6",
+      "type": "multiple-choice",
+      "title": "@Binds vs @Provides",
+      "difficulty": "intermediate",
+      "description": "When <b>must</b> you use <code>@Provides</code> instead of <code>@Binds</code>?",
+      "options": [
+        "When the dependency is an interface",
+        "When the class has no constructor parameters",
+        "When the class is from a third-party library and you can't add @Inject to its constructor",
+        "When you want the dependency to be a singleton"
+      ],
+      "correctIndex": 2,
+      "explanation": "<code>@Binds</code> only works when Hilt can construct the implementation itself (the class has <code>@Inject constructor</code>). For third-party classes (Retrofit, OkHttp, Room), you can't modify their source to add <code>@Inject</code>, so you <b>must</b> use <code>@Provides</code> with a function body that constructs the instance. You also need <code>@Provides</code> when construction requires builder patterns or configuration.",
+      "hints": [
+        "Think about what @Binds needs to work — it has no function body",
+        "Can you modify Retrofit's constructor to add @Inject?"
+      ]
+    },
+    {
+      "id": "di-7",
+      "type": "write-code",
+      "title": "Multibinding with @IntoSet",
+      "difficulty": "advanced",
+      "description": "Create a Hilt module that collects multiple <code>AnalyticsTracker</code> implementations into a Set, and an <code>AnalyticsManager</code> class that injects and uses all of them.",
+      "starterCode": "interface AnalyticsTracker {\n    fun track(event: String, params: Map<String, String>)\n}\n\nclass FirebaseTracker @Inject constructor() : AnalyticsTracker {\n    override fun track(event: String, params: Map<String, String>) { /* ... */ }\n}\n\nclass MixpanelTracker @Inject constructor() : AnalyticsTracker {\n    override fun track(event: String, params: Map<String, String>) { /* ... */ }\n}\n\n// TODO: Hilt module with @IntoSet\n\n// TODO: AnalyticsManager that injects Set<AnalyticsTracker>",
+      "checks": [
+        {
+          "pattern": "@IntoSet",
+          "message": "Use @IntoSet to contribute to the Set",
+          "required": true
+        },
+        {
+          "pattern": "@Binds|@Provides",
+          "message": "Use @Binds or @Provides for each tracker",
+          "required": true
+        },
+        {
+          "pattern": "Set<.*AnalyticsTracker>|Set<.*Tracker>",
+          "message": "Inject a Set of trackers in the manager",
+          "required": true
+        }
+      ],
+      "solution": "interface AnalyticsTracker {\n    fun track(event: String, params: Map<String, String>)\n}\n\nclass FirebaseTracker @Inject constructor() : AnalyticsTracker {\n    override fun track(event: String, params: Map<String, String>) { /* ... */ }\n}\n\nclass MixpanelTracker @Inject constructor() : AnalyticsTracker {\n    override fun track(event: String, params: Map<String, String>) { /* ... */ }\n}\n\n@Module\n@InstallIn(SingletonComponent::class)\nabstract class AnalyticsModule {\n    @Binds @IntoSet\n    abstract fun bindFirebase(impl: FirebaseTracker): AnalyticsTracker\n\n    @Binds @IntoSet\n    abstract fun bindMixpanel(impl: MixpanelTracker): AnalyticsTracker\n}\n\nclass AnalyticsManager @Inject constructor(\n    private val trackers: Set<@JvmSuppressWildcards AnalyticsTracker>\n) {\n    fun track(event: String, params: Map<String, String> = emptyMap()) {\n        trackers.forEach { it.track(event, params) }\n    }\n}",
+      "explanation": "<code>@IntoSet</code> contributes each binding to a <code>Set</code>. The <code>AnalyticsManager</code> injects the entire set and iterates over all trackers. <code>@JvmSuppressWildcards</code> is needed because Kotlin generics produce wildcards that Dagger can't match. This pattern is ideal for plugin architectures where you can add new implementations without changing existing code.",
+      "hints": [
+        "Each @Binds @IntoSet contributes one element to the Set",
+        "You may need @JvmSuppressWildcards on the Set parameter"
+      ]
+    },
+    {
+      "id": "di-8",
+      "type": "fix-bug",
+      "title": "Circular Dependency",
+      "difficulty": "advanced",
+      "description": "This code causes a Hilt compilation error due to a circular dependency: UserManager needs AuthService, and AuthService needs UserManager. Fix it using <code>Lazy</code> or <code>Provider</code>.",
+      "starterCode": "class UserManager @Inject constructor(\n    private val authService: AuthService\n) {\n    fun getCurrentUser(): User {\n        return authService.getAuthenticatedUser()\n    }\n}\n\nclass AuthService @Inject constructor(\n    private val userManager: UserManager\n) {\n    fun getAuthenticatedUser(): User { /* ... */ }\n    fun logout() {\n        userManager.clearCache()\n    }\n}",
+      "checks": [
+        {
+          "pattern": "Lazy<|Provider<|dagger\\.Lazy|javax\\.inject\\.Provider",
+          "message": "Use Lazy<T> or Provider<T> to break the cycle",
+          "required": true
+        }
+      ],
+      "solution": "class UserManager @Inject constructor(\n    private val authService: AuthService\n) {\n    fun getCurrentUser(): User {\n        return authService.getAuthenticatedUser()\n    }\n    fun clearCache() { /* ... */ }\n}\n\nclass AuthService @Inject constructor(\n    private val userManager: Lazy<UserManager>\n) {\n    fun getAuthenticatedUser(): User { /* ... */ }\n    fun logout() {\n        userManager.get().clearCache()\n    }\n}",
+      "explanation": "<code>Lazy&lt;T&gt;</code> (from <code>dagger.Lazy</code>) defers creation until <code>.get()</code> is called, breaking the circular dependency. By the time <code>logout()</code> calls <code>userManager.get()</code>, the UserManager has already been fully constructed. Alternative: use <code>Provider&lt;T&gt;</code> which creates a new instance each time (vs Lazy which caches). Best fix: refactor to eliminate the cycle entirely.",
+      "hints": [
+        "Lazy<T> delays construction — the object isn't created until .get() is called",
+        "Break the cycle on the side that doesn't need the dependency immediately"
+      ]
+    },
+    {
+      "id": "di-9",
+      "type": "multiple-choice",
+      "title": "Koin vs Hilt",
+      "difficulty": "intermediate",
+      "description": "Which of the following is a key advantage of Hilt/Dagger over Koin?",
+      "options": [
+        "Hilt is easier to set up with fewer annotations",
+        "Hilt validates the dependency graph at compile time, catching missing bindings before runtime",
+        "Hilt supports Kotlin Multiplatform (KMP) while Koin does not",
+        "Hilt uses less memory because it doesn't generate code"
+      ],
+      "correctIndex": 1,
+      "explanation": "Hilt/Dagger performs <b>compile-time validation</b> — if a dependency is missing, you get a build error, not a runtime crash. Koin is a service locator that resolves dependencies at runtime, so missing bindings cause <code>NoBeanDefFoundException</code> in production. However, Koin is simpler to set up, pure Kotlin, and supports KMP. Hilt generates more code but catches errors earlier.",
+      "hints": [
+        "Think about when errors are discovered — at build time or at runtime",
+        "Which approach gives you more safety for production apps?"
+      ]
+    },
+    {
+      "id": "di-10",
+      "type": "fill-blank",
+      "title": "Hilt Testing Setup",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to set up a Hilt test that replaces the real repository with a fake.",
+      "code": "@___1___\n@UninstallModules(RepositoryModule::class)\nclass SearchFeatureTest {\n    @get:Rule\n    val hiltRule = HiltAndroidRule(this)\n\n    @___2___\n    val fakeRepo: SearchRepository = FakeSearchRepository()\n\n    @Before\n    fun setup() {\n        hiltRule.___3___()\n    }\n\n    @Test\n    fun searchReturnsResults() { /* ... */ }\n}",
+      "blanks": [
+        {
+          "answer": ["HiltAndroidTest"],
+          "hint": "Annotation that enables Hilt in tests"
+        },
+        {
+          "answer": ["BindValue"],
+          "hint": "Injects this value into the Hilt graph"
+        },
+        {
+          "answer": ["inject"],
+          "hint": "Triggers field injection"
+        }
+      ],
+      "explanation": "<code>@HiltAndroidTest</code> enables Hilt in the test. <code>@UninstallModules</code> removes the real module so you can replace bindings. <code>@BindValue</code> adds your fake directly to the Hilt graph — simpler than creating a test module. <code>hiltRule.inject()</code> triggers field injection on the test class.",
+      "hints": [
+        "The test annotation is specific to Hilt testing",
+        "@BindValue is the simplest way to override a binding in tests"
+      ]
+    }
+  ]
+}

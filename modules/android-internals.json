@@ -1,0 +1,287 @@
+{
+  "id": "android-internals",
+  "title": "Android Internals & Process Model",
+  "icon": "🔬",
+  "description": "Zygote, process death, SavedStateHandle, memory management, threading models, and app startup",
+  "references": [
+    {"title": "Android Developers — Processes and App Lifecycle", "url": "https://developer.android.com/guide/components/activities/process-lifecycle", "type": "docs"},
+    {"title": "Android Developers — Save UI States", "url": "https://developer.android.com/topic/libraries/architecture/saving-states", "type": "docs"},
+    {"title": "Android Developers — App Startup Library", "url": "https://developer.android.com/topic/libraries/app-startup", "type": "docs"},
+    {"title": "AOSP Zygote.java", "url": "https://cs.android.com/android/platform/superproject/+/main:frameworks/base/core/java/com/android/internal/os/Zygote.java", "type": "source"},
+    {"title": "Android Developers — Memory Management", "url": "https://developer.android.com/topic/performance/memory-overview", "type": "docs"},
+    {"title": "Android Developers — Threading Overview", "url": "https://developer.android.com/guide/background/threading-overview", "type": "docs"}
+  ],
+  "lesson": "<h3>How Android Launches Your App</h3>\n<p>Understanding Android internals separates senior engineers from mid-level. These concepts affect architecture decisions around state, threading, and memory.</p>\n<hr class=\"section-divider\">\n<h3>Zygote Process</h3>\n<p>Every Android app is a <b>fork</b> of the Zygote process. Zygote pre-loads the Android framework classes and resources so apps start faster via <b>copy-on-write (COW)</b> memory sharing.</p>\n<div class=\"diagram\">System Boot\n    │\n    ▼\ninit → Zygote (preloads framework classes, ART runtime)\n         │\n         ├── fork() → System Server (ActivityManager, WindowManager, etc.)\n         │\n         ├── fork() → Your App (PID 12345)\n         ├── fork() → Another App (PID 12346)\n         └── fork() → USAP Pool (Unspecialized App Processes, Android 10+)</div>\n<div class=\"info-box\"><b>USAP (Unspecialized App Process):</b> Pre-forked processes waiting to become apps. Eliminates fork overhead on app launch — the process already exists, it just needs to be specialized. This significantly reduces cold start time.</div>\n<hr class=\"section-divider\">\n<h3>Process Priorities & Death</h3>\n<p>Android ranks processes by importance using <code>oom_adj</code> scores. When memory is low, the LMK (Low Memory Killer) terminates lowest-priority processes first:</p>\n<table><tr><th>Priority</th><th>oom_adj</th><th>Example</th></tr><tr><td>Foreground</td><td>0</td><td>Activity user is interacting with</td></tr><tr><td>Visible</td><td>100</td><td>Activity behind a dialog</td></tr><tr><td>Service</td><td>500</td><td>Playing music, downloading</td></tr><tr><td>Cached</td><td>900+</td><td>App in recents, no visible UI</td></tr></table>\n<div class=\"warn-box\"><b>Critical misconception:</b> ViewModel does <b>NOT</b> survive process death. Only <code>SavedStateHandle</code> (backed by <code>Bundle</code>) survives. The Bundle has a ~1MB transaction limit — store only essential IDs and state, not large objects.</div>\n<hr class=\"section-divider\">\n<h3>SavedStateHandle in ViewModels</h3>\n<div class=\"lesson-code\">class SearchViewModel(\n    private val savedStateHandle: SavedStateHandle,\n    private val repository: SearchRepository\n) : ViewModel() {\n\n    <span class=\"cmt\">// Survives process death — backed by Bundle</span>\n    val query = savedStateHandle.getStateFlow(\"query\", \"\")\n\n    <span class=\"cmt\">// Does NOT survive process death — only in ViewModel memory</span>\n    private val _results = MutableStateFlow&lt;List&lt;Result&gt;&gt;(emptyList())\n    val results: StateFlow&lt;List&lt;Result&gt;&gt; = _results\n\n    fun onQueryChanged(newQuery: String) {\n        savedStateHandle[\"query\"] = newQuery  <span class=\"cmt\">// Persisted!</span>\n        viewModelScope.launch {\n            _results.value = repository.search(newQuery)\n        }\n    }\n}</div>\n<hr class=\"section-divider\">\n<h3>Application Startup Sequence</h3>\n<div class=\"diagram\">1. ContentProvider.onCreate()  ← runs BEFORE Application!\n2. Application.onCreate()\n3. Activity.onCreate()\n4. Activity.onStart()\n5. Activity.onResume()</div>\n<div class=\"info-box\"><b>App Startup library:</b> Many libraries abuse ContentProviders for auto-initialization (WorkManager, Firebase). The <code>App Startup</code> library consolidates them into a single ContentProvider with dependency ordering and lazy initialization.</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// App Startup: define an initializer</span>\nclass WorkManagerInitializer : Initializer&lt;WorkManager&gt; {\n    override fun create(context: Context): WorkManager {\n        val config = Configuration.Builder().build()\n        WorkManager.initialize(context, config)\n        return WorkManager.getInstance(context)\n    }\n    override fun dependencies(): List&lt;Class&lt;out Initializer&lt;*&gt;&gt;&gt; = emptyList()\n}</div>\n<hr class=\"section-divider\">\n<h3>Memory Management</h3>\n<ul>\n<li><b>ART GC</b> — Generational, concurrent collector. Young gen (nursery) for short-lived objects, old gen for survivors.</li>\n<li><b>Heap sizes</b> — Vary by device (128MB–512MB typical). <code>largeHeap=true</code> in manifest requests more but is NOT guaranteed.</li>\n<li><b>Bitmaps post-API 26</b> — Stored on native heap (not Java heap), so they don't count against the Java heap limit, but still consume device RAM.</li>\n</ul>\n<div class=\"lesson-code\"><span class=\"cmt\">// Respond to memory pressure</span>\nclass MyApp : Application() {\n    override fun onTrimMemory(level: Int) {\n        when {\n            level >= TRIM_MEMORY_RUNNING_CRITICAL -> clearAllCaches()\n            level >= TRIM_MEMORY_RUNNING_LOW -> clearImageCache()\n            level >= TRIM_MEMORY_UI_HIDDEN -> releaseUiResources()\n        }\n    }\n}</div>\n<hr class=\"section-divider\">\n<h3>Threading Model</h3>\n<ul>\n<li><b>Main thread</b> — Runs the message loop (Looper). All UI updates, lifecycle callbacks. <code>Dispatchers.Main</code></li>\n<li><b>RenderThread</b> — Offloads GPU commands from main thread (API 21+). Handles Canvas drawing, animations</li>\n<li><b>Binder threads</b> — Pool of ~16 threads for IPC (inter-process communication). System calls, ContentProvider queries</li>\n<li><b>Dispatchers.Default</b> — Thread pool sized to CPU cores. For CPU-intensive work</li>\n<li><b>Dispatchers.IO</b> — Shares Default's pool but allows up to 64 additional threads for blocking I/O</li>\n</ul>",
+  "questions": [
+    {
+      "id": "ai-1",
+      "type": "multiple-choice",
+      "title": "Zygote Process",
+      "difficulty": "advanced",
+      "description": "Why does Android use Zygote to launch apps instead of starting each app from scratch?",
+      "options": [
+        "Zygote provides security isolation between apps",
+        "Zygote pre-loads framework classes and the ART runtime, so forked processes share that memory via copy-on-write — drastically reducing startup time and memory usage",
+        "Zygote handles permission enforcement for each app",
+        "Zygote compiles each app's bytecode before launching"
+      ],
+      "correctIndex": 1,
+      "explanation": "Zygote pre-loads ~3000 Android framework classes and the ART runtime into memory. When a new app starts, it <code>fork()</code>s from Zygote. The child process inherits all pre-loaded classes via <b>copy-on-write (COW)</b> — only pages that are modified get their own copy in RAM. This saves both time (no re-loading) and memory (shared pages).",
+      "hints": [
+        "Think about what every Android app has in common",
+        "fork() on Linux shares memory pages until they're modified"
+      ]
+    },
+    {
+      "id": "ai-2",
+      "type": "what-does-this-do",
+      "title": "SavedStateHandle Pattern",
+      "difficulty": "intermediate",
+      "description": "What happens when the system kills the app's process while this ViewModel is active, and the user returns to the app?",
+      "code": "class EditViewModel(\n    private val savedStateHandle: SavedStateHandle\n) : ViewModel() {\n    val title = savedStateHandle.getStateFlow(\"title\", \"\")\n    val content = savedStateHandle.getStateFlow(\"content\", \"\")\n\n    private val _suggestions = MutableStateFlow<List<String>>(emptyList())\n    val suggestions: StateFlow<List<String>> = _suggestions\n\n    fun updateTitle(t: String) { savedStateHandle[\"title\"] = t }\n    fun updateContent(c: String) { savedStateHandle[\"content\"] = c }\n    fun loadSuggestions() {\n        viewModelScope.launch {\n            _suggestions.value = api.getSuggestions(title.value)\n        }\n    }\n}",
+      "options": [
+        "All state is lost — title, content, and suggestions are all empty",
+        "title and content are restored from SavedStateHandle, but suggestions is empty (must be re-fetched)",
+        "Everything is restored because ViewModel survives process death",
+        "The app crashes because the ViewModel is destroyed"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>savedStateHandle.getStateFlow()</code> is backed by the saved instance state Bundle, which survives process death. So <code>title</code> and <code>content</code> are restored. But <code>_suggestions</code> is a plain <code>MutableStateFlow</code> in ViewModel memory — it's reset to <code>emptyList()</code>. The app needs to call <code>loadSuggestions()</code> again. <b>ViewModel does NOT survive process death</b> — only SavedStateHandle does.",
+      "hints": [
+        "What's the difference between SavedStateHandle-backed state and regular MutableStateFlow?",
+        "ViewModel is destroyed on process death — a new one is created"
+      ]
+    },
+    {
+      "id": "ai-3",
+      "type": "multiple-choice",
+      "title": "Startup Sequence",
+      "difficulty": "advanced",
+      "description": "In what order do these run when an Android app cold-starts?",
+      "options": [
+        "Application.onCreate() → ContentProvider.onCreate() → Activity.onCreate()",
+        "Activity.onCreate() → Application.onCreate() → ContentProvider.onCreate()",
+        "ContentProvider.onCreate() → Application.onCreate() → Activity.onCreate()",
+        "Application.attachBaseContext() → Activity.onCreate() → ContentProvider.onCreate()"
+      ],
+      "correctIndex": 2,
+      "explanation": "The order is: <code>Application.attachBaseContext()</code> → <code>ContentProvider.onCreate()</code> → <code>Application.onCreate()</code> → <code>Activity.onCreate()</code>. ContentProviders run <b>before</b> Application.onCreate()! This is why many libraries (Firebase, WorkManager) used ContentProviders for auto-init — and why App Startup library was created to consolidate them.",
+      "hints": [
+        "This order surprises most developers — ContentProviders run very early",
+        "This is why libraries abuse ContentProviders for initialization"
+      ]
+    },
+    {
+      "id": "ai-4",
+      "type": "fix-bug",
+      "title": "Process Death Bug",
+      "difficulty": "advanced",
+      "description": "Users report losing their draft text after switching to another app and back. The ViewModel survives rotation but the text is gone after a long background period. Fix it.",
+      "starterCode": "class DraftViewModel : ViewModel() {\n    private val _draftText = MutableStateFlow(\"\")\n    val draftText: StateFlow<String> = _draftText\n\n    fun updateDraft(text: String) {\n        _draftText.value = text\n    }\n}",
+      "checks": [
+        {
+          "pattern": "SavedStateHandle|savedStateHandle",
+          "message": "Use SavedStateHandle to survive process death",
+          "required": true
+        }
+      ],
+      "solution": "class DraftViewModel(\n    private val savedStateHandle: SavedStateHandle\n) : ViewModel() {\n    val draftText = savedStateHandle.getStateFlow(\"draft\", \"\")\n\n    fun updateDraft(text: String) {\n        savedStateHandle[\"draft\"] = text\n    }\n}",
+      "explanation": "MutableStateFlow lives in ViewModel memory. ViewModel survives <b>configuration changes</b> (rotation) but NOT <b>process death</b> (system kills app when backgrounded). <code>SavedStateHandle</code> persists to the saved instance state Bundle, which survives both. Replace MutableStateFlow with <code>savedStateHandle.getStateFlow()</code> for state that must survive process death.",
+      "hints": [
+        "The text survives rotation but not being backgrounded — what's different?",
+        "ViewModel survives config changes, but what survives process death?"
+      ]
+    },
+    {
+      "id": "ai-5",
+      "type": "multiple-choice",
+      "title": "onTrimMemory Levels",
+      "difficulty": "intermediate",
+      "description": "When does <code>onTrimMemory(TRIM_MEMORY_UI_HIDDEN)</code> get called?",
+      "options": [
+        "When the system is about to kill your process",
+        "When your app's UI is no longer visible (user navigated away)",
+        "When the device is running critically low on memory",
+        "When a large bitmap is loaded"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>TRIM_MEMORY_UI_HIDDEN</code> is called when your app's UI is no longer visible — e.g., user pressed Home. This is the ideal time to release UI-specific resources (image caches, large views). Higher levels like <code>TRIM_MEMORY_RUNNING_LOW</code> and <code>TRIM_MEMORY_RUNNING_CRITICAL</code> indicate system-wide memory pressure and require more aggressive cleanup.",
+      "hints": [
+        "UI_HIDDEN relates to your app's visibility state, not system memory pressure"
+      ]
+    },
+    {
+      "id": "ai-6",
+      "type": "fill-blank",
+      "title": "App Startup Library",
+      "difficulty": "advanced",
+      "description": "Fill in the blanks to define an App Startup initializer for a custom analytics library.",
+      "code": "class AnalyticsInitializer : ___1___<Analytics> {\n    override fun ___2___(context: Context): Analytics {\n        return Analytics.Builder(context)\n            .setDebug(BuildConfig.DEBUG)\n            .build()\n    }\n\n    override fun ___3___(): List<Class<out Initializer<*>>> {\n        return emptyList()\n    }\n}",
+      "blanks": [
+        {
+          "answer": ["Initializer"],
+          "hint": "The App Startup interface to implement"
+        },
+        {
+          "answer": ["create"],
+          "hint": "The method that creates and returns the initialized object"
+        },
+        {
+          "answer": ["dependencies"],
+          "hint": "Declares which other initializers must run first"
+        }
+      ],
+      "explanation": "App Startup uses <code>Initializer<T></code> interface. <code>create()</code> runs initialization and returns the result. <code>dependencies()</code> declares ordering — if your analytics depends on logging, return <code>listOf(LoggingInitializer::class.java)</code>. This consolidates multiple ContentProvider inits into one, reducing cold start overhead.",
+      "hints": [
+        "The interface has two methods: one to create, one to declare order",
+        "Return emptyList() if this initializer has no prerequisites"
+      ]
+    },
+    {
+      "id": "ai-7",
+      "type": "multiple-choice",
+      "title": "Dispatchers.IO Internals",
+      "difficulty": "advanced",
+      "description": "How does <code>Dispatchers.IO</code> relate to <code>Dispatchers.Default</code> internally?",
+      "options": [
+        "They are completely separate thread pools with no relationship",
+        "IO shares Default's thread pool but can expand to 64 additional threads for blocking operations",
+        "IO is a single background thread, Default is a pool",
+        "Default wraps IO with a size limit matching CPU core count"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>Dispatchers.IO</code> shares the same underlying thread pool as <code>Dispatchers.Default</code>, but allows up to 64 additional threads (or the number of cores, whichever is larger) for blocking I/O. When a coroutine on IO is blocked, it doesn't consume a Default thread — extra threads are created. When the IO work completes, the thread may be reused by Default. Use <code>limitedParallelism()</code> to create sub-dispatchers with controlled concurrency.",
+      "hints": [
+        "They share threads to reduce context switching",
+        "IO allows more parallelism because blocking threads don't do CPU work"
+      ]
+    },
+    {
+      "id": "ai-8",
+      "type": "what-does-this-do",
+      "title": "Bundle Size Limit",
+      "difficulty": "advanced",
+      "description": "What problem does this code cause, and when does it manifest?",
+      "code": "class GalleryViewModel(\n    private val savedStateHandle: SavedStateHandle\n) : ViewModel() {\n    fun savePhotos(photos: List<Photo>) {\n        // Photo has: id, url, thumbnail, fullResBase64, metadata\n        savedStateHandle[\"photos\"] = ArrayList(photos)\n    }\n}",
+      "options": [
+        "It works fine — SavedStateHandle can store any Parcelable list",
+        "It may crash with TransactionTooLargeException because the Bundle has a ~1MB limit and base64-encoded photos are large",
+        "It causes a memory leak because ArrayList holds references",
+        "It fails because SavedStateHandle doesn't support lists"
+      ],
+      "correctIndex": 1,
+      "explanation": "The saved instance state Bundle has a <b>~1MB total transaction limit</b> (shared across the entire Activity). Storing full-resolution base64 image data will easily exceed this. On process death/restore, the system throws <code>TransactionTooLargeException</code> and the app crashes. <b>Solution:</b> Save only photo IDs in SavedStateHandle, and re-fetch the actual data on restore.",
+      "hints": [
+        "The Bundle is serialized through Binder IPC which has a size limit",
+        "Think about the combined size of base64-encoded images"
+      ]
+    },
+    {
+      "id": "ai-9",
+      "type": "multiple-choice",
+      "title": "Process Priority",
+      "difficulty": "intermediate",
+      "description": "Your app is playing music in a foreground service. The system is under memory pressure. What happens?",
+      "options": [
+        "The foreground service is killed immediately to free memory",
+        "The foreground service has elevated priority (like foreground activity) and will be among the last processes killed",
+        "The music stops but the process stays alive",
+        "Android never kills foreground services under any circumstances"
+      ],
+      "correctIndex": 1,
+      "explanation": "A foreground service (with notification) runs at elevated priority — similar to a visible process. The LMK will kill cached and background processes first. However, under extreme memory pressure, even foreground services can be killed. They are NOT immune, just much less likely to be terminated. The system will try to restart them afterward.",
+      "hints": [
+        "Foreground services show a notification — this reflects their elevated status"
+      ]
+    },
+    {
+      "id": "ai-10",
+      "type": "write-code",
+      "title": "SavedStateHandle with Hilt",
+      "difficulty": "advanced",
+      "description": "Write a ViewModel with Hilt injection that uses SavedStateHandle to persist a search query across process death, and loads results from a repository.",
+      "starterCode": "// Write a HiltViewModel that:\n// 1. Injects SavedStateHandle and SearchRepository\n// 2. Exposes query as StateFlow (survives process death)\n// 3. Exposes results as StateFlow (re-fetched on restore)\n// 4. Has onQueryChanged(String) that saves and searches\n\n@HiltViewModel\nclass SearchViewModel @Inject constructor(\n    // TODO\n) : ViewModel() {\n    // TODO\n}",
+      "checks": [
+        {
+          "pattern": "SavedStateHandle|savedStateHandle",
+          "message": "Use SavedStateHandle for process-death survival",
+          "required": true
+        },
+        {
+          "pattern": "getStateFlow|getLiveData",
+          "message": "Get a reactive state from SavedStateHandle",
+          "required": true
+        },
+        {
+          "pattern": "viewModelScope|launch",
+          "message": "Use viewModelScope for async work",
+          "required": true
+        }
+      ],
+      "solution": "@HiltViewModel\nclass SearchViewModel @Inject constructor(\n    private val savedStateHandle: SavedStateHandle,\n    private val repository: SearchRepository\n) : ViewModel() {\n    val query = savedStateHandle.getStateFlow(\"query\", \"\")\n\n    private val _results = MutableStateFlow<List<SearchResult>>(emptyList())\n    val results: StateFlow<List<SearchResult>> = _results\n\n    init {\n        // Re-fetch results if query was restored after process death\n        if (query.value.isNotEmpty()) {\n            search(query.value)\n        }\n    }\n\n    fun onQueryChanged(newQuery: String) {\n        savedStateHandle[\"query\"] = newQuery\n        search(newQuery)\n    }\n\n    private fun search(query: String) {\n        viewModelScope.launch {\n            _results.value = repository.search(query)\n        }\n    }\n}",
+      "explanation": "<code>SavedStateHandle</code> is automatically provided by Hilt for <code>@HiltViewModel</code>. <code>getStateFlow(\"query\", \"\")</code> returns a StateFlow that persists across process death. The <code>init</code> block re-fetches results if a query was restored. This pattern preserves user input (query) while re-loading derived data (results).",
+      "hints": [
+        "Hilt automatically provides SavedStateHandle to ViewModels",
+        "Think about what happens in init{} when the ViewModel is recreated after process death"
+      ]
+    },
+    {
+      "id": "ai-11",
+      "type": "write-code",
+      "title": "onTrimMemory Implementation",
+      "difficulty": "advanced",
+      "description": "Implement <code>onTrimMemory()</code> in an Application subclass that handles different memory pressure levels appropriately. Clear image caches at low memory, release all caches at critical, and release UI resources when the UI is hidden.",
+      "starterCode": "class MyApp : Application() {\n    private val imageCache = LruCache<String, Bitmap>(50 * 1024 * 1024)\n    private val dataCache = mutableMapOf<String, Any>()\n\n    override fun onTrimMemory(level: Int) {\n        super.onTrimMemory(level)\n        // TODO: Handle memory pressure levels\n    }\n}",
+      "checks": [
+        {
+          "pattern": "TRIM_MEMORY_RUNNING_CRITICAL|TRIM_MEMORY_COMPLETE",
+          "message": "Handle critical memory levels",
+          "required": true
+        },
+        {
+          "pattern": "TRIM_MEMORY_RUNNING_LOW|TRIM_MEMORY_MODERATE",
+          "message": "Handle moderate memory pressure",
+          "required": true
+        },
+        {
+          "pattern": "TRIM_MEMORY_UI_HIDDEN",
+          "message": "Handle UI hidden state",
+          "required": true
+        }
+      ],
+      "solution": "class MyApp : Application() {\n    private val imageCache = LruCache<String, Bitmap>(50 * 1024 * 1024)\n    private val dataCache = mutableMapOf<String, Any>()\n\n    override fun onTrimMemory(level: Int) {\n        super.onTrimMemory(level)\n        when {\n            level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> {\n                // System is critically low on memory\n                imageCache.evictAll()\n                dataCache.clear()\n            }\n            level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> {\n                // System is moderately low — trim caches\n                imageCache.trimToSize(imageCache.maxSize() / 2)\n            }\n            level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> {\n                // App UI no longer visible — release UI resources\n                imageCache.evictAll()\n            }\n        }\n    }\n}",
+      "explanation": "Memory trim levels form a hierarchy: <code>TRIM_MEMORY_UI_HIDDEN</code> (20) means your UI is gone — release image caches. <code>TRIM_MEMORY_RUNNING_LOW</code> (10) means the system needs memory while your app is running — reduce cache sizes. <code>TRIM_MEMORY_RUNNING_CRITICAL</code> (15) means the system will kill processes soon — release everything non-essential. Responding properly helps avoid your process being killed.",
+      "hints": [
+        "The levels form a hierarchy — use >= comparisons, not ==",
+        "UI_HIDDEN is the right time to release image caches since the user can't see them"
+      ],
+      "learnMore": [
+        {"title": "Android Developers — onTrimMemory levels", "url": "https://developer.android.com/reference/android/content/ComponentCallbacks2"},
+        {"title": "Android Developers — Memory Management Overview", "url": "https://developer.android.com/topic/performance/memory-overview"}
+      ]
+    },
+    {
+      "id": "ai-12",
+      "type": "multiple-choice",
+      "title": "RenderThread vs Main Thread",
+      "difficulty": "advanced",
+      "description": "What work happens on the <code>RenderThread</code> versus the <code>main thread</code> in Android's hardware-accelerated rendering pipeline?",
+      "options": [
+        "Main thread handles all rendering; RenderThread is only for animations",
+        "Main thread measures, lays out, and records drawing commands into DisplayLists; RenderThread replays those DisplayLists to the GPU via OpenGL/Vulkan — so the main thread is free for the next frame",
+        "RenderThread handles measure and layout; main thread handles draw",
+        "Main thread and RenderThread do identical work for redundancy"
+      ],
+      "correctIndex": 1,
+      "explanation": "With hardware acceleration (default since API 14), the <b>main thread</b> runs <code>performTraversals()</code>: measure, layout, and recording draw commands into <code>DisplayList</code>/<code>RenderNode</code> objects. The <b>RenderThread</b> (API 21+) then takes those recorded commands and replays them to the GPU. This means the main thread can start processing the next frame's input/animations while the RenderThread is still drawing the current frame. This is why <code>invalidate()</code> is cheap with HW accel — only the changed RenderNode is re-recorded, and the RenderThread handles actual GPU submission.",
+      "hints": [
+        "Think about what 'recording' draw commands means vs 'executing' them",
+        "The split lets two frames overlap: one being recorded, one being drawn"
+      ],
+      "learnMore": [
+        {"title": "Android Developers — Hardware Acceleration", "url": "https://developer.android.com/topic/performance/hardware-accel"},
+        {"title": "AOSP RenderThread.cpp", "url": "https://cs.android.com/android/platform/superproject/+/main:frameworks/base/libs/hwui/renderthread/RenderThread.cpp"}
+      ]
+    }
+  ]
+}

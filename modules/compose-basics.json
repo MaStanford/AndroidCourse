@@ -1,0 +1,219 @@
+{
+  "id": "compose-basics",
+  "title": "Compose Basics",
+  "icon": "🎨",
+  "description": "Jetpack Compose fundamentals and state management",
+  "references": [
+    {"title": "Android Developers — Compose Tutorial", "url": "https://developer.android.com/develop/ui/compose/tutorial", "type": "docs"},
+    {"title": "Android Developers — State in Compose", "url": "https://developer.android.com/develop/ui/compose/state", "type": "docs"},
+    {"title": "Android Developers — Compose Modifiers", "url": "https://developer.android.com/develop/ui/compose/modifiers", "type": "docs"},
+    {"title": "Android Developers — Thinking in Compose", "url": "https://developer.android.com/develop/ui/compose/mental-model", "type": "docs"}
+  ],
+  "lesson": "<h3>Declarative UI with Compose</h3>\n<p>Jetpack Compose replaces XML layouts with <b>Kotlin functions</b> that describe UI. Instead of imperatively mutating views, you declare what the UI should look like for a given state, and Compose handles updates.</p>\n<h3>State and Recomposition</h3>\n<p>When state changes, Compose <b>recomposes</b> — it re-calls your composable functions to update the UI. The key rules:</p>\n<ul>\n<li><code>remember { mutableStateOf() }</code> — preserves state across recompositions AND triggers recomposition on change</li>\n<li><code>rememberSaveable</code> — survives configuration changes (rotation) too</li>\n<li>State should flow <b>down</b>, events should flow <b>up</b> (unidirectional data flow)</li>\n</ul>\n<div class=\"lesson-code\">@Composable\nfun Greeting(name: String) {  // state flows down\n    var count by remember { mutableIntStateOf(0) }\n    Button(onClick = { count++ }) {  // events flow up\n        Text(\"Hello $name! Clicked $count times\")\n    }\n}</div>\n<h3>Modifiers</h3>\n<p>Modifiers configure size, layout, behavior, and appearance. They <b>chain in order</b> — each wraps the next. <code>padding</code> before <code>background</code> creates a border effect; after creates inner padding.</p>",
+  "questions": [
+    {
+      "id": "cb-1",
+      "type": "fix-bug",
+      "title": "The Disappearing Counter",
+      "difficulty": "beginner",
+      "description": "This counter resets to 0 every time you click. Fix it so the count persists across recompositions.",
+      "starterCode": "@Composable\nfun Counter() {\n    var count = 0\n    \n    Column(\n        horizontalAlignment = Alignment.CenterHorizontally,\n        modifier = Modifier.padding(16.dp)\n    ) {\n        Text(text = \"Count: $count\", fontSize = 24.sp)\n        Spacer(modifier = Modifier.height(8.dp))\n        Button(onClick = { count++ }) {\n            Text(\"Increment\")\n        }\n    }\n}",
+      "checks": [
+        {
+          "pattern": "remember",
+          "message": "Wrap the state in remember{} to survive recomposition",
+          "required": true
+        },
+        {
+          "pattern": "mutableStateOf|mutableIntStateOf",
+          "message": "Use mutableStateOf() for observable state",
+          "required": true
+        }
+      ],
+      "solution": "@Composable\nfun Counter() {\n    var count by remember { mutableIntStateOf(0) }\n    \n    Column(\n        horizontalAlignment = Alignment.CenterHorizontally,\n        modifier = Modifier.padding(16.dp)\n    ) {\n        Text(text = \"Count: $count\", fontSize = 24.sp)\n        Spacer(modifier = Modifier.height(8.dp))\n        Button(onClick = { count++ }) {\n            Text(\"Increment\")\n        }\n    }\n}",
+      "explanation": "Composable functions can be called many times (recomposition). Local variables are recreated each time. <code>remember { mutableStateOf(0) }</code> preserves the value AND triggers recomposition when it changes.",
+      "hints": [
+        "Compose recreates local variables on every recomposition",
+        "You need two things: preservation (remember) and observability (mutableStateOf)"
+      ]
+    },
+    {
+      "id": "cb-2",
+      "type": "fill-blank",
+      "title": "TextField with State",
+      "difficulty": "beginner",
+      "description": "Fill in the blanks to create a TextField that displays and updates user input.",
+      "code": "@Composable\nfun SearchBar() {\n    var query by ___1___ { ___2___(\"\") }\n\n    TextField(\n        value = ___3___,\n        onValueChange = { ___3___ = it },\n        label = { Text(\"Search\") }\n    )\n}",
+      "blanks": [
+        {
+          "answer": [
+            "remember"
+          ],
+          "hint": "Preserves state across recompositions"
+        },
+        {
+          "answer": [
+            "mutableStateOf"
+          ],
+          "hint": "Creates observable mutable state"
+        },
+        {
+          "answer": [
+            "query"
+          ],
+          "hint": "The state variable holding the text"
+        }
+      ],
+      "explanation": "A <code>TextField</code> in Compose is a controlled component — you must provide the current value AND handle changes via <code>onValueChange</code>.",
+      "hints": [
+        "The TextField needs to both read and write from the same state variable"
+      ]
+    },
+    {
+      "id": "cb-3",
+      "type": "multiple-choice",
+      "title": "@Composable Annotation",
+      "difficulty": "beginner",
+      "description": "What does the <code>@Composable</code> annotation do?",
+      "options": [
+        "Makes the function run on a background thread",
+        "Marks a function that can emit UI and participate in composition/recomposition",
+        "Automatically caches the function result",
+        "Converts it into a suspend function"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>@Composable</code> marks a function as part of the Compose runtime. These functions can call other composable functions, emit UI nodes, and participate in recomposition. They run on the main thread.",
+      "hints": [
+        "Think about what makes Compose functions special vs regular Kotlin functions"
+      ]
+    },
+    {
+      "id": "cb-4",
+      "type": "what-does-this-do",
+      "title": "Modifier Chain",
+      "difficulty": "intermediate",
+      "description": "What visual result does this Modifier chain produce?",
+      "code": "Box(\n    modifier = Modifier\n        .size(200.dp)\n        .background(Color.Blue)\n        .padding(24.dp)\n        .background(Color.Red)\n        .padding(24.dp)\n        .background(Color.White)\n) {\n    Text(\"Hello\")\n}",
+      "options": [
+        "A white box (200dp) with \"Hello\" in center",
+        "Blue border → Red border → White center with \"Hello\"",
+        "Three stacked colored boxes, largest white",
+        "Compilation error — cannot chain multiple backgrounds"
+      ],
+      "correctIndex": 1,
+      "explanation": "Modifiers are applied in order, wrapping from outside in. <code>.background(Blue)</code> fills the 200dp area blue. <code>.padding(24dp)</code> insets, then <code>.background(Red)</code> fills the remaining area red. Another padding + white background creates the innermost area. <b>Modifier order matters!</b>",
+      "hints": [
+        "Modifiers are applied sequentially — each one wraps the next",
+        "padding before background creates a border effect"
+      ]
+    },
+    {
+      "id": "cb-5",
+      "type": "write-code",
+      "title": "Profile Card",
+      "difficulty": "beginner",
+      "description": "Write a composable that displays a user profile card with a name (bold, 20sp), email (gray, 14sp), and a \"Follow\" button. Use a Column with 8dp spacing and 16dp padding.",
+      "starterCode": "@Composable\nfun ProfileCard(name: String, email: String, onFollow: () -> Unit) {\n    // TODO: Column with padding, containing:\n    // - Name text (bold, 20sp)\n    // - Email text (gray, 14sp)\n    // - Follow button\n}",
+      "checks": [
+        {
+          "pattern": "Column",
+          "message": "Use a Column layout",
+          "required": true
+        },
+        {
+          "pattern": "Text.*name|name.*Text",
+          "message": "Display the name",
+          "required": true
+        },
+        {
+          "pattern": "Button|onClick",
+          "message": "Include a Follow button",
+          "required": true
+        },
+        {
+          "pattern": "padding|Modifier",
+          "message": "Apply padding modifier",
+          "required": true
+        }
+      ],
+      "solution": "@Composable\nfun ProfileCard(name: String, email: String, onFollow: () -> Unit) {\n    Column(\n        modifier = Modifier.padding(16.dp),\n        verticalArrangement = Arrangement.spacedBy(8.dp)\n    ) {\n        Text(\n            text = name,\n            fontSize = 20.sp,\n            fontWeight = FontWeight.Bold\n        )\n        Text(\n            text = email,\n            fontSize = 14.sp,\n            color = Color.Gray\n        )\n        Button(onClick = onFollow) {\n            Text(\"Follow\")\n        }\n    }\n}",
+      "explanation": "<code>Column</code> stacks children vertically. <code>Arrangement.spacedBy(8.dp)</code> adds consistent spacing. The card follows <b>state hoisting</b> — the click handler (<code>onFollow</code>) is passed in, not defined inside.",
+      "hints": [
+        "Column arranges children vertically",
+        "Use Arrangement.spacedBy for consistent spacing between items"
+      ]
+    },
+    {
+      "id": "cb-6",
+      "type": "fix-bug",
+      "title": "Infinite Recomposition Loop",
+      "difficulty": "intermediate",
+      "description": "This composable causes an infinite loop and freezes the app. Fix it.",
+      "starterCode": "@Composable\nfun TimerScreen() {\n    var seconds by remember { mutableIntStateOf(0) }\n    \n    // BUG: This causes infinite recomposition!\n    seconds = seconds + 1\n    \n    Text(\"Elapsed: $seconds seconds\")\n}",
+      "checks": [
+        {
+          "pattern": "LaunchedEffect|SideEffect|DisposableEffect",
+          "message": "Use a side effect API for time-based operations",
+          "required": true
+        },
+        {
+          "pattern": "delay|Timer|schedule",
+          "message": "Use delay() or a timer mechanism",
+          "required": true
+        }
+      ],
+      "solution": "@Composable\nfun TimerScreen() {\n    var seconds by remember { mutableIntStateOf(0) }\n    \n    LaunchedEffect(Unit) {\n        while (true) {\n            delay(1000)\n            seconds++\n        }\n    }\n    \n    Text(\"Elapsed: $seconds seconds\")\n}",
+      "explanation": "Updating state directly in the composable body triggers recomposition, which runs the body again, which updates state again — infinite loop. State mutations must happen in <b>event handlers</b> or <b>side effects</b>. <code>LaunchedEffect(Unit)</code> runs a coroutine once when the composable enters composition, and <code>delay(1000)</code> waits between updates.",
+      "hints": [
+        "Modifying state in the composable body immediately triggers another recomposition",
+        "You need a way to run code over time, not on every recomposition"
+      ]
+    },
+    {
+      "id": "cb-7",
+      "type": "multiple-choice",
+      "title": "remember vs rememberSaveable",
+      "difficulty": "intermediate",
+      "description": "When should you use <code>rememberSaveable</code> instead of <code>remember</code>?",
+      "options": [
+        "When the state is a complex object like a list",
+        "When the state needs to survive configuration changes (like screen rotation)",
+        "When you want better performance",
+        "When using State in a ViewModel"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>remember</code> survives recomposition but NOT configuration changes (rotation, language change). <code>rememberSaveable</code> saves state to the saved instance state bundle, surviving both recomposition AND configuration changes. Use it for UI state the user would be frustrated to lose (text input, scroll position). ViewModel state already survives configuration changes, so <code>rememberSaveable</code> is for state that lives in the composable itself.",
+      "hints": [
+        "What happens to remember{} state when the user rotates the phone?",
+        "Think about the saved instance state bundle"
+      ]
+    },
+    {
+      "id": "cb-8",
+      "type": "fill-blank",
+      "title": "Basic LazyColumn",
+      "difficulty": "beginner",
+      "description": "Fill in the blanks to create a scrollable list of items.",
+      "code": "@Composable\nfun ItemList(items: List<String>) {\n    ___1___ {\n        ___2___(items) { item ->\n            Text(\n                text = item,\n                modifier = Modifier\n                    .fillMaxWidth()\n                    .padding(16.dp)\n            )\n        }\n    }\n}",
+      "blanks": [
+        {
+          "answer": [
+            "LazyColumn"
+          ],
+          "hint": "The Compose equivalent of RecyclerView"
+        },
+        {
+          "answer": [
+            "items"
+          ],
+          "hint": "DSL function to add a list of items"
+        }
+      ],
+      "explanation": "<code>LazyColumn</code> is the Compose equivalent of RecyclerView — it only composes visible items, making it efficient for long lists. The <code>items()</code> function inside the <code>LazyColumn</code> block adds items from a list. Each item gets a composable lambda.",
+      "hints": [
+        "The \"Lazy\" prefix means it only renders visible items",
+        "The function inside the block specifies what to render for each item"
+      ]
+    }
+  ]
+}

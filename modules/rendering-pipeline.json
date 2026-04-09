@@ -1,0 +1,246 @@
+{
+  "id": "rendering-pipeline",
+  "title": "Rendering Pipeline: Views & Compose",
+  "icon": "🖌️",
+  "description": "Choreographer and VSYNC, View measure/layout/draw, hardware acceleration, RenderThread, Compose LayoutNode tree, Compose three phases, and architecture comparison",
+  "references": [
+    {"title": "Android Developers — How Android Draws Views", "url": "https://developer.android.com/develop/ui/views/layout/how-android-draws", "type": "docs"},
+    {"title": "Android Developers — Compose Phases", "url": "https://developer.android.com/develop/ui/compose/phases", "type": "docs"},
+    {"title": "Android Developers — Compose Performance", "url": "https://developer.android.com/develop/ui/compose/performance", "type": "docs"},
+    {"title": "AOSP ViewRootImpl.performTraversals()", "url": "https://cs.android.com/android/platform/superproject/+/main:frameworks/base/core/java/android/view/ViewRootImpl.java", "type": "source"},
+    {"title": "AOSP Choreographer", "url": "https://cs.android.com/android/platform/superproject/+/main:frameworks/base/core/java/android/view/Choreographer.java", "type": "source"},
+    {"title": "Android Developers — Hardware Acceleration", "url": "https://developer.android.com/topic/performance/hardware-accel", "type": "docs"},
+    {"title": "Android Developers — Custom View Components", "url": "https://developer.android.com/develop/ui/views/layout/custom-views/custom-components", "type": "docs"}
+  ],
+  "lesson": "<h3>The Frame: VSYNC to Pixels</h3>\n<p>Every frame on Android begins with a <b>VSYNC signal</b> from the display hardware. The <code>Choreographer</code> listens for VSYNC and dispatches frame callbacks in a fixed order. At 60 fps, each frame has a <b>16.67 ms budget</b> — exceed it and the frame is dropped (\"jank\").</p>\n<div class=\"diagram\">VSYNC Timeline (60 fps = 16.67ms per frame)\n\n  VSYNC #1          VSYNC #2          VSYNC #3\n    │                  │                  │\n    ▼                  ▼                  ▼\n  ┌─────────────────┐┌─────────────────┐┌─────────────────┐\n  │   Frame N       ││   Frame N+1     ││   Frame N+2     │\n  │                 ││                 ││                 │\n  │ 1. INPUT        ││ 1. INPUT        ││                 │\n  │ 2. ANIMATION    ││ 2. ANIMATION    ││   (dropped!)    │\n  │ 3. TRAVERSAL    ││ 3. TRAVERSAL    ││   Work from N+1 │\n  │    (measure/    ││    (measure/    ││   overran into  │\n  │     layout/     ││     layout/     ││   this slot     │\n  │     draw)       ││     draw)       ││                 │\n  └─────────────────┘└─────────────────┘└─────────────────┘\n  ◀── 16.67ms ──────▶◀── 16.67ms ──────▶</div>\n<p>Choreographer dispatches three callback types each frame:</p>\n<ul>\n<li><b>CALLBACK_INPUT</b> — touch events, key events</li>\n<li><b>CALLBACK_ANIMATION</b> — ValueAnimator ticks, Compose animations</li>\n<li><b>CALLBACK_TRAVERSAL</b> — <code>ViewRootImpl.performTraversals()</code> (measure, layout, draw)</li>\n</ul>\n<div class=\"info-box\"><b>Choreographer.postFrameCallback():</b> Schedules work on the next VSYNC. This is what powers <code>View.postOnAnimation()</code> and how the framework schedules traversals. If nothing is dirty, no traversal callback is posted — the system is idle.</div>\n<hr class=\"section-divider\">\n<h3>View Drawing: Measure / Layout / Draw</h3>\n<p>When a View is invalidated or layout is requested, <code>ViewRootImpl.performTraversals()</code> runs a <b>three-pass traversal</b> of the View tree during the TRAVERSAL callback:</p>\n<div class=\"diagram\">ViewRootImpl.performTraversals()\n         │\n         ├──▶ 1. performMeasure()   ← \"How big should each View be?\"\n         │        │\n         │        └──▶ View.measure() → onMeasure()\n         │             Walks tree top-down, parents constrain children\n         │             Result: measuredWidth / measuredHeight\n         │\n         ├──▶ 2. performLayout()    ← \"Where should each View go?\"\n         │        │\n         │        └──▶ View.layout() → onLayout()\n         │             Parents assign (left, top, right, bottom) to children\n         │             Result: final position in window\n         │\n         └──▶ 3. performDraw()      ← \"What does each View look like?\"\n                  │\n                  └──▶ View.draw() → onDraw()\n                       Canvas operations: drawRect, drawText, drawBitmap\n                       Result: DisplayList / RenderNode</div>\n<h3>MeasureSpec</h3>\n<p>Parents pass <code>MeasureSpec</code> to children during measure, encoding a <b>mode</b> and a <b>size</b>:</p>\n<table><tr><th>Mode</th><th>Meaning</th><th>Example</th></tr><tr><td><code>EXACTLY</code></td><td>Parent determined exact size</td><td><code>layout_width=\"200dp\"</code> or <code>match_parent</code></td></tr><tr><td><code>AT_MOST</code></td><td>Child can be up to this size</td><td><code>wrap_content</code> inside bounded parent</td></tr><tr><td><code>UNSPECIFIED</code></td><td>No constraints</td><td><code>wrap_content</code> inside ScrollView</td></tr></table>\n<div class=\"lesson-code\">override fun onMeasure(widthSpec: Int, heightSpec: Int) {\n    val widthMode = MeasureSpec.getMode(widthSpec)\n    val widthSize = MeasureSpec.getSize(widthSpec)\n\n    val desiredWidth = calculateContentWidth()\n\n    val width = when (widthMode) {\n        MeasureSpec.EXACTLY -> widthSize           <span class=\"cmt\">// Parent says: be exactly this</span>\n        MeasureSpec.AT_MOST -> min(desiredWidth, widthSize)  <span class=\"cmt\">// Up to this max</span>\n        else -> desiredWidth                       <span class=\"cmt\">// UNSPECIFIED: be whatever you want</span>\n    }\n    setMeasuredDimension(width, height)\n}</div>\n<h3>requestLayout() vs invalidate()</h3>\n<table><tr><th>Method</th><th>Triggers</th><th>When to Use</th></tr><tr><td><code>requestLayout()</code></td><td>Measure + Layout + Draw</td><td>Size or position changed</td></tr><tr><td><code>invalidate()</code></td><td>Draw only</td><td>Appearance changed (color, text) but size unchanged</td></tr></table>\n<div class=\"warn-box\"><b>Never call requestLayout() from onDraw() or onMeasure().</b> This creates an infinite loop: measure triggers draw, which triggers measure again. The system will detect this and drop frames or ANR.</div>\n<hr class=\"section-divider\">\n<h3>Hardware Acceleration &amp; RenderThread</h3>\n<p>Before API 14, Android used <b>software rendering</b>: the main thread executed Canvas draw operations directly into a bitmap, then copied it to the screen. With <b>hardware acceleration</b> (default since API 14):</p>\n<div class=\"diagram\">Software Rendering (old):\n  Main Thread: onDraw() → Canvas → Bitmap → copy to screen\n  (Everything on main thread, slow)\n\nHardware-Accelerated Rendering (modern):\n  Main Thread: onDraw() → Canvas ops recorded into DisplayList/RenderNode\n                           │\n                           ▼\n  RenderThread: Replays DisplayList → OpenGL ES / Vulkan → GPU → Screen\n                (Separate thread! Main thread is free)</div>\n<p>Each View has its own <code>RenderNode</code> containing a <code>DisplayList</code> — a serialized list of Canvas commands. When you call <code>invalidate()</code>, only the dirty View's DisplayList is re-recorded. The RenderThread replays all DisplayLists to produce the frame. This is why <code>invalidate()</code> is cheap with hardware acceleration — other Views' RenderNodes are reused without re-recording.</p>\n<div class=\"info-box\"><b>Hardware layers:</b> <code>View.setLayerType(LAYER_TYPE_HARDWARE, null)</code> renders the View into an off-screen GPU texture. Subsequent frames reuse the texture without re-executing the DisplayList. Ideal for complex Views during animation — but the texture consumes GPU memory, so clear it with <code>LAYER_TYPE_NONE</code> when animation ends.</div>\n<hr class=\"section-divider\">\n<h3>How Compose Renders</h3>\n<p>Compose does <b>not</b> create a traditional View hierarchy. Instead, the entire Compose UI lives inside a single <code>AndroidComposeView</code> (which is a View). Composition produces a <b>LayoutNode tree</b> — a lightweight data structure managed by the Compose runtime.</p>\n<div class=\"diagram\">View World:                    Compose World:\n\nViewRootImpl                   ViewRootImpl\n  └── FrameLayout                └── AndroidComposeView  (single View!)\n        ├── LinearLayout                └── LayoutNode (root)\n        │     ├── TextView                     ├── LayoutNode (Column)\n        │     └── ImageView                    │     ├── LayoutNode (Text)\n        │                                      │     └── LayoutNode (Image)\n        └── Button                             └── LayoutNode (Button)\n\nN Views = N measure/layout      All layout in single-pass\nDouble-taxation possible!        No double-taxation</div>\n<p>The bridge: <code>AndroidComposeView</code> participates in the View system's measure/layout/draw cycle. When the View system calls its <code>onMeasure()</code>/<code>onLayout()</code>/<code>onDraw()</code>, it delegates to the Compose layout and drawing engine internally.</p>\n<hr class=\"section-divider\">\n<h3>Compose Three Phases</h3>\n<p>Compose rendering has three distinct phases, conceptually similar to the View system but architecturally different:</p>\n<div class=\"diagram\">Phase 1: COMPOSITION          Phase 2: LAYOUT              Phase 3: DRAWING\n─────────────────────         ──────────────────           ────────────────\nRuns @Composable functions    Measures + places            Draws to Canvas\nBuilds/updates LayoutNode     LayoutNodes in a             via DrawScope\ntree via slot table            SINGLE pass                 (backed by Skia)\n         │                           │                           │\n         ▼                           ▼                           ▼\n  Slot Table updated           LayoutNode gets             Pixels rendered\n  LayoutNodes created/         (width, height, x, y)       to screen\n  modified/removed</div>\n<ol>\n<li><b>Composition</b> — Executes your <code>@Composable</code> functions. The Compose compiler plugin transforms them to update a <b>slot table</b>, which tracks the LayoutNode tree. On recomposition, only changed parts of the tree are updated (positional memoization).</li>\n<li><b>Layout</b> — Measures and places every LayoutNode in a <b>single pass</b>. Unlike the View system, Compose enforces that each node is measured <b>exactly once</b> — no double-taxation. <code>IntrinsicMeasurements</code> let you query min/max sizes without violating this rule.</li>\n<li><b>Drawing</b> — Each LayoutNode draws itself via <code>DrawScope</code>, which wraps a Skia Canvas. Drawing commands are recorded into the View system's DisplayList through AndroidComposeView.</li>\n</ol>\n<div class=\"info-box\"><b>Phase independence:</b> Each phase can run independently. If state read during Drawing changes, only Drawing re-runs — Composition and Layout are skipped. <code>Modifier.graphicsLayer { }</code> reads state only during Drawing, so animating alpha, rotation, or scale with graphicsLayer skips Composition and Layout entirely.</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// BAD: alpha change triggers Composition + Layout + Drawing</span>\nvar alpha by remember { mutableFloatStateOf(1f) }\nBox(modifier = Modifier.alpha(alpha))  <span class=\"cmt\">// alpha read in Composition phase</span>\n\n<span class=\"cmt\">// GOOD: alpha change triggers Drawing only</span>\nvar alpha by remember { mutableFloatStateOf(1f) }\nBox(modifier = Modifier.graphicsLayer { this.alpha = alpha })  <span class=\"cmt\">// read in Drawing phase</span></div>\n<hr class=\"section-divider\">\n<h3>Views vs Compose Architecture Comparison</h3>\n<table><tr><th>Aspect</th><th>View System</th><th>Compose</th></tr><tr><td><b>UI tree</b></td><td>View hierarchy (N View objects)</td><td>LayoutNode tree inside single AndroidComposeView</td></tr><tr><td><b>Measure</b></td><td>Multi-pass allowed (double-taxation)</td><td>Single-pass enforced (one measure per node)</td></tr><tr><td><b>Layout + Draw</b></td><td>Separate passes via performTraversals</td><td>Three phases: Composition, Layout, Drawing</td></tr><tr><td><b>Rendering</b></td><td>DisplayList per View + RenderThread</td><td>DrawScope records into DisplayList via AndroidComposeView</td></tr><tr><td><b>Partial update</b></td><td>invalidate() re-records one RenderNode</td><td>Phase skipping (graphicsLayer skips Composition + Layout)</td></tr><tr><td><b>Bridge</b></td><td>N/A</td><td>AndroidComposeView is a single View in the View system</td></tr></table>\n<div class=\"warn-box\"><b>Mixed layouts hurt:</b> Nesting <code>ComposeView</code> inside RecyclerView items means each item creates a separate AndroidComposeView + composition. This duplicates Compose runtime overhead per item. Prefer a fully Compose <code>LazyColumn</code> or use <code>AbstractComposeView</code> with careful <code>ViewCompositionStrategy</code>.</div>",
+  "questions": [
+    {
+      "id": "rp-1",
+      "type": "multiple-choice",
+      "title": "performTraversals() Three Phases",
+      "difficulty": "intermediate",
+      "description": "What is the correct order of the three passes in <code>ViewRootImpl.performTraversals()</code>?",
+      "options": [
+        "Draw → Layout → Measure",
+        "Layout → Measure → Draw",
+        "Measure → Layout → Draw",
+        "Measure → Draw → Layout"
+      ],
+      "correctIndex": 2,
+      "explanation": "<code>performTraversals()</code> always runs in the order: <b>Measure → Layout → Draw</b>. First, the tree is measured top-down (parents constrain children with MeasureSpec). Then, parents assign positions to children in the layout pass. Finally, each View draws itself via Canvas. This order is fixed — you cannot change it.",
+      "hints": [
+        "Think about what information each pass needs from the previous one",
+        "You need to know size before you can assign position, and position before you can draw"
+      ],
+      "learnMore": [
+        {"title": "AOSP ViewRootImpl.performTraversals()", "url": "https://cs.android.com/android/platform/superproject/+/main:frameworks/base/core/java/android/view/ViewRootImpl.java"}
+      ]
+    },
+    {
+      "id": "rp-2",
+      "type": "what-does-this-do",
+      "title": "requestLayout() in onDraw()",
+      "difficulty": "advanced",
+      "description": "What happens when this custom View is displayed?",
+      "code": "class BadView(context: Context) : View(context) {\n    private var frameCount = 0\n\n    override fun onDraw(canvas: Canvas) {\n        super.onDraw(canvas)\n        frameCount++\n        canvas.drawText(\"Frame: $frameCount\", 50f, 50f, paint)\n        requestLayout()  // Force re-measure on next frame\n    }\n}",
+      "options": [
+        "Displays the frame count and updates it once per second",
+        "Creates an infinite traversal loop: requestLayout() schedules measure+layout+draw, which calls onDraw() again, which calls requestLayout() — causing continuous jank and potential ANR",
+        "Throws an IllegalStateException because requestLayout() cannot be called from onDraw()",
+        "Works fine — requestLayout() is asynchronous so it runs on the next frame without issues"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>requestLayout()</code> marks the View as needing measure+layout+draw, scheduling a new traversal on the next VSYNC. Each traversal calls <code>onDraw()</code>, which calls <code>requestLayout()</code> again — creating an <b>infinite loop</b>. Every single frame triggers a full measure+layout+draw traversal. The View tree never reaches a stable state, causing constant work on the main thread, dropped frames, and potential ANR. Use <code>invalidate()</code> if you only need to redraw, and never trigger layout from draw.",
+      "hints": [
+        "requestLayout() schedules a full traversal including draw — what calls onDraw()?",
+        "Think about what happens when the traversal from requestLayout() reaches the draw phase"
+      ],
+      "learnMore": [
+        {"title": "How Android Draws Views", "url": "https://developer.android.com/develop/ui/views/layout/how-android-draws"}
+      ]
+    },
+    {
+      "id": "rp-3",
+      "type": "multiple-choice",
+      "title": "requestLayout() vs invalidate()",
+      "difficulty": "intermediate",
+      "description": "A custom View changes its background color but its size and position remain the same. Which method should you call to update the display?",
+      "options": [
+        "requestLayout() — because the View's appearance changed",
+        "invalidate() — because only drawing needs to re-run, not measure or layout",
+        "forceLayout() — because it's the most efficient option",
+        "postInvalidateOnAnimation() — because it skips measure and layout and waits for VSYNC"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>invalidate()</code> marks the View as needing only a <b>redraw</b> (the draw pass). Since the size and position haven't changed, there's no need to re-measure or re-layout the entire tree. <code>requestLayout()</code> would trigger an unnecessary measure+layout pass on the whole tree up to the root. With hardware acceleration, invalidate() only re-records the View's DisplayList — very cheap. <code>postInvalidateOnAnimation()</code> is also valid but schedules for the next VSYNC; <code>invalidate()</code> already batches to the next traversal.",
+      "hints": [
+        "What triggers measure+layout+draw vs just draw?",
+        "If only the appearance changes (not size), which passes do you actually need?"
+      ]
+    },
+    {
+      "id": "rp-4",
+      "type": "fill-blank",
+      "title": "Custom View onMeasure()",
+      "difficulty": "advanced",
+      "description": "Fill in the blanks to correctly implement <code>onMeasure()</code> for a custom View that respects parent constraints.",
+      "code": "override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {\n    val widthMode = ___1___.getMode(widthMeasureSpec)\n    val widthSize = MeasureSpec.getSize(widthMeasureSpec)\n    val desiredWidth = calculateDesiredWidth()\n\n    val width = when (widthMode) {\n        MeasureSpec.EXACTLY -> widthSize\n        MeasureSpec.AT_MOST -> min(desiredWidth, widthSize)\n        else -> desiredWidth\n    }\n\n    ___2___(width, resolveHeight(heightMeasureSpec))\n}",
+      "blanks": [
+        {
+          "answer": ["MeasureSpec"],
+          "hint": "The class that packs mode and size into a single int"
+        },
+        {
+          "answer": ["setMeasuredDimension"],
+          "hint": "The method you must call at the end of onMeasure() to store the result"
+        }
+      ],
+      "explanation": "<code>MeasureSpec</code> encodes both a mode (EXACTLY, AT_MOST, UNSPECIFIED) and a size into a single int. You extract them with <code>MeasureSpec.getMode()</code> and <code>MeasureSpec.getSize()</code>. After computing the final dimensions, you <b>must</b> call <code>setMeasuredDimension(width, height)</code> — failing to do so throws an <code>IllegalStateException</code>.",
+      "hints": [
+        "The parent packs constraints into a single integer — which class encodes that?",
+        "onMeasure() must end by storing the final width and height"
+      ],
+      "learnMore": [
+        {"title": "Custom View Components", "url": "https://developer.android.com/develop/ui/views/layout/custom-views/custom-components"}
+      ]
+    },
+    {
+      "id": "rp-5",
+      "type": "multiple-choice",
+      "title": "Choreographer and VSYNC",
+      "difficulty": "advanced",
+      "description": "What is the role of <code>Choreographer</code> in the Android rendering pipeline, and what does the VSYNC-app signal trigger?",
+      "options": [
+        "Choreographer manages the GPU thread pool and VSYNC triggers shader compilation",
+        "Choreographer receives VSYNC signals and dispatches frame callbacks in order: INPUT → ANIMATION → TRAVERSAL, coordinating all per-frame work on the main thread",
+        "Choreographer runs on the RenderThread and VSYNC triggers DisplayList replay",
+        "Choreographer batches multiple frames together and VSYNC triggers buffer swaps on the display"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>Choreographer</code> is the main thread's frame scheduler. It registers for VSYNC signals via <code>SurfaceFlinger</code>. When VSYNC-app fires, Choreographer dispatches callbacks in order: <b>CALLBACK_INPUT</b> (touch/key events) → <b>CALLBACK_ANIMATION</b> (ValueAnimator ticks) → <b>CALLBACK_TRAVERSAL</b> (ViewRootImpl.performTraversals). This ensures input is processed before animations, and animations before layout/draw. If no callbacks are pending, Choreographer doesn't request VSYNC — saving power.",
+      "hints": [
+        "Choreographer runs on the main thread, not the RenderThread",
+        "The callback order matters: input before animation before layout/draw"
+      ],
+      "learnMore": [
+        {"title": "AOSP Choreographer Source", "url": "https://cs.android.com/android/platform/superproject/+/main:frameworks/base/core/java/android/view/Choreographer.java"}
+      ]
+    },
+    {
+      "id": "rp-6",
+      "type": "what-does-this-do",
+      "title": "Modifier.graphicsLayer Phase Skipping",
+      "difficulty": "advanced",
+      "description": "How does Compose handle the animated alpha in this code? Which phases run when <code>alpha</code> changes?",
+      "code": "@Composable\nfun FadingCard(visible: Boolean) {\n    val alpha by animateFloatAsState(\n        targetValue = if (visible) 1f else 0f\n    )\n\n    Card(\n        modifier = Modifier\n            .fillMaxWidth()\n            .graphicsLayer {\n                this.alpha = alpha  // State read here\n            }\n    ) {\n        Text(\"Hello Compose\")\n    }\n}",
+      "options": [
+        "All three phases run: Composition, Layout, and Drawing — because the state changed",
+        "Only Composition and Drawing run — Layout is skipped because size didn't change",
+        "Only Drawing runs — the state is read inside graphicsLayer{} which executes only in the Drawing phase, so Composition and Layout are skipped",
+        "No phases run — graphicsLayer caches the result and handles animation internally"
+      ],
+      "correctIndex": 2,
+      "explanation": "<code>Modifier.graphicsLayer { }</code> is a <b>Drawing-phase-only</b> modifier. The lambda inside it executes during the Drawing phase, not during Composition. When <code>alpha</code> changes, Compose sees that the state is only read in Drawing — so it skips Composition (no @Composable functions re-run) and Layout (no re-measurement). Only the Drawing phase runs to apply the new alpha. This is why <code>graphicsLayer</code> is the preferred way to animate visual properties like alpha, rotation, scale, and translation.",
+      "hints": [
+        "Where is the state value actually read — during Composition or inside the graphicsLayer lambda?",
+        "Compose tracks which phase reads each state value"
+      ],
+      "learnMore": [
+        {"title": "Compose Phases", "url": "https://developer.android.com/develop/ui/compose/phases"}
+      ]
+    },
+    {
+      "id": "rp-7",
+      "type": "multiple-choice",
+      "title": "Compose Single-Pass Layout",
+      "difficulty": "advanced",
+      "description": "How does Compose avoid the \"double-taxation\" problem that affects the View system's measure pass?",
+      "options": [
+        "Compose caches all measurements from the previous frame and reuses them",
+        "Compose uses parallel threads to measure different branches simultaneously",
+        "Compose enforces that each LayoutNode is measured exactly once per layout pass — multiple measurements throw an exception — and provides intrinsic measurements as a separate pre-pass for cases that need size information",
+        "Compose skips the measure pass entirely and uses fixed sizes for all components"
+      ],
+      "correctIndex": 2,
+      "explanation": "In the View system, a parent can measure a child multiple times (e.g., LinearLayout with <code>layout_weight</code> measures twice). Deeply nested weighted layouts cause exponential measure calls — <b>double-taxation</b>. Compose forbids this: each LayoutNode is measured <b>exactly once</b>. Attempting to measure a node twice throws an exception. For cases where a parent needs to know a child's preferred size before measuring, Compose provides <b>intrinsic measurements</b> (<code>minIntrinsicWidth</code>, <code>maxIntrinsicHeight</code>, etc.) as a separate, cheap query that doesn't count as a real measurement.",
+      "hints": [
+        "What causes double-taxation in Views? LinearLayout with weights...",
+        "Compose has a mechanism for querying size without triggering a full measure"
+      ],
+      "learnMore": [
+        {"title": "Compose Performance", "url": "https://developer.android.com/develop/ui/compose/performance"}
+      ]
+    },
+    {
+      "id": "rp-8",
+      "type": "trivia",
+      "title": "View Hierarchy vs LayoutNode Tree",
+      "difficulty": "advanced",
+      "description": "Explain the key architectural difference between how the View system and Compose manage their UI trees, and how they bridge together.",
+      "keywords": [
+        "AndroidComposeView",
+        "LayoutNode",
+        "single View",
+        "bridge",
+        "hierarchy",
+        "one View",
+        "ComposeView"
+      ],
+      "answer": "The View system creates a hierarchy of View objects — each View is a separate object that participates in measure/layout/draw traversals. Compose replaces this with a LayoutNode tree inside a single AndroidComposeView. AndroidComposeView is the bridge: it is one View in the View hierarchy that internally manages the entire Compose LayoutNode tree, delegating View system callbacks to the Compose layout and drawing engine.",
+      "explanation": "In the View system, N UI elements means N View objects, each with its own measure/layout/draw overhead. In Compose, the entire UI is a tree of lightweight <code>LayoutNode</code> objects inside one <code>AndroidComposeView</code>. This View participates in the traditional View traversal (performTraversals calls its onMeasure/onLayout/onDraw), but internally it runs Compose's own single-pass layout and Skia-based drawing. This architecture means Compose UI is invisible to the View system's layout inspector as individual Views — it's all one View.",
+      "hints": [
+        "How many Views does a Compose screen create in the View hierarchy?",
+        "What class bridges the View system and Compose's LayoutNode tree?"
+      ]
+    },
+    {
+      "id": "rp-9",
+      "type": "fix-bug",
+      "title": "Missing Hardware Layer for Animation",
+      "difficulty": "advanced",
+      "description": "This custom View animates a complex drawing (drop shadow, paths, gradients) every frame. Users report severe jank during the animation. Fix it by leveraging hardware layers.",
+      "starterCode": "class AnimatedBadge(context: Context) : View(context) {\n    private var progress = 0f\n    private val animator = ValueAnimator.ofFloat(0f, 1f).apply {\n        duration = 300\n        addUpdateListener {\n            progress = it.animatedValue as Float\n            invalidate()  // Redraw every frame\n        }\n    }\n\n    override fun onDraw(canvas: Canvas) {\n        // Expensive: shadow, gradient, paths\n        drawComplexBadge(canvas, progress)\n    }\n\n    fun animateIn() {\n        animator.start()\n    }\n}",
+      "checks": [
+        {
+          "pattern": "LAYER_TYPE_HARDWARE|setLayerType",
+          "message": "Use a hardware layer during the animation to cache the rendering as a GPU texture",
+          "required": true
+        },
+        {
+          "pattern": "LAYER_TYPE_NONE|setLayerType.*0",
+          "message": "Clear the hardware layer when animation ends to free GPU memory",
+          "required": true
+        }
+      ],
+      "solution": "class AnimatedBadge(context: Context) : View(context) {\n    private var progress = 0f\n    private val animator = ValueAnimator.ofFloat(0f, 1f).apply {\n        duration = 300\n        addUpdateListener {\n            progress = it.animatedValue as Float\n            invalidate()\n        }\n        addListener(object : AnimatorListenerAdapter() {\n            override fun onAnimationStart(animation: Animator) {\n                setLayerType(LAYER_TYPE_HARDWARE, null)\n            }\n            override fun onAnimationEnd(animation: Animator) {\n                setLayerType(LAYER_TYPE_NONE, null)\n            }\n        })\n    }\n\n    override fun onDraw(canvas: Canvas) {\n        drawComplexBadge(canvas, progress)\n    }\n\n    fun animateIn() {\n        animator.start()\n    }\n}",
+      "explanation": "Without a hardware layer, every <code>invalidate()</code> re-executes all expensive Canvas operations (shadows, gradients, paths) to rebuild the DisplayList. With <code>LAYER_TYPE_HARDWARE</code>, the View is rendered once into a GPU texture. Subsequent frames apply transformations (alpha, translation, scale) to the cached texture without re-drawing — dramatically cheaper. Set <code>LAYER_TYPE_NONE</code> when the animation ends to free the GPU texture memory. Hardware layers are ideal for <b>short animations on complex Views</b>.",
+      "hints": [
+        "The expensive drawing doesn't need to happen every frame during animation",
+        "A hardware layer caches the View as a GPU texture — transforms are cheap on textures",
+        "Don't forget to release the GPU texture when the animation finishes"
+      ],
+      "learnMore": [
+        {"title": "Hardware Acceleration", "url": "https://developer.android.com/topic/performance/hardware-accel"}
+      ]
+    },
+    {
+      "id": "rp-10",
+      "type": "multiple-choice",
+      "title": "ComposeView in RecyclerView",
+      "difficulty": "advanced",
+      "description": "When using <code>ComposeView</code> inside RecyclerView item layouts, what happens during the View system's traversal?",
+      "options": [
+        "Each ComposeView shares a single composition, so traversal is efficient",
+        "Each ComposeView creates its own AndroidComposeView and separate composition — the View system traverses each as an individual View, and each runs its own Compose phases independently, adding per-item overhead",
+        "ComposeView items are automatically batched into a single AndroidComposeView by the framework",
+        "RecyclerView disables View traversal for ComposeView items and delegates entirely to Compose"
+      ],
+      "correctIndex": 1,
+      "explanation": "Each <code>ComposeView</code> in a RecyclerView item creates a <b>separate</b> <code>AndroidComposeView</code> with its own composition, slot table, and LayoutNode tree. The View system's <code>performTraversals()</code> walks through each ComposeView as a normal View — calling onMeasure/onLayout/onDraw, each of which triggers that item's Compose phases internally. This means N visible items = N separate compositions with N separate layout passes. For better performance, migrate the entire list to <code>LazyColumn</code> (one composition, one AndroidComposeView) or carefully manage <code>ViewCompositionStrategy</code> to control composition lifecycle.",
+      "hints": [
+        "Each ComposeView is an independent View — what does that mean for traversal?",
+        "Compare this to a single LazyColumn which has one AndroidComposeView for all items"
+      ]
+    }
+  ]
+}

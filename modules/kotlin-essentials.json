@@ -1,0 +1,312 @@
+{
+  "id": "kotlin-essentials",
+  "title": "Kotlin Essentials",
+  "icon": "🎯",
+  "description": "Kotlin language features essential for Android development",
+  "references": [
+    {"title": "Kotlin Language Reference — Null Safety", "url": "https://kotlinlang.org/docs/null-safety.html", "type": "docs"},
+    {"title": "Kotlin Language Reference — Delegated Properties", "url": "https://kotlinlang.org/docs/delegated-properties.html", "type": "docs"},
+    {"title": "Kotlin Language Reference — Scope Functions", "url": "https://kotlinlang.org/docs/scope-functions.html", "type": "docs"},
+    {"title": "Kotlin Language Reference — Higher-Order Functions", "url": "https://kotlinlang.org/docs/lambdas.html", "type": "docs"},
+    {"title": "Android Developers — Kotlin on Android", "url": "https://developer.android.com/kotlin", "type": "docs"}
+  ],
+  "lesson": "<h3>Why Kotlin for Android</h3>\n<p>Kotlin became Android's primary language in 2019. Its killer features — <b>null safety</b>, <b>coroutines</b>, <b>data classes</b>, and <b>extension functions</b> — make Android code safer and more concise.</p>\n<h3>Null Safety</h3>\n<p>Every type is non-null by default. Use <code>?</code> to make a type nullable. The compiler forces you to handle null cases:</p>\n<div class=\"lesson-code\">val name: String = \"Alice\"    <span class=\"cmt\">// Cannot be null</span>\nval email: String? = null     <span class=\"cmt\">// Can be null</span>\nprintln(email?.length ?: 0)   <span class=\"cmt\">// Safe call + Elvis operator</span></div>\n\n<h3>The <code>by</code> Keyword — Property Delegation</h3>\n<p><code>by</code> is Kotlin's <b>property delegation</b> mechanism. It lets you delegate the getter/setter of a property to another object. This is NOT Compose-specific — it's a core language feature.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// WITHOUT \"by\" — you work with the wrapper object:</span>\nval countState: MutableState&lt;Int&gt; = remember { mutableStateOf(0) }\ncountState.value++  <span class=\"cmt\">// must use .value every time</span>\n\n<span class=\"cmt\">// WITH \"by\" — Kotlin unwraps it for you:</span>\nvar count: Int by remember { mutableStateOf(0) }\ncount++  <span class=\"cmt\">// syntactic sugar for countState.value++</span>\n\n<span class=\"cmt\">// What the compiler generates:</span>\nprivate val count$delegate = mutableStateOf(0)\nvar count: String\n    get() = count$delegate.getValue(thisRef, property)\n    set(v) { count$delegate.setValue(thisRef, property, v) }</div>\n<p>Any class can be a delegate if it implements <code>operator fun getValue()</code> and optionally <code>setValue()</code>.</p>\n\n<h4><code>by lazy { }</code> — Computed on First Access</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// lazy: computes on FIRST access, caches forever after</span>\nval expensiveObject by lazy {\n    ExpensiveComputation()  <span class=\"cmt\">// runs once, when first accessed</span>\n}\n\n<span class=\"cmt\">// Thread-safe by default (LazyThreadSafetyMode.SYNCHRONIZED)</span>\n<span class=\"cmt\">// Use lazy(LazyThreadSafetyMode.NONE) if single-threaded</span></div>\n\n<h4><code>lateinit var</code> — Promise to Initialize Later</h4>\n<div class=\"lesson-code\">lateinit var adapter: RecyclerView.Adapter  <span class=\"cmt\">// no initial value</span>\n<span class=\"cmt\">// Must initialize before first use or UninitializedPropertyAccessException</span>\n<span class=\"cmt\">// Only for var (mutable), non-null, non-primitive types</span>\n<span class=\"cmt\">// Check with ::adapter.isInitialized</span></div>\n\n<h4>All Common <code>by</code> Delegations in Android</h4>\n<table>\n<tr><th>Pattern</th><th>What It Does</th><th>When to Use</th></tr>\n<tr><td><code>by mutableStateOf()</code></td><td>Observable read/write (Compose)</td><td>Compose state</td></tr>\n<tr><td><code>by lazy { }</code></td><td>Computed on first access, cached</td><td>Expensive init you might not need</td></tr>\n<tr><td><code>by remember { mutableStateOf() }</code></td><td>Compose-surviving observable state</td><td>Composable local state</td></tr>\n<tr><td><code>by viewModels()</code></td><td>Lazy ViewModel creation</td><td>Activity/Fragment</td></tr>\n<tr><td><code>by activityViewModels()</code></td><td>Shared ViewModel across fragments</td><td>Fragment</td></tr>\n<tr><td><code>by inject()</code></td><td>Koin dependency injection</td><td>DI</td></tr>\n<tr><td><code>by Delegates.observable()</code></td><td>Callback on every change</td><td>Plain Kotlin observers</td></tr>\n</table>\n\n<hr class=\"section-divider\">\n<h3>Scope Functions — Complete Reference</h3>\n<table>\n<tr><th>Function</th><th>Object Ref</th><th>Returns</th><th>Use Case</th></tr>\n<tr><td><code>let</code></td><td><code>it</code></td><td>Lambda result</td><td>Null-safe transforms, scoping</td></tr>\n<tr><td><code>apply</code></td><td><code>this</code></td><td>The object</td><td>Configure/initialize objects</td></tr>\n<tr><td><code>run</code></td><td><code>this</code></td><td>Lambda result</td><td>Compute using object properties</td></tr>\n<tr><td><code>with</code></td><td><code>this</code></td><td>Lambda result</td><td>Same as run (not an extension)</td></tr>\n<tr><td><code>also</code></td><td><code>it</code></td><td>The object</td><td>Side effects (logging, validation)</td></tr>\n<tr><td><code>takeIf</code></td><td><code>it</code></td><td>Object or null</td><td>Conditional filtering</td></tr>\n<tr><td><code>takeUnless</code></td><td><code>it</code></td><td>Object or null</td><td>Inverse of takeIf</td></tr>\n</table>\n<div class=\"lesson-code\"><span class=\"cmt\">// apply: configure and return the object</span>\nval intent = Intent(this, DetailActivity::class.java).apply {\n    putExtra(\"ID\", 42)\n    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)\n}\n\n<span class=\"cmt\">// let: transform nullable</span>\nval length = nullableString?.let { it.trim().length } ?: 0\n\n<span class=\"cmt\">// also: side effect without changing the chain</span>\nfetchUsers()\n    .also { Log.d(\"TAG\", \"Fetched ${it.size} users\") }\n    .filter { it.isActive }\n\n<span class=\"cmt\">// run: compute using object</span>\nval desc = user.run { \"$name ($email), joined $joinDate\" }\n\n<span class=\"cmt\">// with: group operations on same object</span>\nwith(binding) {\n    nameText.text = user.name\n    emailText.text = user.email\n}\n\n<span class=\"cmt\">// takeIf: conditional</span>\nval validEmail = input.takeIf { it.contains(\"@\") }</div>\n<div class=\"info-box\"><b>Decision guide:</b> Need to <b>configure</b> an object → <code>apply</code>. Need to <b>transform</b> nullable → <code>let</code>. Need to <b>log/debug</b> → <code>also</code>. Need to <b>compute</b> → <code>run</code> or <code>with</code>.</div>\n\n<hr class=\"section-divider\">\n<h3>Higher-Order Functions</h3>\n<p>A function that takes other functions as parameters or returns a function. This is how all of Compose works — <code>Button(onClick = { })</code>, <code>LazyColumn { items() { } }</code>. In Kotlin, trailing lambdas make them read naturally.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Higher-order function: takes a function parameter</span>\nfun performAction(times: Int, action: (Int) -&gt; Unit) {\n    repeat(times) { i -&gt; action(i) }\n}\n\n<span class=\"cmt\">// Trailing lambda syntax:</span>\nperformAction(3) { index -&gt;\n    println(\"Action #$index\")\n}</div>",
+  "questions": [
+    {
+      "id": "ke-1",
+      "type": "multiple-choice",
+      "title": "Null Safety Operators",
+      "difficulty": "beginner",
+      "description": "Which operator safely calls a method on a nullable type, returning null if the receiver is null instead of throwing an exception?",
+      "options": [
+        "!! (not-null assertion)",
+        "?. (safe call)",
+        "?: (Elvis operator)",
+        "as? (safe cast)"
+      ],
+      "correctIndex": 1,
+      "explanation": "The <code>?.</code> safe call operator calls the method only if the receiver is non-null, returning null otherwise. <code>!!</code> throws a NullPointerException if the value is null. <code>?:</code> (Elvis) provides a default when the left side is null. <code>as?</code> returns null if the cast fails.",
+      "hints": [
+        "Which operator is \"safe\" — it never crashes?"
+      ]
+    },
+    {
+      "id": "ke-2",
+      "type": "fill-blank",
+      "title": "Launching a Coroutine",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to launch a coroutine that fetches data from a repository and updates the UI state.",
+      "code": "class MyViewModel : ViewModel() {\n    private val _uiState = MutableStateFlow<String>(\"\")\n\n    fun loadData() {\n        ___1___.___2___ {\n            val result = repository.fetchData()\n            _uiState.value = result\n        }\n    }\n}",
+      "blanks": [
+        {
+          "answer": [
+            "viewModelScope"
+          ],
+          "hint": "ViewModel-scoped coroutine scope"
+        },
+        {
+          "answer": [
+            "launch"
+          ],
+          "hint": "Coroutine builder for fire-and-forget"
+        }
+      ],
+      "explanation": "<code>viewModelScope</code> is a built-in CoroutineScope tied to the ViewModel lifecycle. <code>launch</code> is the coroutine builder for fire-and-forget work (as opposed to <code>async</code> which returns a Deferred).",
+      "hints": [
+        "ViewModels have a built-in scope for coroutines",
+        "The most common coroutine builder that does not return a result"
+      ]
+    },
+    {
+      "id": "ke-3",
+      "type": "what-does-this-do",
+      "title": "Scope Functions",
+      "difficulty": "intermediate",
+      "description": "What does this code output?",
+      "code": "data class User(var name: String, var age: Int)\n\nfun main() {\n    val user = User(\"Alice\", 25).apply {\n        name = \"Bob\"\n        age = 30\n    }\n    val greeting = user.let {\n        \"Hello, ${it.name}! Age: ${it.age}\"\n    }\n    println(greeting)\n}",
+      "options": [
+        "Hello, Alice! Age: 25",
+        "Hello, Bob! Age: 30",
+        "Hello, Alice! Age: 30",
+        "Compilation error"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>apply</code> executes the block on the object and returns the object itself. Inside <code>apply</code>, <code>this</code> refers to the User, so name and age are modified. Then <code>let</code> takes the User as <code>it</code> and returns the formatted string.",
+      "hints": [
+        "apply{} modifies the object and returns it",
+        "let{} uses \"it\" to reference the object"
+      ]
+    },
+    {
+      "id": "ke-4",
+      "type": "fix-bug",
+      "title": "Null Pointer Crash",
+      "difficulty": "beginner",
+      "description": "This code crashes with a NullPointerException when the user has no email. Fix it to safely handle the null case, defaulting to \"No email\".",
+      "starterCode": "fun displayUserEmail(email: String?): String {\n    // This crashes when email is null!\n    return email!!.uppercase()\n}",
+      "checks": [
+        {
+          "pattern": "\\?\\.",
+          "message": "Use safe call operator (?.) instead of !!",
+          "required": false
+        },
+        {
+          "pattern": "\\?:",
+          "message": "Use Elvis operator (?:) to provide a default value",
+          "required": false
+        }
+      ],
+      "solution": "fun displayUserEmail(email: String?): String {\n    return email?.uppercase() ?: \"No email\"\n}",
+      "explanation": "The <code>!!</code> operator asserts non-null and crashes if the value IS null. The fix uses <code>?.</code> (safe call) combined with <code>?:</code> (Elvis) to provide \"No email\" as the default.",
+      "hints": [
+        "Replace !! with something that does not throw on null",
+        "Chain a safe call with a default value operator"
+      ]
+    },
+    {
+      "id": "ke-5",
+      "type": "multiple-choice",
+      "title": "val vs var",
+      "difficulty": "beginner",
+      "description": "What is the key difference between <code>val</code> and <code>var</code> in Kotlin?",
+      "options": [
+        "val is for primitives, var is for objects",
+        "val is immutable (read-only reference), var is mutable (reassignable)",
+        "val is compile-time constant, var is runtime",
+        "There is no difference"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>val</code> declares a read-only reference — once assigned, it cannot be reassigned. <code>var</code> is reassignable. Note: <code>val</code> does not mean the object itself is immutable — a <code>val list = mutableListOf()</code> can still have items added.",
+      "hints": [
+        "Think of val as \"value\" (fixed) and var as \"variable\" (changeable)"
+      ]
+    },
+    {
+      "id": "ke-6",
+      "type": "multiple-choice",
+      "title": "Coroutine Dispatchers",
+      "difficulty": "intermediate",
+      "description": "Which coroutine dispatcher should you use for CPU-intensive work like sorting a large list or parsing JSON?",
+      "options": [
+        "Dispatchers.Main",
+        "Dispatchers.IO",
+        "Dispatchers.Default",
+        "Dispatchers.Unconfined"
+      ],
+      "correctIndex": 2,
+      "explanation": "<code>Dispatchers.Default</code> is optimized for CPU-intensive work — it uses a shared pool of threads equal to the number of CPU cores. <code>Dispatchers.IO</code> is for I/O operations (network, disk) with a larger thread pool. <code>Dispatchers.Main</code> runs on the UI thread. <code>Dispatchers.Unconfined</code> is for special cases and generally avoided.",
+      "hints": [
+        "IO is for waiting on external systems, but what about pure computation?",
+        "Think about how many threads you need for CPU work vs IO work"
+      ]
+    },
+    {
+      "id": "ke-7",
+      "type": "fill-blank",
+      "title": "Sealed Class with When",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to create a sealed class and exhaustively handle all cases.",
+      "code": "___1___ class NetworkResult<out T> {\n    data class Success<T>(val data: T) : NetworkResult<T>()\n    data class Error(val message: String) : NetworkResult<Nothing>()\n    ___2___ Loading : NetworkResult<Nothing>()\n}\n\nfun handleResult(result: NetworkResult<String>) {\n    ___3___(result) {\n        is NetworkResult.Success -> showData(result.data)\n        is NetworkResult.Error -> showError(result.message)\n        is NetworkResult.Loading -> showSpinner()\n    }\n}",
+      "blanks": [
+        {
+          "answer": [
+            "sealed"
+          ],
+          "hint": "Restricts subclass hierarchy"
+        },
+        {
+          "answer": [
+            "data object",
+            "object"
+          ],
+          "hint": "Singleton subclass (no data)"
+        },
+        {
+          "answer": [
+            "when"
+          ],
+          "hint": "Exhaustive branching expression"
+        }
+      ],
+      "explanation": "<code>sealed class</code> restricts subclasses to the same file. <code>object Loading</code> is a singleton (no data needed). <code>when</code> on a sealed class is exhaustive — the compiler ensures all cases are handled, no <code>else</code> needed.",
+      "hints": [
+        "This keyword ensures all subtypes are known at compile time",
+        "The Loading state carries no data, so it should be a singleton"
+      ]
+    },
+    {
+      "id": "ke-8",
+      "type": "write-code",
+      "title": "Extension Function",
+      "difficulty": "intermediate",
+      "description": "Write an extension function on String that returns true if the string is a valid email address (contains @ and at least one dot after @).",
+      "starterCode": "// Write your extension function:\nfun String.isValidEmail(): Boolean {\n    // TODO: Check for @ symbol and dot after @\n}",
+      "checks": [
+        {
+          "pattern": "fun\\s+String\\.isValidEmail",
+          "message": "Define as an extension function on String",
+          "required": true
+        },
+        {
+          "pattern": "@",
+          "message": "Check for @ symbol",
+          "required": true
+        },
+        {
+          "pattern": "contains|indexOf|matches|Regex|\\.",
+          "message": "Validate the email format",
+          "required": true
+        },
+        {
+          "pattern": "return|Boolean",
+          "message": "Return a Boolean result",
+          "required": true
+        }
+      ],
+      "solution": "fun String.isValidEmail(): Boolean {\n    return this.contains(\"@\") &&\n        this.substringAfter(\"@\").contains(\".\")\n}",
+      "explanation": "Extension functions add methods to existing classes without modifying them. <code>fun String.isValidEmail()</code> adds <code>isValidEmail()</code> to all Strings. Inside, <code>this</code> refers to the String instance. This is a simplified validation — production apps should use <code>Patterns.EMAIL_ADDRESS</code>.",
+      "hints": [
+        "Extension functions use the syntax: fun ReceiverType.functionName()",
+        "Inside the function, \"this\" refers to the receiver object"
+      ]
+    },
+    {
+      "id": "ke-9",
+      "type": "what-does-this-do",
+      "title": "Collection Operations",
+      "difficulty": "intermediate",
+      "description": "What does this code produce?",
+      "code": "val numbers = listOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)\n\nval result = numbers\n    .filter { it % 2 == 0 }\n    .map { it * it }\n    .take(3)\n    .sum()\n\nprintln(result)",
+      "options": [
+        "30 (sum of 4+16+36... wait thats wrong)",
+        "56 (4+16+36)",
+        "220 (sum of all even squares)",
+        "20 (4+16)"
+      ],
+      "correctIndex": 1,
+      "explanation": "Step by step: <code>filter { it % 2 == 0 }</code> → [2,4,6,8,10]. <code>map { it * it }</code> → [4,16,36,64,100]. <code>take(3)</code> → [4,16,36]. <code>sum()</code> → 56. Kotlin's collection operators chain functionally, each transforming the result of the previous operation.",
+      "hints": [
+        "Trace through each operation step by step",
+        "filter keeps even numbers, map squares them, take gets the first 3"
+      ]
+    },
+    {
+      "id": "ke-10",
+      "type": "multiple-choice",
+      "title": "lateinit vs lazy",
+      "difficulty": "intermediate",
+      "description": "What is the key difference between <code>lateinit var</code> and <code>by lazy</code>?",
+      "options": [
+        "lateinit is for val, lazy is for var",
+        "lateinit is for var (mutable, initialized later, non-null). lazy is for val (immutable, computed on first access, thread-safe by default)",
+        "They are identical but lazy is newer",
+        "lateinit only works with primitives"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>lateinit var</code> defers initialization of a mutable, non-null property — you promise to initialize it before first use (crashes with UninitializedPropertyAccessException if you don't). <code>by lazy</code> creates a read-only property computed on first access and cached. Use <code>lateinit</code> for DI-injected fields; use <code>lazy</code> for expensive computations that may not be needed.",
+      "hints": [
+        "One is var (mutable), the other is val (read-only)",
+        "Think about when and how initialization happens"
+      ]
+    },
+    {
+      "id": "ke-11",
+      "type": "what-does-this-do",
+      "title": "inline and reified",
+      "difficulty": "advanced",
+      "description": "What does <code>inline</code> and <code>reified</code> enable in this code?",
+      "code": "inline fun <reified T> Bundle.getParcelableCompat(key: String): T? {\n    return if (Build.VERSION.SDK_INT >= 33) {\n        getParcelable(key, T::class.java)\n    } else {\n        @Suppress(\"DEPRECATION\")\n        getParcelable(key) as? T\n    }\n}",
+      "options": [
+        "reified allows accessing T::class.java at runtime — normally erased by generics. inline copies the function body at call sites, which is required for reified to work",
+        "inline makes it faster, reified is decorative",
+        "Both keywords are optional optimizations",
+        "inline prevents subclassing, reified enables it"
+      ],
+      "correctIndex": 0,
+      "explanation": "JVM generics use <b>type erasure</b> — <code>T</code> is not available at runtime. <code>reified</code> preserves the type info, enabling <code>T::class.java</code>. This requires <code>inline</code> because the compiler injects the actual type at each call site. This pattern is essential for Android APIs that need a Class parameter (getParcelable, startActivity, etc.).",
+      "hints": [
+        "Without reified, you cannot write T::class.java — the compiler does not know T at runtime",
+        "inline copies the function body to the call site"
+      ]
+    },
+    {
+      "id": "ke-12",
+      "type": "fix-bug",
+      "title": "Delegation with by",
+      "difficulty": "intermediate",
+      "description": "This ViewModel uses <code>by</code> delegation incorrectly. The state never updates in the UI. Fix it.",
+      "starterCode": "class ProfileViewModel : ViewModel() {\n    // BUG: UI never sees updates!\n    var name = mutableStateOf(\"Alice\")\n    \n    fun updateName(newName: String) {\n        name.value = newName\n    }\n}\n\n// In composable:\n// val name = viewModel.name  // This is a State<String>, not a String!",
+      "checks": [
+        {
+          "pattern": "by\\s+mutableStateOf|by mutableStateOf",
+          "message": "Use \"by\" delegation to unwrap the State wrapper",
+          "required": true
+        }
+      ],
+      "solution": "class ProfileViewModel : ViewModel() {\n    var name by mutableStateOf(\"Alice\")\n    \n    fun updateName(newName: String) {\n        name = newName  // Direct assignment works with \"by\"\n    }\n}",
+      "explanation": "Without <code>by</code>, <code>name</code> is a <code>MutableState&lt;String&gt;</code> object — you access the value via <code>.value</code>. With <code>by</code> delegation, Kotlin's property delegation unwraps it, so <code>name</code> acts as a plain <code>String</code>. Both work, but <code>by</code> is cleaner and less error-prone. The <code>=</code> vs <code>by</code> distinction is one of the most common Compose gotchas.",
+      "hints": [
+        "The \"by\" keyword delegates get/set to the State object",
+        "Compare: val x = mutableStateOf(\"\") (State<String>) vs var x by mutableStateOf(\"\") (String)"
+      ]
+    },
+    {
+      "id": "ke-13",
+      "type": "multiple-choice",
+      "title": "Higher-Order Functions",
+      "difficulty": "intermediate",
+      "description": "What is a higher-order function in Kotlin?",
+      "options": [
+        "A function defined inside a class",
+        "A function that takes other functions as parameters or returns a function",
+        "A function that calls itself recursively",
+        "A function with multiple return types"
+      ],
+      "correctIndex": 1,
+      "explanation": "Higher-order functions accept functions as parameters or return them. This is fundamental to Kotlin and Android — click listeners (<code>onClick: () -> Unit</code>), list operations (<code>.map { }</code>), and Compose itself (<code>content: @Composable () -> Unit</code>) all use higher-order functions. In Kotlin, trailing lambdas make them read naturally: <code>Button(onClick = { }) { Text(\"Hi\") }</code>.",
+      "hints": [
+        "Think about how Button takes an onClick lambda and a content lambda"
+      ]
+    }
+  ]
+}

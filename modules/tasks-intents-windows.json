@@ -1,0 +1,256 @@
+{
+  "id": "tasks-intents-windows",
+  "title": "Tasks, Intents & Window Management",
+  "icon": "\ud83e\ude9f",
+  "description": "Task affinity, launch modes, Intent flag combinations, IntentFilter matching algorithm, data URI resolution, WMS window hierarchy, ViewRootImpl, edge-to-edge insets, and multi-window architecture",
+  "references": [
+    {"title": "Android Developers \u2014 Tasks and Back Stack", "url": "https://developer.android.com/guide/components/activities/tasks-and-back-stack", "type": "docs"},
+    {"title": "Android Developers \u2014 Intent Filters", "url": "https://developer.android.com/guide/components/intents-filters", "type": "docs"},
+    {"title": "Android Developers \u2014 Edge-to-edge", "url": "https://developer.android.com/develop/ui/views/layout/edge-to-edge", "type": "docs"},
+    {"title": "AOSP WindowManagerService.java", "url": "https://cs.android.com/android/platform/superproject/+/main:frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java", "type": "source"},
+    {"title": "AOSP ViewRootImpl.java", "url": "https://cs.android.com/android/platform/superproject/+/main:frameworks/base/core/java/android/view/ViewRootImpl.java", "type": "source"},
+    {"title": "Android Developers \u2014 Multi-window Support", "url": "https://developer.android.com/guide/topics/large-screens/multi-window-support", "type": "docs"}
+  ],
+  "lesson": "<h3>Task Affinity & Complex Launch Modes</h3>\n<p>A <b>task</b> is a stack of Activities that the user perceives as a single unit of work. Each task appears as a separate entry in the <b>Recents screen</b>. By default, all Activities in an app share the same task affinity (the app's package name), but you can override this with <code>android:taskAffinity</code>.</p>\n<div class=\"diagram\">Default: All activities share one task\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502  Task (com.example.app)        \u2502\n\u2502  \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510  \u2502\n\u2502  \u2502 DetailActivity (top)       \u2502  \u2502\n\u2502  \u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524  \u2502\n\u2502  \u2502 ListActivity              \u2502  \u2502\n\u2502  \u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524  \u2502\n\u2502  \u2502 MainActivity (root)       \u2502  \u2502\n\u2502  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518  \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n\nWith taskAffinity + NEW_TASK:\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510  \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502 Task 1 (main)  \u2502  \u2502 Task 2 (chat) \u2502\n\u2502 MainActivity   \u2502  \u2502 ChatActivity  \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n (Recents entry 1)  (Recents entry 2)</div>\n<table><tr><th>Launch Mode</th><th>Behavior</th><th>Use Case</th></tr><tr><td><code>standard</code></td><td>New instance every time, placed on calling task</td><td>Most activities</td></tr><tr><td><code>singleTop</code></td><td>Reuses top instance via <code>onNewIntent()</code>; new instance if not on top</td><td>Search results, notifications</td></tr><tr><td><code>singleTask</code></td><td>Only one instance per task; clears above it when re-activated</td><td>Home/dashboard screen</td></tr><tr><td><code>singleInstance</code></td><td>Sole activity in its task; always gets its own task</td><td>Launcher, call screen</td></tr><tr><td><code>singleInstancePerTask</code></td><td>One instance per task, but multiple tasks can each have one (API 31+)</td><td>Multi-window document editors</td></tr></table>\n<p><code>allowTaskReparenting=\"true\"</code> lets an Activity move between tasks. Example: a browser Activity launched from your app\u2019s task can move to the browser\u2019s task when the browser is next brought forward. This happens because the system matches the Activity\u2019s <code>taskAffinity</code> with the incoming task.</p>\n<div class=\"info-box\"><b>Key insight:</b> <code>taskAffinity</code> alone does nothing. It only takes effect when combined with <code>FLAG_ACTIVITY_NEW_TASK</code> (for launching into a matching task) or <code>allowTaskReparenting=\"true\"</code> (for moving between tasks).</div>\n<hr class=\"section-divider\">\n<h3>Intent Flags Deep Dive</h3>\n<p>Intent flags give you runtime control over Activity launch behavior. They override or combine with manifest <code>launchMode</code> declarations:</p>\n<table><tr><th>Flag</th><th>Effect</th></tr><tr><td><code>FLAG_ACTIVITY_NEW_TASK</code></td><td>Start Activity in a task matching its <code>taskAffinity</code>. Required when launching from non-Activity contexts (Service, BroadcastReceiver).</td></tr><tr><td><code>FLAG_ACTIVITY_CLEAR_TOP</code></td><td>If the Activity already exists in the task, destroy everything above it. <b>With standard launchMode</b>: the existing instance is also destroyed and re-created. <b>With singleTop</b>: existing instance gets <code>onNewIntent()</code>.</td></tr><tr><td><code>FLAG_ACTIVITY_SINGLE_TOP</code></td><td>Same as <code>singleTop</code> launchMode. If the Activity is already at the top of the task, call <code>onNewIntent()</code> instead of creating a new instance.</td></tr><tr><td><code>FLAG_ACTIVITY_CLEAR_TASK</code></td><td>Clear the entire task before launching the Activity. <b>Must be used with NEW_TASK.</b></td></tr><tr><td><code>FLAG_ACTIVITY_NO_HISTORY</code></td><td>Activity is not kept in the back stack. Once the user leaves, it is finished.</td></tr><tr><td><code>FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS</code></td><td>Task does not appear in the Recents screen.</td></tr></table>\n<div class=\"warn-box\"><b>Common trap \u2014 CLEAR_TOP + standard launchMode:</b> When <code>FLAG_ACTIVITY_CLEAR_TOP</code> finds the target Activity in the stack, it destroys everything above it <b>including the target itself</b>, then creates a new instance. If you want to reuse the existing instance, also add <code>FLAG_ACTIVITY_SINGLE_TOP</code>. The combination <code>NEW_TASK | CLEAR_TOP | SINGLE_TOP</code> behaves like <code>singleTask</code>.</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// Notification deep link pattern: clear the entire task and land on target</span>\nval intent = Intent(context, DashboardActivity::class.java).apply {\n    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK\n}\n\n<span class=\"cmt\">// Navigate to root, reusing existing instance</span>\nval homeIntent = Intent(context, MainActivity::class.java).apply {\n    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP\n}</div>\n<div class=\"info-box\"><b>Flag vs manifest precedence:</b> Intent flags generally take precedence over manifest <code>launchMode</code>. However, some manifest attributes (<code>singleInstance</code>) cannot be overridden by flags. When in doubt, flags win for the caller\u2019s intent, but the callee\u2019s manifest restricts what\u2019s possible.</div>\n<hr class=\"section-divider\">\n<h3>IntentFilter Matching Algorithm</h3>\n<p>When you call <code>startActivity(implicitIntent)</code>, the <b>PackageManagerService (PMS)</b> resolves it by checking all declared <code>&lt;intent-filter&gt;</code> elements. A filter must pass <b>all three tests</b>:</p>\n<div class=\"diagram\">Implicit Intent Resolution\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\nIntent { action=VIEW, category=DEFAULT, data=https://example.com/products/42 }\n       \u2502\n       \u25bc\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502 TEST 1: Action                            \u2502\n\u2502 Intent's action must match ANY one         \u2502\n\u2502 declared &lt;action&gt; in the filter            \u2502\n\u2502 (filter must declare at least one action)  \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n       \u2502 pass?\n       \u25bc\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502 TEST 2: Category                          \u2502\n\u2502 ALL categories in the Intent must be       \u2502\n\u2502 declared in the filter.                    \u2502\n\u2502 CATEGORY_DEFAULT is auto-added by          \u2502\n\u2502 startActivity() \u2014 filter MUST include it   \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n       \u2502 pass?\n       \u25bc\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502 TEST 3: Data (scheme + authority + path    \u2502\n\u2502        + MIME type)                        \u2502\n\u2502 Each part of the URI must match.           \u2502\n\u2502 MIME wildcards: image/* or */*             \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n       \u2502 pass?\n       \u25bc\n   \u2705 MATCH</div>\n<div class=\"warn-box\"><b>Why CATEGORY_DEFAULT is required:</b> <code>startActivity()</code> and <code>startActivityForResult()</code> automatically add <code>CATEGORY_DEFAULT</code> to the Intent. If your <code>&lt;intent-filter&gt;</code> does not declare <code>&lt;category android:name=\"android.intent.category.DEFAULT\" /&gt;</code>, it will <b>never</b> match implicit intents (except for <code>MAIN/LAUNCHER</code> filters, which are special-cased).</div>\n<hr class=\"section-divider\">\n<h3>Data URIs in Intent Matching</h3>\n<p>The data test checks the Intent\u2019s URI and MIME type against the filter\u2019s <code>&lt;data&gt;</code> elements:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// URI structure</span>\nscheme://authority/path\nhttps://example.com/products/42\n  |         |          |\nscheme   host:port   pathPrefix\n\n<span class=\"cmt\">// IntentFilter for HTTPS deep links</span>\n&lt;intent-filter&gt;\n    &lt;action android:name=\"android.intent.action.VIEW\" /&gt;\n    &lt;category android:name=\"android.intent.category.DEFAULT\" /&gt;\n    &lt;category android:name=\"android.intent.category.BROWSABLE\" /&gt;\n    &lt;data android:scheme=\"https\"\n          android:host=\"example.com\"\n          android:pathPrefix=\"/products\" /&gt;\n&lt;/intent-filter&gt;</div>\n<table><tr><th>Data Element</th><th>Matching Rule</th></tr><tr><td><code>scheme</code></td><td>Exact match (case-insensitive). Must be specified first \u2014 without a scheme, all other URI parts are ignored.</td></tr><tr><td><code>host</code> (authority)</td><td>Exact match or wildcard (<code>*.example.com</code>). Ignored if no scheme.</td></tr><tr><td><code>path</code></td><td>Exact match: <code>path</code>, prefix: <code>pathPrefix</code>, pattern: <code>pathPattern</code> (with <code>.*</code> wildcards). Ignored if no scheme + authority.</td></tr><tr><td><code>mimeType</code></td><td>Supports wildcards: <code>image/*</code>, <code>*/*</code>. Can be declared without URI parts (e.g., share intents with content: URIs).</td></tr></table>\n<div class=\"info-box\"><b>MIME-only vs URI-only filters:</b> A filter with only <code>mimeType</code> matches intents with a <code>content:</code> or <code>file:</code> URI that has the matching MIME type. A filter with only URI parts (no mimeType) matches intents that have a URI but no MIME type. When both are specified, both must match.</div>\n<hr class=\"section-divider\">\n<h3>Window Hierarchy</h3>\n<p>The <b>WindowManagerService (WMS)</b> runs in <code>system_server</code> and manages every window on screen. Each window is backed by a <code>Surface</code> \u2014 a buffer that receives drawing commands. <b>SurfaceFlinger</b> composites all Surfaces into the final frame displayed on screen.</p>\n<div class=\"diagram\">Window Z-Order (back to front)\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510 Z = highest\n\u2502  SYSTEM WINDOWS            \u2502\n\u2502  Status bar, Navigation    \u2502\n\u2502  bar, Toast, System alert  \u2502\n\u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524\n\u2502  SUB-WINDOWS               \u2502\n\u2502  PopupWindow, Dialog,      \u2502\n\u2502  Menus, Spinner dropdown   \u2502\n\u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524\n\u2502  APPLICATION WINDOWS       \u2502\n\u2502  Activities, InputMethod   \u2502\n\u2502  Dream, Wallpaper          \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518 Z = lowest\n\n             \u2502\n     SurfaceFlinger composites\n       all Surfaces into the\n        final display frame</div>\n<p>Window types are defined in <code>WindowManager.LayoutParams</code>:</p>\n<table><tr><th>Type Range</th><th>Category</th><th>Examples</th></tr><tr><td>1\u201399</td><td>Application</td><td>Activity windows (<code>TYPE_BASE_APPLICATION</code>), dialogs</td></tr><tr><td>1000\u20131999</td><td>Sub-windows</td><td><code>TYPE_APPLICATION_PANEL</code> (PopupWindow), <code>TYPE_APPLICATION_MEDIA</code></td></tr><tr><td>2000\u20132999</td><td>System</td><td><code>TYPE_STATUS_BAR</code>, <code>TYPE_NAVIGATION_BAR</code>, <code>TYPE_TOAST</code>, <code>TYPE_SYSTEM_ALERT</code></td></tr></table>\n<hr class=\"section-divider\">\n<h3>ViewRootImpl</h3>\n<p><code>ViewRootImpl</code> is the bridge between the View hierarchy and the window system. It is <b>not a View</b> \u2014 it implements <code>ViewParent</code> and manages the connection to WMS.</p>\n<div class=\"diagram\">setContentView() Call Chain\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\nActivity.setContentView(layoutRes)\n    \u2502\n    \u25bc\nPhoneWindow.setContentView()\n    \u2502  creates/finds DecorView\n    \u2502  inflates layout into content frame\n    \u25bc\nActivityThread.handleResumeActivity()\n    \u2502\n    \u25bc\nWindowManager.addView(decorView, params)\n    \u2502\n    \u25bc\nWindowManagerGlobal.addView()\n    \u2502  creates ViewRootImpl\n    \u25bc\nViewRootImpl.setView(decorView)\n    \u2502  \u2514\u2500 IWindowSession.addToDisplayAsUser()  \u2192 WMS (Binder IPC)\n    \u2502  \u2514\u2500 Creates Surface\n    \u2502  \u2514\u2500 Requests first layout traversal\n    \u25bc\nViewRootImpl.performTraversals()\n    \u251c\u2500 measure()\n    \u251c\u2500 layout()\n    \u2514\u2500 draw() \u2192 Surface \u2192 SurfaceFlinger</div>\n<p><b>ViewRootImpl responsibilities:</b></p>\n<ul><li>Holds the <code>Surface</code> for drawing</li><li>Schedules traversals via <code>Choreographer</code> on VSYNC signals</li><li>Dispatches input events (touch, key) from InputDispatcher to the View tree</li><li>Manages window insets (system bars, IME)</li><li>Enforces the \"only UI thread can touch views\" rule via <code>checkThread()</code></li></ul>\n<div class=\"info-box\"><b>One ViewRootImpl per window:</b> Each window (Activity, Dialog, PopupWindow, Toast) has its own ViewRootImpl. A Dialog creates a separate window with its own ViewRootImpl, distinct from the Activity\u2019s.</div>\n<hr class=\"section-divider\">\n<h3>Window Insets & Edge-to-Edge</h3>\n<p>Window insets describe areas of the screen occupied by system UI (status bar, navigation bar, IME, display cutout). Starting with <b>Android 15 (API 35)</b>, apps targeting this API go edge-to-edge by default \u2014 the system no longer adds padding for system bars automatically.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Enable edge-to-edge (call in onCreate before setContentView)</span>\noverride fun onCreate(savedInstanceState: Bundle?) {\n    enableEdgeToEdge()  <span class=\"cmt\">// from androidx.activity</span>\n    super.onCreate(savedInstanceState)\n    setContentView(R.layout.activity_main)\n\n    <span class=\"cmt\">// Handle insets manually for Views</span>\n    ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.root)) { v, insets -&gt;\n        val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())\n        v.setPadding(bars.left, bars.top, bars.right, bars.bottom)\n        insets\n    }\n}</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// Compose: handle insets declaratively</span>\nScaffold(\n    modifier = Modifier.fillMaxSize()\n) { innerPadding -&gt;\n    LazyColumn(\n        modifier = Modifier\n            .fillMaxSize()\n            .padding(innerPadding),\n        contentPadding = WindowInsets.systemBars.asPaddingValues()\n    ) {\n        items(data) { item -&gt;\n            ItemRow(item)\n        }\n    }\n}</div>\n<table><tr><th>Inset Type</th><th>What It Covers</th></tr><tr><td><code>systemBars()</code></td><td>Status bar + navigation bar + caption bar</td></tr><tr><td><code>ime()</code></td><td>Software keyboard</td></tr><tr><td><code>displayCutout()</code></td><td>Notch / punch-hole camera area</td></tr><tr><td><code>systemGestures()</code></td><td>Gesture navigation edge zones (left/right/bottom)</td></tr><tr><td><code>tappableElement()</code></td><td>Areas where system UI intercepts taps</td></tr></table>\n<div class=\"warn-box\"><b>Android 15 breaking change:</b> Apps targeting API 35+ are edge-to-edge by default. If you do not handle insets, your content will draw behind the status bar and navigation bar. There is no opt-out \u2014 you must handle insets properly using <code>WindowInsetsCompat</code> or Compose\u2019s <code>WindowInsets</code>.</div>\n<hr class=\"section-divider\">\n<h3>Multi-Window Architecture</h3>\n<p>Android supports three multi-window modes, all managed by WMS and the task/activity stack:</p>\n<table><tr><th>Mode</th><th>API</th><th>Behavior</th></tr><tr><td><b>Split-screen</b></td><td>24+</td><td>Two tasks side-by-side (or top/bottom). User drags divider. Both activities are resumed (multi-resume, API 29+).</td></tr><tr><td><b>Freeform</b></td><td>24+</td><td>Desktop-like windows, resizable. Enabled by device manufacturer. Common on ChromeOS, tablets.</td></tr><tr><td><b>Picture-in-Picture (PiP)</b></td><td>26+</td><td>Small overlay window. Activity enters PiP via <code>enterPictureInPictureMode()</code>. Paused state (pre-API 31) or resumed.</td></tr></table>\n<div class=\"lesson-code\"><span class=\"cmt\">// Entering PiP mode</span>\noverride fun onUserLeaveHint() {\n    if (Build.VERSION.SDK_INT &gt;= Build.VERSION_CODES.O) {\n        enterPictureInPictureMode(\n            PictureInPictureParams.Builder()\n                .setAspectRatio(Rational(16, 9))\n                .setAutoEnterEnabled(true)  <span class=\"cmt\">// API 31+</span>\n                .build()\n        )\n    }\n}</div>\n<div class=\"warn-box\"><b>Multi-window lifecycle trap:</b> When entering split-screen on API 24\u201328, the Activity is destroyed and re-created (configuration change). On API 29+, <b>multi-resume</b> means both activities are in <code>RESUMED</code> state. Do not assume only one Activity is resumed at a time. Always use <code>onTopResumedActivityChanged()</code> (API 29+) to know if you are the topmost resumed activity.</div>\n<div class=\"info-box\"><b>Resizing considerations:</b> Never hardcode screen dimensions. Use <code>WindowMetricsCalculator</code> from Jetpack WindowManager to get current window size. In multi-window mode, the window size is smaller than the display. Using <code>Display.getSize()</code> or <code>Resources.displayMetrics</code> returns the full display, not your window bounds.</div>",
+  "questions": [
+    {
+      "id": "tw-1",
+      "type": "what-does-this-do",
+      "title": "Task Affinity + NEW_TASK Behavior",
+      "difficulty": "advanced",
+      "description": "An Activity declares a custom <code>taskAffinity</code> and is launched with <code>FLAG_ACTIVITY_NEW_TASK</code>. Where does it end up?",
+      "code": "<!-- AndroidManifest.xml -->\n<activity\n    android:name=\".ChatActivity\"\n    android:taskAffinity=\"com.example.chat\"\n    android:launchMode=\"standard\" />\n\n<activity\n    android:name=\".MainActivity\"\n    android:taskAffinity=\"com.example.app\" />\n\n// Launching from MainActivity:\nval intent = Intent(this, ChatActivity::class.java)\nintent.flags = Intent.FLAG_ACTIVITY_NEW_TASK\nstartActivity(intent)",
+      "options": [
+        "ChatActivity is placed on top of MainActivity in the same task, because they are in the same app",
+        "ChatActivity is launched in a separate task with affinity \"com.example.chat\" — it appears as a separate entry in Recents",
+        "The launch fails with an exception because you cannot use NEW_TASK within the same app",
+        "ChatActivity replaces MainActivity in the current task"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>FLAG_ACTIVITY_NEW_TASK</code> tells the system to find or create a task whose affinity matches the Activity's <code>taskAffinity</code>. Since ChatActivity declares <code>taskAffinity=\"com.example.chat\"</code> (different from the default app affinity), the system creates a new task for it. This new task appears as a separate entry in the Recents screen. Without the differing <code>taskAffinity</code>, <code>NEW_TASK</code> would find the existing task (same affinity) and place the Activity there.",
+      "hints": [
+        "FLAG_ACTIVITY_NEW_TASK looks for a task matching the target Activity's taskAffinity",
+        "Different taskAffinity + NEW_TASK = separate Recents entry"
+      ],
+      "learnMore": [
+        {"title": "Android Developers \u2014 Tasks and Back Stack", "url": "https://developer.android.com/guide/components/activities/tasks-and-back-stack"}
+      ]
+    },
+    {
+      "id": "tw-2",
+      "type": "multiple-choice",
+      "title": "CLEAR_TOP with Standard vs SingleTop",
+      "difficulty": "advanced",
+      "description": "Your task has Activities A \u2192 B \u2192 C \u2192 D (D on top). You launch Activity B with <code>FLAG_ACTIVITY_CLEAR_TOP</code>. What happens differently when B has <code>launchMode=\"standard\"</code> vs <code>launchMode=\"singleTop\"</code>?",
+      "options": [
+        "Both cases: B receives onNewIntent() and C, D are destroyed",
+        "standard: B is destroyed and re-created (C, D also destroyed). singleTop: existing B receives onNewIntent() (C, D destroyed)",
+        "standard: nothing happens because CLEAR_TOP only works with singleTask. singleTop: B receives onNewIntent()",
+        "Both cases: B is destroyed and re-created. The launchMode makes no difference with CLEAR_TOP"
+      ],
+      "correctIndex": 1,
+      "explanation": "With <code>FLAG_ACTIVITY_CLEAR_TOP</code>, Activities C and D are always destroyed. The critical difference is what happens to B: <b>standard launchMode</b> \u2014 the existing instance of B is also destroyed, then a brand-new instance is created (full <code>onCreate()</code>). <b>singleTop launchMode</b> (or adding <code>FLAG_ACTIVITY_SINGLE_TOP</code>) \u2014 the existing instance of B is kept alive and receives <code>onNewIntent()</code>. This is because standard mode always creates a new instance, even when CLEAR_TOP clears above.",
+      "hints": [
+        "Think about what 'standard' launchMode means: always a new instance",
+        "To get CLEAR_TOP + reuse, you need singleTop behavior"
+      ]
+    },
+    {
+      "id": "tw-3",
+      "type": "fill-blank",
+      "title": "IntentFilter for HTTPS Deep Links",
+      "difficulty": "intermediate",
+      "description": "Complete this IntentFilter to handle HTTPS URLs for <code>example.com/products/*</code> paths.",
+      "code": "<intent-filter>\n    <action android:name=\"android.intent.action.___1___\" />\n    <category android:name=\"android.intent.category.DEFAULT\" />\n    <category android:name=\"android.intent.category.___2___\" />\n    <data android:scheme=\"https\"\n          android:host=\"example.com\"\n          android:___3___=\"/products\" />\n</intent-filter>",
+      "blanks": [
+        {
+          "answer": ["VIEW"],
+          "hint": "Standard action for viewing data / opening a URL"
+        },
+        {
+          "answer": ["BROWSABLE"],
+          "hint": "Category that allows the Activity to be launched from a browser link"
+        },
+        {
+          "answer": ["pathPrefix"],
+          "hint": "Attribute that matches a URI path starting with a given prefix"
+        }
+      ],
+      "explanation": "<code>ACTION_VIEW</code> is the standard action for viewing data, including URLs. <code>CATEGORY_BROWSABLE</code> is required for an Activity to be launchable from a browser \u2014 without it, clicking a link in Chrome cannot open your app. <code>pathPrefix</code> matches any path starting with <code>/products</code> (e.g., <code>/products/42</code>, <code>/products/shoes</code>). <code>CATEGORY_DEFAULT</code> is required because <code>startActivity()</code> adds it automatically.",
+      "hints": [
+        "Opening a URL in the browser is 'viewing' data",
+        "What category allows a browser to invoke this filter?"
+      ],
+      "learnMore": [
+        {"title": "Android Developers \u2014 Intent Filter Matching", "url": "https://developer.android.com/guide/components/intents-filters"}
+      ]
+    },
+    {
+      "id": "tw-4",
+      "type": "multiple-choice",
+      "title": "IntentFilter Three-Test Rule",
+      "difficulty": "intermediate",
+      "description": "An implicit Intent has <code>action=SEND</code>, <code>categories=[DEFAULT, BROWSABLE]</code>, and <code>mimeType=text/plain</code>. Which IntentFilter matches?",
+      "options": [
+        "Filter A: action=SEND, category=DEFAULT (missing BROWSABLE category)",
+        "Filter B: action=SEND, category=DEFAULT, category=BROWSABLE, mimeType=text/plain",
+        "Filter C: action=SEND, action=VIEW, category=DEFAULT, category=BROWSABLE, mimeType=image/* (wrong MIME type)",
+        "Filter D: action=VIEW, category=DEFAULT, category=BROWSABLE, mimeType=text/plain (wrong action)"
+      ],
+      "correctIndex": 1,
+      "explanation": "IntentFilter matching requires passing <b>all three tests</b>: (1) <b>Action test</b> \u2014 the Intent's action must match at least one declared action. Filters B and C have SEND, Filter D only has VIEW (fails). (2) <b>Category test</b> \u2014 <b>every</b> category in the Intent must be declared in the filter. Filter A is missing BROWSABLE (fails). (3) <b>Data test</b> \u2014 MIME type must match. Filter C declares <code>image/*</code> but the Intent has <code>text/plain</code> (fails). Only Filter B passes all three tests.",
+      "hints": [
+        "Action test: match ANY one. Category test: match ALL. Data test: MIME must match",
+        "Filter A fails because BROWSABLE is in the Intent but not the filter"
+      ]
+    },
+    {
+      "id": "tw-5",
+      "type": "fix-bug",
+      "title": "Notification Deep Link Creates Duplicate Tasks",
+      "difficulty": "intermediate",
+      "description": "Users report that tapping a notification always creates a new task in Recents, even if the app is already open. After several notifications, the Recents screen shows many copies of the same app. Fix the PendingIntent so it reuses the existing task.",
+      "starterCode": "fun showNotification(context: Context, itemId: String) {\n    val intent = Intent(context, DetailActivity::class.java).apply {\n        putExtra(\"item_id\", itemId)\n        flags = Intent.FLAG_ACTIVITY_NEW_TASK\n    }\n    val pendingIntent = PendingIntent.getActivity(\n        context, 0, intent,\n        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT\n    )\n    val notification = NotificationCompat.Builder(context, CHANNEL_ID)\n        .setSmallIcon(R.drawable.ic_notification)\n        .setContentTitle(\"New item available\")\n        .setContentIntent(pendingIntent)\n        .setAutoCancel(true)\n        .build()\n    NotificationManagerCompat.from(context).notify(itemId.hashCode(), notification)\n}",
+      "checks": [
+        {
+          "pattern": "FLAG_ACTIVITY_CLEAR_TASK|CLEAR_TASK",
+          "message": "Add FLAG_ACTIVITY_CLEAR_TASK to reuse the existing task instead of creating duplicates",
+          "required": true
+        },
+        {
+          "pattern": "FLAG_ACTIVITY_NEW_TASK|NEW_TASK",
+          "message": "Keep FLAG_ACTIVITY_NEW_TASK (required with CLEAR_TASK)",
+          "required": true
+        }
+      ],
+      "solution": "fun showNotification(context: Context, itemId: String) {\n    val intent = Intent(context, DetailActivity::class.java).apply {\n        putExtra(\"item_id\", itemId)\n        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK\n    }\n    val pendingIntent = PendingIntent.getActivity(\n        context, itemId.hashCode(), intent,\n        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT\n    )\n    val notification = NotificationCompat.Builder(context, CHANNEL_ID)\n        .setSmallIcon(R.drawable.ic_notification)\n        .setContentTitle(\"New item available\")\n        .setContentIntent(pendingIntent)\n        .setAutoCancel(true)\n        .build()\n    NotificationManagerCompat.from(context).notify(itemId.hashCode(), notification)\n}",
+      "explanation": "The bug is using <code>FLAG_ACTIVITY_NEW_TASK</code> alone. This creates a new task every time if the existing task isn't in the foreground with the same affinity. Adding <code>FLAG_ACTIVITY_CLEAR_TASK</code> clears the existing task and places the new Activity as the root, preventing duplicate Recents entries. The combination <code>NEW_TASK | CLEAR_TASK</code> is the standard pattern for notification deep links. Additionally, the <code>requestCode</code> in <code>PendingIntent.getActivity()</code> should be unique per notification to avoid PendingIntent reuse across different items.",
+      "hints": [
+        "FLAG_ACTIVITY_NEW_TASK alone creates a new task if one doesn't already match",
+        "What flag clears an existing task so the Activity becomes the new root?"
+      ],
+      "learnMore": [
+        {"title": "Android Developers \u2014 Create a notification deep link", "url": "https://developer.android.com/develop/ui/views/notifications/navigation#DirectEntry"}
+      ]
+    },
+    {
+      "id": "tw-6",
+      "type": "what-does-this-do",
+      "title": "ViewRootImpl in the setContentView() Chain",
+      "difficulty": "advanced",
+      "description": "When does <code>ViewRootImpl</code> enter the picture during Activity startup, and what role does it play?",
+      "code": "class MyActivity : AppCompatActivity() {\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        setContentView(R.layout.activity_main)  // Step 1\n        // ViewRootImpl does NOT exist yet here\n    }\n\n    override fun onResume() {\n        super.onResume()\n        // After onResume(), ActivityThread calls:\n        // WindowManager.addView(decorView, params)\n        //   -> WindowManagerGlobal.addView()\n        //     -> new ViewRootImpl(context, display)\n        //     -> viewRootImpl.setView(decorView, params, ...)\n        //       -> IWindowSession.addToDisplayAsUser() [Binder to WMS]\n        //       -> requestLayout() -> scheduleTraversals()\n    }\n}",
+      "options": [
+        "ViewRootImpl is created inside setContentView() when the layout XML is inflated",
+        "ViewRootImpl is created after onResume() when ActivityThread calls WindowManager.addView() \u2014 it connects the DecorView to WMS via Binder and triggers the first measure/layout/draw pass",
+        "ViewRootImpl is created during onCreate() to set up the Surface for drawing",
+        "ViewRootImpl is a View subclass that sits between DecorView and the content layout"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>setContentView()</code> only inflates the layout into the DecorView \u2014 no window is created yet. <code>ViewRootImpl</code> is created <b>after onResume()</b> when <code>ActivityThread.handleResumeActivity()</code> calls <code>WindowManager.addView(decorView)</code>. At this point, ViewRootImpl: (1) Establishes a Binder connection to WMS via <code>IWindowSession</code>. (2) Creates the <code>Surface</code>. (3) Calls <code>requestLayout()</code> which schedules the first traversal via <code>Choreographer</code>. (4) The traversal performs <code>measure()</code>, <code>layout()</code>, and <code>draw()</code>. ViewRootImpl is <b>not</b> a View \u2014 it implements <code>ViewParent</code> and serves as the root parent of the DecorView.",
+      "hints": [
+        "setContentView() just inflates XML into a ViewGroup \u2014 no Surface or WMS connection yet",
+        "Think about when the Activity's content actually becomes visible on screen"
+      ],
+      "learnMore": [
+        {"title": "AOSP ViewRootImpl.java Source", "url": "https://cs.android.com/android/platform/superproject/+/main:frameworks/base/core/java/android/view/ViewRootImpl.java"}
+      ]
+    },
+    {
+      "id": "tw-7",
+      "type": "write-code",
+      "title": "Edge-to-Edge with Compose Inset Handling",
+      "difficulty": "intermediate",
+      "description": "Implement an edge-to-edge Activity with Compose that displays a scrollable list. The list items should not be obscured by the status bar or navigation bar. Use Compose's <code>WindowInsets</code> APIs.",
+      "starterCode": "class MainActivity : ComponentActivity() {\n    override fun onCreate(savedInstanceState: Bundle?) {\n        // TODO: enable edge-to-edge\n        super.onCreate(savedInstanceState)\n        setContent {\n            MyTheme {\n                // TODO: display a LazyColumn that respects system bar insets\n            }\n        }\n    }\n}\n\n@Composable\nfun ItemList(items: List<String>) {\n    // TODO: LazyColumn with proper inset handling\n}",
+      "checks": [
+        {
+          "pattern": "enableEdgeToEdge|WindowCompat\\.setDecorFitsSystemWindows",
+          "message": "Enable edge-to-edge display",
+          "required": true
+        },
+        {
+          "pattern": "systemBars|WindowInsets|contentPadding|safeDrawing",
+          "message": "Handle system bar insets so content is not obscured",
+          "required": true
+        },
+        {
+          "pattern": "LazyColumn",
+          "message": "Use LazyColumn for the scrollable list",
+          "required": true
+        }
+      ],
+      "solution": "class MainActivity : ComponentActivity() {\n    override fun onCreate(savedInstanceState: Bundle?) {\n        enableEdgeToEdge()\n        super.onCreate(savedInstanceState)\n        setContent {\n            MyTheme {\n                Scaffold(\n                    modifier = Modifier.fillMaxSize()\n                ) { innerPadding ->\n                    ItemList(\n                        items = listOf(\"Item 1\", \"Item 2\", \"Item 3\"),\n                        modifier = Modifier.padding(innerPadding)\n                    )\n                }\n            }\n        }\n    }\n}\n\n@Composable\nfun ItemList(items: List<String>, modifier: Modifier = Modifier) {\n    LazyColumn(\n        modifier = modifier.fillMaxSize(),\n        contentPadding = WindowInsets.systemBars.asPaddingValues()\n    ) {\n        items(items) { item ->\n            Text(\n                text = item,\n                modifier = Modifier\n                    .fillMaxWidth()\n                    .padding(16.dp)\n            )\n        }\n    }\n}",
+      "explanation": "<code>enableEdgeToEdge()</code> configures the Activity to draw behind system bars (transparent status bar and navigation bar). Without inset handling, list items would be hidden behind these bars. <code>Scaffold</code> automatically handles insets via its <code>innerPadding</code>. Alternatively, use <code>WindowInsets.systemBars.asPaddingValues()</code> as <code>contentPadding</code> in <code>LazyColumn</code> \u2014 this adds inset-aware padding to the scroll content while allowing the background to draw edge-to-edge.",
+      "hints": [
+        "enableEdgeToEdge() replaces the old WindowCompat.setDecorFitsSystemWindows() approach",
+        "Scaffold in Material 3 automatically provides inset-safe innerPadding"
+      ],
+      "learnMore": [
+        {"title": "Android Developers \u2014 Edge-to-edge migration guide", "url": "https://developer.android.com/develop/ui/views/layout/edge-to-edge"}
+      ]
+    },
+    {
+      "id": "tw-8",
+      "type": "multiple-choice",
+      "title": "Window Type Z-Ordering",
+      "difficulty": "intermediate",
+      "description": "Which window type has the highest Z-order (drawn on top of everything else)?",
+      "options": [
+        "Application windows (TYPE_BASE_APPLICATION) \u2014 they are the main content",
+        "Sub-windows (TYPE_APPLICATION_PANEL) \u2014 they overlay their parent Activity",
+        "System windows (TYPE_STATUS_BAR, TYPE_NAVIGATION_BAR) \u2014 system UI is always on top",
+        "All window types share the same Z-order and are composited by their creation time"
+      ],
+      "correctIndex": 2,
+      "explanation": "Windows are Z-ordered by their type ranges defined in <code>WindowManager.LayoutParams</code>: <b>Application windows</b> (types 1\u201399) are at the bottom. <b>Sub-windows</b> (1000\u20131999) are drawn above their parent application window. <b>System windows</b> (2000\u20132999) have the highest Z-order \u2014 the status bar, navigation bar, and system alerts always appear on top. Within each range, individual windows are ordered by their layer assignment. This is why a PopupWindow (sub-window) appears above your Activity, and the status bar (system window) appears above everything.",
+      "hints": [
+        "Think about why the status bar is always visible on top of any app",
+        "Window types use numeric ranges: higher range = higher Z-order"
+      ]
+    },
+    {
+      "id": "tw-9",
+      "type": "fix-bug",
+      "title": "Multi-Window Crash: Hardcoded Screen Width",
+      "difficulty": "advanced",
+      "description": "Users report a crash when entering split-screen mode. The app uses the full display width to calculate a grid column count, but in split-screen the window is only half the display. Fix the code to use the actual window size.",
+      "starterCode": "class GridActivity : AppCompatActivity() {\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        setContentView(R.layout.activity_grid)\n\n        val display = windowManager.defaultDisplay\n        val displayMetrics = DisplayMetrics()\n        display.getMetrics(displayMetrics)\n        val screenWidthDp = displayMetrics.widthPixels / displayMetrics.density\n\n        val columnCount = (screenWidthDp / 180).toInt().coerceAtLeast(1)\n        val recyclerView = findViewById<RecyclerView>(R.id.grid)\n        recyclerView.layoutManager = GridLayoutManager(this, columnCount)\n    }\n}",
+      "checks": [
+        {
+          "pattern": "WindowMetricsCalculator|currentWindowMetrics|computeCurrentWindowMetrics",
+          "message": "Use WindowMetricsCalculator or WindowMetrics to get the actual window size instead of the display size",
+          "required": true
+        }
+      ],
+      "solution": "class GridActivity : AppCompatActivity() {\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        setContentView(R.layout.activity_grid)\n\n        val metrics = WindowMetricsCalculator.getOrCreate()\n            .computeCurrentWindowMetrics(this)\n        val widthDp = metrics.bounds.width() /\n            resources.displayMetrics.density\n\n        val columnCount = (widthDp / 180).toInt().coerceAtLeast(1)\n        val recyclerView = findViewById<RecyclerView>(R.id.grid)\n        recyclerView.layoutManager = GridLayoutManager(this, columnCount)\n    }\n}",
+      "explanation": "The bug: <code>Display.getMetrics()</code> returns the <b>full display size</b>, not the app's window size. In split-screen mode, the window is roughly half the display, so the column count is calculated for the full screen and content overflows. The fix: use <code>WindowMetricsCalculator.computeCurrentWindowMetrics()</code> from the Jetpack WindowManager library, which returns the <b>actual window bounds</b> \u2014 correct in multi-window, freeform, and PiP modes. Alternatively, on API 30+, use <code>windowManager.currentWindowMetrics</code>.",
+      "hints": [
+        "In split-screen, the display size and the window size are different",
+        "Jetpack WindowManager provides APIs that work correctly in multi-window"
+      ],
+      "learnMore": [
+        {"title": "Android Developers \u2014 Multi-window support", "url": "https://developer.android.com/guide/topics/large-screens/multi-window-support"}
+      ]
+    },
+    {
+      "id": "tw-10",
+      "type": "multiple-choice",
+      "title": "Activity Lifecycle in Split-Screen",
+      "difficulty": "advanced",
+      "description": "On API 29+, what happens to your Activity's lifecycle when the user puts it into split-screen mode alongside another app?",
+      "options": [
+        "Your Activity is paused (onPause) because it no longer has full focus",
+        "Your Activity is destroyed and re-created due to a configuration change (screen size), then resumes \u2014 and both split-screen activities are in the RESUMED state simultaneously (multi-resume)",
+        "Your Activity stays in RESUMED state without any lifecycle changes",
+        "Your Activity is stopped (onStop) because it is partially hidden by the other app"
+      ],
+      "correctIndex": 1,
+      "explanation": "Entering split-screen triggers a <b>configuration change</b> (<code>screenSize</code>, <code>smallestScreenSize</code>) because the window dimensions change. Unless you handle these in <code>android:configChanges</code>, the Activity is destroyed and re-created. After re-creation, on API 29+ with <b>multi-resume</b>, both split-screen Activities enter the <code>RESUMED</code> state simultaneously. Before API 29, only the focused Activity was RESUMED; the other was PAUSED. Use <code>onTopResumedActivityChanged(boolean)</code> (API 29+) to detect which Activity has topmost focus for exclusive resources like the camera.",
+      "hints": [
+        "Screen size changes are configuration changes by default",
+        "Multi-resume (API 29+) changed how split-screen lifecycle works"
+      ]
+    }
+  ]
+}

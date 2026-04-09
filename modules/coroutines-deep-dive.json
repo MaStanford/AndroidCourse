@@ -1,0 +1,252 @@
+{
+  "id": "coroutines-deep-dive",
+  "title": "Coroutines Deep Dive",
+  "icon": "🔄",
+  "description": "Scopes, structured concurrency, exception handling, and advanced patterns",
+  "references": [
+    {"title": "Kotlin Coroutines Guide", "url": "https://kotlinlang.org/docs/coroutines-guide.html", "type": "docs"},
+    {"title": "Android Developers — Coroutines on Android", "url": "https://developer.android.com/kotlin/coroutines", "type": "docs"},
+    {"title": "Kotlin Coroutines — Exception Handling", "url": "https://kotlinlang.org/docs/exception-handling.html", "type": "docs"},
+    {"title": "Roman Elizarov — Structured Concurrency", "url": "https://elizarov.medium.com/structured-concurrency-722d765aa952", "type": "article"}
+  ],
+  "lesson": "<h3>Coroutine Scopes & Structured Concurrency</h3>\n<p>Every coroutine runs in a <b>scope</b> that defines its lifetime. A scope holds a <code>Job</code> (tracks children) and a <code>CoroutineContext</code> (dispatcher, error handler). The scope creates a parent-child hierarchy with three rules:</p>\n<div class=\"info-box\"><b>The Three Rules of Structured Concurrency:</b><br>\n1. Parent cancelled → <b>all children cancelled</b><br>\n2. Child fails → <b>parent cancelled</b> (unless SupervisorJob)<br>\n3. Parent waits for <b>all children</b> before completing</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// ViewModel scope — cancelled when ViewModel is cleared</span>\nviewModelScope.launch {\n    launch { fetchUser() }    <span class=\"cmt\">// child 1</span>\n    launch { fetchPosts() }   <span class=\"cmt\">// child 2</span>\n    <span class=\"cmt\">// Parent waits for BOTH to finish</span>\n}</div>\n\n<h3>launch vs async</h3>\n<table>\n<tr><th></th><th>launch</th><th>async</th></tr>\n<tr><td>Returns</td><td><code>Job</code> (no result)</td><td><code>Deferred&lt;T&gt;</code> (a future result)</td></tr>\n<tr><td>Use for</td><td>Side effects (update UI, write DB)</td><td>Parallel computation needing results</td></tr>\n<tr><td>Exceptions</td><td>Propagate UP to parent immediately</td><td>Held until <code>.await()</code> is called</td></tr>\n</table>\n<div class=\"lesson-code\"><span class=\"cmt\">// Parallel decomposition: both run concurrently</span>\nval user = async { api.getUser(id) }     <span class=\"cmt\">// starts immediately</span>\nval posts = async { api.getPosts(id) }   <span class=\"cmt\">// starts immediately</span>\nshowProfile(user.await(), posts.await()) <span class=\"cmt\">// total = slowest, not sum</span></div>\n\n<hr class=\"section-divider\">\n<h3>Exception Handling — The Tricky Part</h3>\n<div class=\"diagram\">launch { throw Exception() }\n  │\n  ▼\nException propagates UP to parent\n  │\n  ▼\nParent cancels ALL children (siblings die too)\n  │\n  ▼\nIf no handler → app crashes\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nasync { throw Exception() }\n  │\n  ▼\nException is HELD inside Deferred\n  │\n  ▼\nRe-thrown when .await() is called\n  │\n  ▼\nCan be caught with try { deferred.await() } catch { }</div>\n<div class=\"warn-box\"><b>CoroutineExceptionHandler</b> only works on the <b>root coroutine</b> (first launch in the scope). On child coroutines, the exception propagates to the parent before the child's handler runs. For child error handling, use <code>try/catch</code>.</div>\n\n<hr class=\"section-divider\">\n<h3>SupervisorJob — Independent Children</h3>\n<div class=\"diagram\">Regular Job:                     SupervisorJob:\n─────────────                    ──────────────\n  Parent Job                       Parent (Supervisor)\n  ├── Child A: FAILS  ──┐         ├── Child A: FAILS\n  └── Child B: running  │         └── Child B: KEEPS RUNNING ✓\n       ↓                │\n    CANCELLED by parent ◄┘       Child A's failure does NOT\n                                 affect siblings</div>\n<p><code>viewModelScope</code> and <code>lifecycleScope</code> use SupervisorJob — you don't want one failed API call to cancel all ViewModel work.</p>\n\n<hr class=\"section-divider\">\n<h3>Dispatchers — Thread Pools Underneath</h3>\n<p>A Dispatcher IS a thread pool. Each one is optimized for different work:</p>\n<table>\n<tr><th>Dispatcher</th><th>Thread Pool</th><th>Use For</th><th>Java Equivalent</th></tr>\n<tr><td><code>Dispatchers.Main</code></td><td>Single UI thread</td><td>Touch views, update State</td><td><code>Handler(Looper.getMainLooper())</code></td></tr>\n<tr><td><code>Dispatchers.IO</code></td><td>Up to 64 threads (elastic)</td><td>Network, disk, database</td><td><code>Executors.newCachedThreadPool()</code></td></tr>\n<tr><td><code>Dispatchers.Default</code></td><td>= CPU cores (fixed)</td><td>JSON parsing, sorting, encryption</td><td><code>Executors.newFixedThreadPool(cores)</code></td></tr>\n<tr><td><code>Dispatchers.Unconfined</code></td><td>Resumes on caller's thread</td><td>Rare, testing only</td><td>—</td></tr>\n</table>\n\n<hr class=\"section-divider\">\n<h3>What Is a Job on the JVM?</h3>\n<p>Coroutines are NOT JVM magic — they're a <b>compiler + library feature</b>. No special bytecode support.</p>\n<div class=\"diagram\">Kotlin Coroutine         JVM / Java Equivalent\n────────────────         ────────────────────\nCoroutineScope      →    ExecutorService (thread pool)\nJob                 →    Future&lt;?&gt; (cancel/check handle)\nDeferred&lt;T&gt;         →    CompletableFuture&lt;T&gt;\nDispatcher          →    Executor / ThreadPoolExecutor\nsuspend fun         →    Callback (compiled to state machine)\nlaunch { }          →    executor.submit(Runnable)\nasync { }           →    executor.submit(Callable&lt;T&gt;)\ndelay(1000)         →    ScheduledExecutor.schedule()\nChannel             →    BlockingQueue\nFlow                →    RxJava Observable</div>\n<p>The compiler transforms each <code>suspend fun</code> into a <b>state machine</b> with labels at each suspension point. The <code>Continuation</code> interface is literally just a callback:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// This is the ENTIRE Continuation interface:</span>\ninterface Continuation&lt;in T&gt; {\n    val context: CoroutineContext\n    fun resumeWith(result: Result&lt;T&gt;)\n}\n<span class=\"cmt\">// That's it. A callback with context. No JVM magic.</span></div>\n\n<hr class=\"section-divider\">\n<h3>The <code>+</code> Operator — How Context Combining Works</h3>\n<p>When you write <code>CoroutineScope(SupervisorJob() + Dispatchers.Main)</code>, the <code>+</code> is <b>operator overloading</b>. <code>CoroutineContext</code> works like a Map — each element has a unique key:</p>\n<div class=\"diagram\">SupervisorJob()          Dispatchers.Main          CoroutineName(\"X\")\n┌──────────────┐        ┌───────────────┐          ┌────────────────┐\n│ Key: Job     │   +    │ Key: Intercept│    +     │ Key: Name      │\n│ Val: SvJob   │        │ Val: MainDisp │          │ Val: \"X\"       │\n└──────────────┘        └───────────────┘          └────────────────┘\n        │                       │                         │\n        └───────────────────────┴─────────────────────────┘\n                                │\n                   ┌────────────────────────┐\n                   │  Combined Context Map:  │\n                   │  Job → SupervisorJob    │\n                   │  Intercept → Main       │\n                   │  Name → \"X\"             │\n                   └────────────────────────┘\n\nSame key? Right side wins:\n  Dispatchers.IO + Dispatchers.Main  →  Main (same key: Interceptor)\n  Job() + SupervisorJob()            →  SupervisorJob (same key: Job)</div>\n\n<hr class=\"section-divider\">\n<h3>Built-In Scopes Reference</h3>\n<table>\n<tr><th>Scope</th><th>Where</th><th>Cancelled When</th><th>Dispatcher</th><th>Job Type</th></tr>\n<tr><td><code>viewModelScope</code></td><td>ViewModel</td><td>onCleared()</td><td>Main.immediate</td><td>SupervisorJob</td></tr>\n<tr><td><code>lifecycleScope</code></td><td>Activity/Fragment</td><td>onDestroy()</td><td>Main.immediate</td><td>SupervisorJob</td></tr>\n<tr><td><code>rememberCoroutineScope()</code></td><td>Composable</td><td>Leaves composition</td><td>Main.immediate</td><td>Job</td></tr>\n<tr><td><code>GlobalScope</code></td><td>Anywhere</td><td><b>Never</b></td><td>Default</td><td>—</td></tr>\n</table>\n<div class=\"warn-box\"><b>Avoid GlobalScope</b> — it has no lifecycle, so coroutines leak. Always prefer a lifecycle-bound scope.</div>\n\n<h4>Creating Custom Scopes for Complex Apps</h4>\n<p>For an app with multiple subsystems (RAG, voice, token processing), custom scopes are standard practice:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Each subsystem gets its own scope + appropriate dispatcher</span>\nclass LlmAppManager {\n    private val ragScope = CoroutineScope(\n        SupervisorJob() + Dispatchers.IO + CoroutineName(\"RAG\")\n    )\n    private val voiceScope = CoroutineScope(\n        SupervisorJob() + Dispatchers.Main + CoroutineName(\"Voice\")\n    )\n    private val tokenScope = CoroutineScope(\n        SupervisorJob() + Dispatchers.Default + CoroutineName(\"Tokenizer\")\n    )\n\n    fun destroy() {\n        ragScope.cancel()     <span class=\"cmt\">// MUST cancel to prevent leaks</span>\n        voiceScope.cancel()\n        tokenScope.cancel()\n    }\n}</div>\n<p>Compared to Java thread pools, coroutine scopes give you: structured parent-child cancellation, automatic cleanup, sequential-looking async code, and thousands of coroutines per thread (they suspend, not block).</p>",
+  "questions": [
+    {
+      "id": "cd-1",
+      "type": "multiple-choice",
+      "title": "launch vs async",
+      "difficulty": "intermediate",
+      "description": "What is the key difference between <code>launch</code> and <code>async</code>?",
+      "options": [
+        "launch runs on Main thread, async runs on IO",
+        "launch is for fire-and-forget (returns Job), async returns a Deferred<T> that you .await() for a result",
+        "launch is sequential, async is parallel",
+        "launch is deprecated in favor of async"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>launch</code> starts a coroutine and returns a <code>Job</code> (no result). Use it for side effects — updating UI, writing to DB, sending analytics. <code>async</code> returns <code>Deferred&lt;T&gt;</code> — a promise of a future value. Call <code>.await()</code> to get the result. Use async when you need to run things in parallel and combine results.",
+      "hints": [
+        "Think about return values — one has a result, one does not"
+      ]
+    },
+    {
+      "id": "cd-2",
+      "type": "what-does-this-do",
+      "title": "Parallel Decomposition",
+      "difficulty": "intermediate",
+      "description": "How does this code execute? What happens and in what order?",
+      "code": "viewModelScope.launch {\n    val startTime = System.currentTimeMillis()\n    \n    val user = async { fetchUser() }      // takes 2 seconds\n    val posts = async { fetchPosts() }     // takes 3 seconds\n    val settings = async { fetchSettings() } // takes 1 second\n    \n    val profile = Profile(\n        user = user.await(),\n        posts = posts.await(),\n        settings = settings.await()\n    )\n    \n    val elapsed = System.currentTimeMillis() - startTime\n    Log.d(\"TAG\", \"Completed in ${elapsed}ms\")\n}",
+      "options": [
+        "Sequential: ~6 seconds total (2+3+1)",
+        "Parallel: ~3 seconds total (all three run concurrently, total = slowest)",
+        "Parallel: ~1 second total (fastest wins)",
+        "Error: cannot use multiple async in one scope"
+      ],
+      "correctIndex": 1,
+      "explanation": "All three <code>async</code> calls start immediately and run <b>concurrently</b>. <code>.await()</code> suspends until each result is ready, but since they're already running in parallel, the total time equals the <b>slowest</b> operation (~3 seconds). This is the \"parallel decomposition\" pattern — essential for loading multiple data sources efficiently.",
+      "hints": [
+        "async starts the coroutine immediately, await just waits for the result",
+        "All three start at roughly the same time"
+      ]
+    },
+    {
+      "id": "cd-3",
+      "type": "multiple-choice",
+      "title": "Exception Propagation in launch",
+      "difficulty": "advanced",
+      "description": "What happens when the inner coroutine throws an exception?",
+      "code": "viewModelScope.launch {\n    launch {\n        throw RuntimeException(\"Boom!\")\n    }\n    launch {\n        delay(1000)\n        Log.d(\"TAG\", \"This may or may not print\")\n    }\n}",
+      "options": [
+        "Only the failing child is cancelled, the second child completes normally",
+        "The exception propagates up: the failing child cancels the parent, which cancels ALL children including the second launch",
+        "The exception is silently swallowed",
+        "The app crashes with an unhandled exception dialog"
+      ],
+      "correctIndex": 1,
+      "explanation": "With <code>launch</code>, exceptions propagate <b>upward</b> through the scope hierarchy. The failing child notifies its parent, the parent cancels itself and ALL remaining children (structured concurrency). The second <code>launch</code> gets cancelled before it can print. This is by design — if part of your work fails, all related work should stop. Use <code>supervisorScope</code> if you want independent failure.",
+      "hints": [
+        "Structured concurrency: parent and children are linked",
+        "Think about what the parent does when a child fails"
+      ]
+    },
+    {
+      "id": "cd-4",
+      "type": "fix-bug",
+      "title": "SupervisorScope for Independent Tasks",
+      "difficulty": "advanced",
+      "description": "This code loads a dashboard with three sections. If the \"recommendations\" API fails, the whole dashboard goes blank. Fix it so each section fails independently.",
+      "starterCode": "fun loadDashboard() {\n    viewModelScope.launch {\n        // BUG: If any one fails, ALL sections disappear!\n        val feed = async { api.getFeed() }\n        val recommendations = async { api.getRecommendations() } // This one fails sometimes\n        val trending = async { api.getTrending() }\n        \n        _uiState.value = DashboardState(\n            feed = feed.await(),\n            recommendations = recommendations.await(),\n            trending = trending.await()\n        )\n    }\n}",
+      "checks": [
+        {
+          "pattern": "supervisorScope|SupervisorJob",
+          "message": "Use supervisorScope or SupervisorJob to isolate failures",
+          "required": true
+        },
+        {
+          "pattern": "try|catch|runCatching",
+          "message": "Handle individual failures with try/catch",
+          "required": true
+        }
+      ],
+      "solution": "fun loadDashboard() {\n    viewModelScope.launch {\n        supervisorScope {\n            val feed = async { runCatching { api.getFeed() }.getOrNull() }\n            val recommendations = async { runCatching { api.getRecommendations() }.getOrNull() }\n            val trending = async { runCatching { api.getTrending() }.getOrNull() }\n            \n            _uiState.value = DashboardState(\n                feed = feed.await(),\n                recommendations = recommendations.await(),\n                trending = trending.await()\n            )\n        }\n    }\n}",
+      "explanation": "<code>supervisorScope</code> changes the failure behavior: a child's failure does NOT cancel siblings. Combined with <code>runCatching</code> (or try/catch) around each call, each section can fail independently. The UI shows whatever data succeeded and handles nulls for failures. This is the standard pattern for dashboards with multiple independent data sources.",
+      "hints": [
+        "Normal scope: one child fails → all fail. What scope type lets children fail independently?",
+        "Each async should handle its own errors"
+      ]
+    },
+    {
+      "id": "cd-5",
+      "type": "fill-blank",
+      "title": "withContext for Thread Switching",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to correctly switch from Main to IO thread for a network call, then back to Main to update UI.",
+      "code": "fun loadUser(userId: String) {\n    viewModelScope.launch {\n        _uiState.value = UiState.Loading\n        \n        val user = ___1___(___2___) {\n            // This runs on IO thread\n            api.fetchUser(userId)\n        }\n        \n        // Back on Main thread automatically\n        _uiState.value = UiState.Success(user)\n    }\n}",
+      "blanks": [
+        {
+          "answer": [
+            "withContext"
+          ],
+          "hint": "Switches the coroutine to a different dispatcher"
+        },
+        {
+          "answer": [
+            "Dispatchers.IO"
+          ],
+          "hint": "The dispatcher for network/disk I/O"
+        }
+      ],
+      "explanation": "<code>withContext(Dispatchers.IO)</code> switches the coroutine to the IO dispatcher for the duration of the block, then automatically resumes on the original dispatcher (Main). It's a suspend function, so the code reads sequentially even though it switches threads. This is the standard pattern for calling blocking APIs from a coroutine on Main.",
+      "hints": [
+        "This function suspends, switches context, runs the block, and switches back",
+        "Network calls should run on the IO dispatcher"
+      ]
+    },
+    {
+      "id": "cd-6",
+      "type": "multiple-choice",
+      "title": "CoroutineExceptionHandler",
+      "difficulty": "advanced",
+      "description": "Where does <code>CoroutineExceptionHandler</code> work?",
+      "code": "val handler = CoroutineExceptionHandler { _, exception ->\n    Log.e(\"TAG\", \"Caught: ${exception.message}\")\n}\n\n// Option A:\nscope.launch(handler) { throw RuntimeException() }\n\n// Option B:\nscope.launch {\n    launch(handler) { throw RuntimeException() }\n}\n\n// Option C:\nscope.launch {\n    async(handler) { throw RuntimeException() }.await()\n}",
+      "options": [
+        "All three options work",
+        "Only Option A works — CEH must be on the root/first coroutine in the scope hierarchy",
+        "Options A and B work, C does not",
+        "Only Option C works with async"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>CoroutineExceptionHandler</code> only works when installed on the <b>root coroutine</b> of the scope (Option A). In Option B, the exception propagates to the parent first — the handler on the child is ignored. In Option C, async holds the exception until <code>.await()</code>, which re-throws it as a regular exception — CEH does not catch it. For child coroutines, use <code>try/catch</code> instead.",
+      "hints": [
+        "CEH is a \"last resort\" handler — it only works at the top level",
+        "Think about where exceptions propagate: up to the parent, not to the child's handler"
+      ]
+    },
+    {
+      "id": "cd-7",
+      "type": "fix-bug",
+      "title": "Cancellation Not Cooperative",
+      "difficulty": "intermediate",
+      "description": "This coroutine cannot be cancelled — it keeps running even after the ViewModel is cleared. Fix it.",
+      "starterCode": "fun startPolling() {\n    viewModelScope.launch {\n        while (true) {\n            val data = api.fetchLatest()\n            _uiState.value = UiState.Success(data)\n            Thread.sleep(5000) // Wait 5 seconds\n        }\n    }\n}",
+      "checks": [
+        {
+          "pattern": "delay",
+          "message": "Use delay() instead of Thread.sleep() — delay is cancellation-aware",
+          "required": true
+        },
+        {
+          "pattern": "isActive|ensureActive|yield",
+          "message": "Check for cancellation in the loop (isActive/ensureActive) or use delay()",
+          "required": false
+        }
+      ],
+      "solution": "fun startPolling() {\n    viewModelScope.launch {\n        while (isActive) {\n            val data = api.fetchLatest()\n            _uiState.value = UiState.Success(data)\n            delay(5000) // Cancellation-aware wait\n        }\n    }\n}",
+      "explanation": "<code>Thread.sleep()</code> blocks the thread and is NOT cancellation-aware — the coroutine can't be cancelled during sleep. <code>delay()</code> is a <b>suspend function</b> that checks for cancellation. Also, <code>while(true)</code> should be <code>while(isActive)</code> to check cancellation between iterations. Coroutine cancellation is <b>cooperative</b> — your code must check for it.",
+      "hints": [
+        "Thread.sleep() blocks the thread — the coroutine framework cannot interrupt it",
+        "There's a suspend-function equivalent of Thread.sleep()"
+      ]
+    },
+    {
+      "id": "cd-8",
+      "type": "trivia",
+      "title": "Structured Concurrency Rules",
+      "difficulty": "advanced",
+      "description": "Explain the three rules of structured concurrency in Kotlin coroutines and why they matter.",
+      "keywords": [
+        "parent",
+        "child",
+        "cancel",
+        "wait",
+        "fail",
+        "propagate",
+        "scope",
+        "lifetime",
+        "leak",
+        "hierarchy"
+      ],
+      "answer": "Structured concurrency has three rules: (1) When a parent scope is cancelled, all child coroutines are cancelled. (2) When a child coroutine fails with an exception, it cancels the parent (which cancels all siblings). (3) A parent scope does not complete until all child coroutines complete. These rules prevent coroutine leaks (orphaned coroutines running after their parent is gone), ensure cleanup on failure, and make concurrent code predictable — you always know the lifetime of your coroutines.",
+      "explanation": "These three rules prevent \"coroutine leaks\" — the concurrent equivalent of memory leaks. Without structured concurrency, you could launch a coroutine and forget about it, leaving it running after the Activity/ViewModel is destroyed. The scope hierarchy (viewModelScope → child → grandchild) ensures everything has a defined lifetime.",
+      "hints": [
+        "Think about what happens when: (a) parent is cancelled, (b) child fails, (c) parent finishes",
+        "Why does this prevent \"leaks\"?"
+      ]
+    },
+    {
+      "id": "cd-9",
+      "type": "what-does-this-do",
+      "title": "coroutineScope vs supervisorScope",
+      "difficulty": "advanced",
+      "description": "What's the difference in behavior between these two blocks?",
+      "code": "// Block A:\nsuspend fun loadDataA() = coroutineScope {\n    val users = async { fetchUsers() }    // succeeds\n    val orders = async { fetchOrders() }  // throws!\n    Pair(users.await(), orders.await())\n}\n\n// Block B:\nsuspend fun loadDataB() = supervisorScope {\n    val users = async { fetchUsers() }    // succeeds\n    val orders = async {\n        try { fetchOrders() } catch (e: Exception) { emptyList() }\n    }\n    Pair(users.await(), orders.await())\n}",
+      "options": [
+        "Both behave the same",
+        "Block A: orders fails → users is cancelled → whole function throws. Block B: orders catches its error → users completes → function returns with empty orders list",
+        "Block A works, Block B crashes",
+        "Block B is slower because it doesn't cancel early"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>coroutineScope</code> follows standard structured concurrency — one child fails, everything fails. <code>supervisorScope</code> isolates children — one child's failure doesn't affect siblings. In Block B, fetchOrders() failing is caught locally, so users completes normally. Use <code>coroutineScope</code> for \"all or nothing\" work, <code>supervisorScope</code> for independent tasks.",
+      "hints": [
+        "The key difference is what happens to OTHER children when one fails"
+      ]
+    },
+    {
+      "id": "cd-10",
+      "type": "write-code",
+      "title": "Retry with Exponential Backoff",
+      "difficulty": "advanced",
+      "description": "Write a generic <code>retryWithBackoff</code> suspend function that retries a block up to maxRetries times with exponential delay (1s, 2s, 4s...). Return the result on success, throw on final failure.",
+      "starterCode": "suspend fun <T> retryWithBackoff(\n    maxRetries: Int = 3,\n    initialDelayMs: Long = 1000,\n    block: suspend () -> T\n): T {\n    // TODO: Implement retry logic with exponential backoff\n}",
+      "checks": [
+        {
+          "pattern": "repeat|for|while",
+          "message": "Use a loop for retry attempts",
+          "required": true
+        },
+        {
+          "pattern": "delay",
+          "message": "Use delay() between retries",
+          "required": true
+        },
+        {
+          "pattern": "try.*catch|runCatching",
+          "message": "Catch exceptions to retry",
+          "required": true
+        },
+        {
+          "pattern": "throw|error",
+          "message": "Re-throw on final failure",
+          "required": true
+        }
+      ],
+      "solution": "suspend fun <T> retryWithBackoff(\n    maxRetries: Int = 3,\n    initialDelayMs: Long = 1000,\n    block: suspend () -> T\n): T {\n    var currentDelay = initialDelayMs\n    repeat(maxRetries - 1) {\n        try {\n            return block()\n        } catch (e: Exception) {\n            delay(currentDelay)\n            currentDelay *= 2\n        }\n    }\n    return block() // Last attempt — let it throw\n}",
+      "explanation": "This is a common production pattern. <code>repeat(maxRetries - 1)</code> tries N-1 times with catching. The final call runs without catch, letting the exception propagate. <code>delay()</code> is cancellation-aware, so the retry respects scope cancellation. Doubling the delay implements exponential backoff, reducing pressure on failing services.",
+      "hints": [
+        "Try the block, catch failures, delay, increase the delay, repeat",
+        "The last attempt should not catch — let the caller handle the final failure"
+      ]
+    }
+  ]
+}

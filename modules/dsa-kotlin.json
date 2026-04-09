@@ -1,0 +1,164 @@
+{
+  "id": "dsa-kotlin",
+  "title": "DSA in Kotlin",
+  "icon": "🧮",
+  "description": "Algorithm problems in Kotlin — the patterns that come up in Android interviews at top firms",
+  "references": [
+    {"title": "Kotlin Standard Library Collections", "url": "https://kotlinlang.org/docs/collections-overview.html", "type": "docs"},
+    {"title": "NeetCode — Algorithm Roadmap", "url": "https://neetcode.io/roadmap", "type": "article"},
+    {"title": "Kotlin Competitive Programming", "url": "https://kotlinlang.org/docs/competitive-programming.html", "type": "docs"}
+  ],
+  "lesson": "<h3>Data Structures & Algorithms for Android Interviews</h3>\n<p>FAANG Android interviews include 2-3 coding rounds with standard DSA problems, but you write them in Kotlin. Key advantages of Kotlin for DSA:</p>\n<ul>\n<li><b>Collection functions</b>: <code>filter</code>, <code>map</code>, <code>groupBy</code>, <code>sortedBy</code>, <code>sumOf</code>, <code>windowed</code></li>\n<li><b>Destructuring</b>: <code>val (key, value) = pair</code></li>\n<li><b>String templates</b>: <code>\"${result}\"</code></li>\n<li><b>Extension functions</b>: write clean helpers</li>\n<li><b>Ranges</b>: <code>for (i in 0 until n)</code>, <code>(n downTo 0)</code></li>\n</ul>\n<h3>Must-Know Patterns</h3>\n<ul>\n<li><b>Two Pointers</b> — sorted array problems, palindromes</li>\n<li><b>Sliding Window</b> — substring/subarray problems</li>\n<li><b>HashMap counting</b> — frequency, anagrams, two-sum</li>\n<li><b>BFS/DFS</b> — graphs, trees, matrices</li>\n<li><b>Binary Search</b> — sorted data, search space reduction</li>\n<li><b>Dynamic Programming</b> — optimal substructure, overlapping subproblems</li>\n</ul>\n<div class=\"lesson-code\">// Kotlin DSA idioms:\nval freq = mutableMapOf&lt;Char, Int&gt;()\nfor (c in str) freq[c] = (freq[c] ?: 0) + 1\n\n// Or more idiomatic:\nval freq = str.groupingBy { it }.eachCount()\n\n// Deque as stack/queue:\nval stack = ArrayDeque&lt;Int&gt;()\nstack.addLast(1)   // push\nstack.removeLast() // pop</div>",
+  "questions": [
+    {
+      "id": "dsa-1",
+      "type": "write-code",
+      "title": "Two Sum",
+      "difficulty": "intermediate",
+      "description": "Given an array of integers and a target, return the indices of two numbers that add up to target. Each input has exactly one solution.",
+      "starterCode": "fun twoSum(nums: IntArray, target: Int): IntArray {\n    // TODO: Return indices of two numbers that sum to target\n    // Aim for O(n) time complexity\n}",
+      "checks": [
+        {
+          "pattern": "Map|map|HashMap|hashMap|mutableMap",
+          "message": "Use a HashMap for O(n) lookup",
+          "required": false
+        },
+        {
+          "pattern": "return|intArrayOf",
+          "message": "Return the result",
+          "required": true
+        }
+      ],
+      "solution": "fun twoSum(nums: IntArray, target: Int): IntArray {\n    val seen = mutableMapOf<Int, Int>() // value -> index\n    for ((i, num) in nums.withIndex()) {\n        val complement = target - num\n        seen[complement]?.let { return intArrayOf(it, i) }\n        seen[num] = i\n    }\n    throw IllegalArgumentException(\"No solution\")\n}",
+      "explanation": "For each number, calculate its complement (<code>target - num</code>). Check if we've already seen the complement. If yes, return both indices. If no, store current number and index. This is O(n) time and O(n) space. The Kotlin idiom <code>seen[complement]?.let { }</code> is cleaner than null-checking.",
+      "hints": [
+        "For each number, what other number would you need to reach the target?",
+        "A HashMap lets you check \"have I seen this number before?\" in O(1)"
+      ]
+    },
+    {
+      "id": "dsa-2",
+      "type": "write-code",
+      "title": "Valid Parentheses",
+      "difficulty": "intermediate",
+      "description": "Given a string containing just <code>(){}[]</code>, determine if the input string is valid. Open brackets must be closed in the correct order.",
+      "starterCode": "fun isValid(s: String): Boolean {\n    // TODO: Use a stack to match brackets\n    // \"()\" -> true, \"()[]{}\" -> true, \"(]\" -> false, \"([)]\" -> false\n}",
+      "checks": [
+        {
+          "pattern": "stack|Stack|ArrayDeque|Deque|LinkedList",
+          "message": "Use a stack data structure",
+          "required": false
+        },
+        {
+          "pattern": "return",
+          "message": "Return the result",
+          "required": true
+        }
+      ],
+      "solution": "fun isValid(s: String): Boolean {\n    val stack = ArrayDeque<Char>()\n    val pairs = mapOf(')' to '(', ']' to '[', '}' to '{')\n    \n    for (c in s) {\n        if (c in pairs.values) {\n            stack.addLast(c)\n        } else {\n            if (stack.isEmpty() || stack.removeLast() != pairs[c]) {\n                return false\n            }\n        }\n    }\n    return stack.isEmpty()\n}",
+      "explanation": "Push opening brackets onto the stack. For closing brackets, check if the top of the stack matches. If not, invalid. At the end, the stack should be empty (all brackets matched). <code>ArrayDeque</code> is Kotlin's preferred stack/deque implementation. Time: O(n), Space: O(n).",
+      "hints": [
+        "When you see a closing bracket, what should be on top of the stack?",
+        "Don't forget to check if the stack is empty at the end"
+      ]
+    },
+    {
+      "id": "dsa-3",
+      "type": "write-code",
+      "title": "Maximum Subarray (Kadane's)",
+      "difficulty": "intermediate",
+      "description": "Given an integer array, find the contiguous subarray with the largest sum and return the sum.",
+      "starterCode": "fun maxSubArray(nums: IntArray): Int {\n    // TODO: Find maximum sum contiguous subarray\n    // [-2,1,-3,4,-1,2,1,-5,4] -> 6 (subarray [4,-1,2,1])\n}",
+      "checks": [
+        {
+          "pattern": "max|Math\\.max|maxOf|coerceAtLeast",
+          "message": "Track the maximum sum",
+          "required": true
+        },
+        {
+          "pattern": "for|forEach|fold",
+          "message": "Iterate through the array",
+          "required": true
+        }
+      ],
+      "solution": "fun maxSubArray(nums: IntArray): Int {\n    var currentSum = nums[0]\n    var maxSum = nums[0]\n    \n    for (i in 1 until nums.size) {\n        currentSum = maxOf(nums[i], currentSum + nums[i])\n        maxSum = maxOf(maxSum, currentSum)\n    }\n    return maxSum\n}",
+      "explanation": "Kadane's Algorithm: at each position, decide whether to extend the current subarray or start fresh. If <code>currentSum + nums[i]</code> is less than <code>nums[i]</code> alone, start a new subarray. Track the global maximum. Time: O(n), Space: O(1). This is a classic DP problem where the state is \"max subarray ending at index i\".",
+      "hints": [
+        "At each element, you have two choices: extend the current subarray, or start a new one",
+        "Which choice gives a larger sum?"
+      ]
+    },
+    {
+      "id": "dsa-4",
+      "type": "write-code",
+      "title": "LRU Cache",
+      "difficulty": "advanced",
+      "description": "Design a Least Recently Used cache with <code>get(key)</code> and <code>put(key, value)</code> in O(1) time. This is directly relevant to image caching in Android.",
+      "starterCode": "class LRUCache(private val capacity: Int) {\n    // TODO: Implement get(key) and put(key, value)\n    // get: return value or -1 if not found\n    // put: insert/update. If over capacity, evict least recently used\n    // Both operations must be O(1)\n\n    fun get(key: Int): Int {\n        TODO()\n    }\n\n    fun put(key: Int, value: Int) {\n        TODO()\n    }\n}",
+      "checks": [
+        {
+          "pattern": "LinkedHashMap|linkedMapOf|HashMap|Map",
+          "message": "Use a HashMap-based structure",
+          "required": true
+        },
+        {
+          "pattern": "capacity|size|remove",
+          "message": "Handle capacity eviction",
+          "required": true
+        }
+      ],
+      "solution": "class LRUCache(private val capacity: Int) {\n    private val cache = object : LinkedHashMap<Int, Int>(capacity, 0.75f, true) {\n        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Int>?) =\n            size > capacity\n    }\n\n    fun get(key: Int): Int = cache.getOrDefault(key, -1)\n\n    fun put(key: Int, value: Int) {\n        cache[key] = value\n    }\n}",
+      "explanation": "<code>LinkedHashMap</code> with <code>accessOrder = true</code> (3rd constructor param) maintains entries in access order — most recently accessed at the end. Override <code>removeEldestEntry</code> to auto-evict when over capacity. This gives O(1) get and put. In Android, this is exactly how <code>LruCache</code> (used by image loaders) works internally. Understanding this data structure is critical for mobile performance.",
+      "hints": [
+        "LinkedHashMap can maintain insertion order OR access order",
+        "Java/Kotlin has a built-in data structure perfect for LRU"
+      ]
+    },
+    {
+      "id": "dsa-5",
+      "type": "write-code",
+      "title": "BFS — Shortest Path in Grid",
+      "difficulty": "advanced",
+      "description": "Given a 2D grid where 0 is open and 1 is blocked, find the shortest path from top-left to bottom-right. Return the path length or -1 if impossible.",
+      "starterCode": "fun shortestPath(grid: Array<IntArray>): Int {\n    // TODO: BFS from (0,0) to (rows-1, cols-1)\n    // Return number of steps, or -1 if no path exists\n    // Can move: up, down, left, right\n}",
+      "checks": [
+        {
+          "pattern": "Queue|queue|ArrayDeque|Deque|LinkedList",
+          "message": "Use a queue for BFS",
+          "required": true
+        },
+        {
+          "pattern": "visited|seen",
+          "message": "Track visited cells",
+          "required": false
+        }
+      ],
+      "solution": "fun shortestPath(grid: Array<IntArray>): Int {\n    val rows = grid.size\n    val cols = grid[0].size\n    if (grid[0][0] == 1 || grid[rows-1][cols-1] == 1) return -1\n    \n    val queue = ArrayDeque<Triple<Int, Int, Int>>() // row, col, steps\n    val visited = Array(rows) { BooleanArray(cols) }\n    \n    queue.addLast(Triple(0, 0, 1))\n    visited[0][0] = true\n    \n    val dirs = intArrayOf(-1, 0, 1, 0, -1) // up, right, down, left trick\n    \n    while (queue.isNotEmpty()) {\n        val (r, c, steps) = queue.removeFirst()\n        if (r == rows - 1 && c == cols - 1) return steps\n        \n        for (d in 0 until 4) {\n            val nr = r + dirs[d]\n            val nc = c + dirs[d + 1]\n            if (nr in 0 until rows && nc in 0 until cols &&\n                !visited[nr][nc] && grid[nr][nc] == 0) {\n                visited[nr][nc] = true\n                queue.addLast(Triple(nr, nc, steps + 1))\n            }\n        }\n    }\n    return -1\n}",
+      "explanation": "BFS guarantees shortest path in an unweighted graph/grid. Use a queue (FIFO): explore all cells at distance 1, then distance 2, etc. Mark cells as visited when enqueued (not when dequeued) to prevent revisits. The <code>dirs</code> array trick encodes 4 directions compactly. Time: O(rows * cols), Space: O(rows * cols). This pattern appears in many mobile-relevant problems (map navigation, game pathfinding).",
+      "hints": [
+        "BFS always finds the shortest path in unweighted graphs",
+        "Use a queue, not a stack (that would be DFS)"
+      ]
+    },
+    {
+      "id": "dsa-6",
+      "type": "multiple-choice",
+      "title": "Time Complexity",
+      "difficulty": "intermediate",
+      "description": "What is the time complexity of this Kotlin code?",
+      "code": "fun findDuplicate(nums: List<Int>): Boolean {\n    val seen = mutableSetOf<Int>()\n    for (num in nums) {\n        if (num in seen) return true\n        seen.add(num)\n    }\n    return false\n}",
+      "options": [
+        "O(n^2) — nested iteration",
+        "O(n) — single pass with O(1) HashSet lookups",
+        "O(n log n) — sorting",
+        "O(1) — constant time"
+      ],
+      "correctIndex": 1,
+      "explanation": "The loop runs n times. Each <code>in seen</code> (contains) and <code>add</code> operation on a <code>HashSet</code> is O(1) average case. Total: O(n) time, O(n) space. This is the standard pattern for detecting duplicates efficiently. Compare with the naive O(n^2) approach of checking every pair.",
+      "hints": [
+        "What is the time complexity of HashSet.contains()?",
+        "How many times does the loop run?"
+      ]
+    }
+  ]
+}

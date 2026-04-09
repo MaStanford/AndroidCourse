@@ -1,0 +1,336 @@
+{
+  "id": "compose-state-mastery",
+  "title": "Compose State Mastery",
+  "icon": "🎛️",
+  "description": "All state patterns: @Stable, @Immutable, SnapshotStateList, state hoisting, and when to use what",
+  "references": [
+    {"title": "Android Developers — State and Jetpack Compose", "url": "https://developer.android.com/develop/ui/compose/state", "type": "docs"},
+    {"title": "Android Developers — State Hoisting", "url": "https://developer.android.com/develop/ui/compose/state-hoisting", "type": "docs"},
+    {"title": "Compose Stability Explained", "url": "https://developer.android.com/develop/ui/compose/performance/stability", "type": "docs"},
+    {"title": "kotlinx.collections.immutable", "url": "https://github.com/Kotlin/kotlinx.collections.immutable", "type": "github"}
+  ],
+  "lesson": "<h3>The Complete Guide to Compose State</h3>\n<p>State management in Compose has many tools. Choosing the right one depends on <b>where</b> the state lives, <b>who</b> needs it, and <b>how</b> it changes.</p>\n\n<h3>How <code>remember { mutableStateOf() }</code> Actually Works</h3>\n<p>There are <b>two separate mechanisms</b> working together:</p>\n<h4>Step 1: <code>remember</code> — Survival</h4>\n<p>Compose builds a <b>slot table</b> — a positional data structure indexed by call position. <code>remember</code> stores a value in a slot:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Simplified internal pseudo-code of remember:</span>\n@Composable\nfun &lt;T&gt; remember(calculation: () -&gt; T): T {\n    val position = currentComposer.currentPosition\n    if (slotTable.hasValueAt(position)) {\n        return slotTable.getValueAt(position)   <span class=\"cmt\">// recomposition: return stored</span>\n    } else {\n        val value = calculation()                <span class=\"cmt\">// first composition: compute</span>\n        slotTable.setValueAt(position, value)\n        return value\n    }\n}</div>\n\n<h4>Step 2: <code>mutableStateOf</code> — Observation + Trigger</h4>\n<p><code>remember</code> alone has <b>no change detection</b>. <code>mutableStateOf()</code> creates a <code>MutableState</code> that plugs into Compose's <b>Snapshot system</b>:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Simplified internal pseudo-code:</span>\nclass SnapshotMutableState&lt;T&gt;(initial: T) {\n    private var _value = initial\n\n    var value: T\n        get() {\n            <span class=\"cmt\">// RECORD: \"this composable READS this state\"</span>\n            Snapshot.current.recordRead(this)\n            return _value\n        }\n        set(new) {\n            if (new != _value) {   <span class=\"cmt\">// ← THE DIFF (structural equality)</span>\n                _value = new\n                <span class=\"cmt\">// NOTIFY: \"all readers need to recompose!\"</span>\n                Snapshot.current.notifyWrite(this)\n            }\n        }\n}</div>\n\n<h4>Why You Need BOTH</h4>\n<table>\n<tr><th>What You Write</th><th>Survives Recomposition?</th><th>Triggers Recomposition?</th></tr>\n<tr><td><code>var x = 0</code></td><td>No</td><td>No</td></tr>\n<tr><td><code>val x = remember { 0 }</code></td><td>Yes</td><td>No</td></tr>\n<tr><td><code>val x = mutableStateOf(0)</code></td><td>No (recreated each time!)</td><td>Yes (but lost)</td></tr>\n<tr><td><code>var x by remember { mutableStateOf(0) }</code></td><td><b>Yes</b></td><td><b>Yes</b></td></tr>\n</table>\n\n<div class=\"info-box\"><b>Two levels of diffing:</b> (1) <code>mutableStateOf</code> diffs the <b>value</b> (old != new → schedule recomposition). (2) After recomposition, Compose diffs the <b>UI tree output</b> (old nodes vs new nodes → only patches changes).</div>\n\n<hr class=\"section-divider\">\n<h3>State Hoisting vs Local State</h3>\n<p>The decision tree:</p>\n<ul>\n<li><b>Local state</b> (<code>remember</code>) — UI-only state no one else needs (expanded/collapsed, animation progress)</li>\n<li><b>Hoisted state</b> (passed as params) — state the parent needs to know about (selected item, text input)</li>\n<li><b>ViewModel state</b> (<code>StateFlow</code>) — business logic state that survives rotation (user data, API results)</li>\n</ul>\n<h3>How Compose Decides to Skip Recomposition</h3>\n<p>Compose skips recomposing a function when ALL its parameters are <b>stable</b> AND <b>unchanged</b>. A type is stable when:</p>\n<ul>\n<li>It's a primitive (Int, String, Boolean, Float, etc.)</li>\n<li>It's a <code>data class</code> where all properties are stable types</li>\n<li>It's annotated with <code>@Stable</code> or <code>@Immutable</code></li>\n<li>It's a function type (lambdas) — but captured mutable state makes them unstable!</li>\n</ul>\n<div class=\"lesson-code\">// STABLE — Compose can skip recomposition\ndata class User(val name: String, val age: Int)\n\n// UNSTABLE — List is an interface, Compose can't guarantee immutability\ndata class UserList(val users: List&lt;User&gt;)\n\n// FIX 1: Annotate with @Immutable (you promise it won't change)\n@Immutable\ndata class UserList(val users: List&lt;User&gt;)\n\n// FIX 2: Use kotlinx.collections.immutable\ndata class UserList(val users: ImmutableList&lt;User&gt;)</div>\n<h3>All Three Patterns: Click a Card to Select It</h3>\n<p>The same UI, three different architectures. Each trades simplicity for performance:</p>\n\n<h4>Pattern 1: State Hoisting + @Immutable Data (Standard / ViewModel)</h4>\n<p>Parent owns all state. Children are stateless — they receive data down and send events up.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// The data is @Immutable — never changes after creation</span>\n@Immutable\ndata class Card(val id: String, val title: String, val isSelected: Boolean = false)\n\n<span class=\"cmt\">// ViewModel owns the list</span>\nclass CardViewModel : ViewModel() {\n    private val _cards = MutableStateFlow(listOf(\n        Card(\"1\", \"Kotlin\"), Card(\"2\", \"Compose\"), Card(\"3\", \"Room\")\n    ))\n    val cards = _cards.asStateFlow()\n\n    fun toggleCard(id: String) {\n        _cards.update { list -&gt;\n            <span class=\"hl\">list.map { if (it.id == id) it.copy(isSelected = !it.isSelected) else it }</span>\n        }\n        <span class=\"cmt\">// Creates a NEW list with a NEW Card object for the clicked item</span>\n    }\n}\n\n@Composable\nfun CardList(viewModel: CardViewModel) {\n    val cards by viewModel.cards.collectAsStateWithLifecycle()\n    LazyColumn {\n        items(cards, key = { it.id }) { card -&gt;\n            CardItem(\n                title = card.title,\n                isSelected = card.isSelected,\n                <span class=\"hl\">onClick = { viewModel.toggleCard(card.id) }</span>  <span class=\"cmt\">// event goes UP</span>\n            )\n        }\n    }\n}</div>\n<div class=\"diagram\">Recomposition flow:\n  toggleCard() → new list via .copy() → StateFlow emits\n    → CardList recomposes (reads StateFlow)\n      → LazyColumn diffs items by key\n        → Only changed Card reference → that CardItem recomposes\n        → Unchanged Cards: SKIPPED (@Immutable + same reference)</div>\n\n<h4>Pattern 2: SnapshotStateList + @Immutable Items (Local / No ViewModel)</h4>\n<p>The list itself is Compose-observable. Replace items by index — Compose detects per-index changes.</p>\n<div class=\"lesson-code\">@Immutable\ndata class Card(val id: String, val title: String, val isSelected: Boolean = false)\n\n@Composable\nfun CardList() {\n    <span class=\"hl\">val cards = remember { mutableStateListOf(</span>\n        Card(\"1\", \"Kotlin\"), Card(\"2\", \"Compose\"), Card(\"3\", \"Room\")\n    <span class=\"hl\">)}</span>\n    <span class=\"cmt\">// mutableStateListOf = SnapshotStateList (Compose-observable)</span>\n\n    LazyColumn {\n        items(cards.size, key = { cards[it].id }) { index -&gt;\n            val card = cards[index]\n            CardItem(\n                title = card.title,\n                isSelected = card.isSelected,\n                onClick = {\n                    <span class=\"hl\">cards[index] = card.copy(isSelected = !card.isSelected)</span>\n                    <span class=\"cmt\">// Replaces ONE item. SnapshotStateList detects index-level change</span>\n                }\n            )\n        }\n    }\n}</div>\n<div class=\"diagram\">Recomposition flow:\n  cards[0] = card.copy(...) → SnapshotStateList records write at index 0\n    → Only composables that READ index 0 recompose\n      → That one CardItem recomposes\n      → Other indices: UNTOUCHED</div>\n\n<h4>Pattern 3: @Stable Wrapper with mutableStateOf (Self-Mutating Items)</h4>\n<p>Each item manages its own observable state. No callbacks, no new objects, no parent involvement.</p>\n<div class=\"lesson-code\"><span class=\"hl\">@Stable</span>\nclass CardState(\n    val id: String,\n    val title: String,\n    isSelected: Boolean = false\n) {\n    <span class=\"hl\">var isSelected by mutableStateOf(isSelected)</span>   <span class=\"cmt\">// observable!</span>\n        private set\n    <span class=\"hl\">fun toggleSelected() { isSelected = !isSelected }</span>\n}\n\n@Composable\nfun CardList() {\n    val cards = remember { listOf(\n        CardState(\"1\", \"Kotlin\"), CardState(\"2\", \"Compose\"), CardState(\"3\", \"Room\")\n    )}\n    <span class=\"cmt\">// Just a regular List — the ITEMS are observable, not the list</span>\n\n    LazyColumn {\n        items(cards, key = { it.id }) { card -&gt;\n            CardItem(\n                title = card.title,\n                isSelected = card.isSelected,      <span class=\"cmt\">// reads mutableStateOf</span>\n                onClick = { <span class=\"hl\">card.toggleSelected()</span> }  <span class=\"cmt\">// mutates in place!</span>\n            )\n        }\n    }\n}</div>\n<div class=\"diagram\">Recomposition flow:\n  card.toggleSelected() → isSelected.value changes\n    → Snapshot system checks: who READ this State object?\n      → Only CardItem that called card.isSelected → recomposes\n      → List: unchanged. Other cards: UNTOUCHED.\n      → No new objects created. No parent involved.\n\nThis is the NARROWEST possible recomposition scope.</div>\n\n<hr class=\"section-divider\">\n<h3>Pattern Comparison</h3>\n<table>\n<tr><th>Pattern</th><th>State Lives In</th><th>Change Mechanism</th><th>Recomposition</th><th>Best For</th></tr>\n<tr><td><b>1. State Hoisting</b><br>@Immutable + ViewModel</td><td>ViewModel StateFlow</td><td><code>.copy()</code> → new list</td><td>Parent + changed item</td><td>Standard MVVM, API data</td></tr>\n<tr><td><b>2. SnapshotStateList</b><br>@Immutable items</td><td>Composable (remember)</td><td><code>list[i] = .copy()</code></td><td>Changed index only</td><td>Local lists, no ViewModel</td></tr>\n<tr><td><b>3. @Stable Wrapper</b><br>mutableStateOf fields</td><td>Inside each item</td><td>Property mutation in place</td><td>Changed property reader only</td><td>Complex per-item state</td></tr>\n</table>\n<div class=\"info-box\"><b>When to use which:</b><br>\n• <b>Pattern 1</b> when state is tied to business logic (API responses, database, ViewModel) — most common in production apps<br>\n• <b>Pattern 2</b> when state is local UI-only and you don't need a ViewModel — quick prototypes, local editable lists<br>\n• <b>Pattern 3</b> when items have complex independent state (selected + expanded + editing + animation) — most efficient for per-item reactivity</div>",
+  "questions": [
+    {
+      "id": "sm-1",
+      "type": "multiple-choice",
+      "title": "Why List<T> is Unstable",
+      "difficulty": "advanced",
+      "description": "Why does Compose treat <code>List&lt;User&gt;</code> as unstable, even when you pass the same list?",
+      "options": [
+        "Lists are always slow in Compose",
+        "List<T> is an interface — Compose cannot guarantee the implementation is immutable. Someone could pass a MutableList cast as List, and it could change between recompositions",
+        "Compose only supports arrays, not lists",
+        "Lists are stable but only in debug builds"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>List&lt;T&gt;</code> is a Kotlin interface. The actual object could be an <code>ArrayList</code> (mutable) passed as a <code>List</code> reference. Compose can't guarantee it won't be mutated externally between recompositions, so it marks it <b>unstable</b> and always recomposes. Fixes: (1) <code>@Immutable</code> annotation (your promise), (2) <code>ImmutableList</code> from kotlinx-collections-immutable (compiler-verified), (3) <code>toList()</code> to create a snapshot.",
+      "hints": [
+        "Think about Kotlin interfaces vs implementations — List could be backed by MutableList",
+        "Compose needs guarantees about immutability to skip safely"
+      ]
+    },
+    {
+      "id": "sm-2",
+      "type": "fix-bug",
+      "title": "Clickable Cards — State Hoisting",
+      "difficulty": "intermediate",
+      "description": "This card list doesn't update when cards are clicked. The click should toggle a \"selected\" visual state. Fix it using state hoisting.",
+      "starterCode": "@Composable\nfun CardListScreen() {\n    val cards = remember { listOf(\n        Card(\"1\", \"Kotlin\"), Card(\"2\", \"Compose\"), Card(\"3\", \"Room\")\n    )}\n    val selectedIds = remember { mutableSetOf<String>() }\n\n    LazyColumn {\n        items(cards, key = { it.id }) { card ->\n            CardItem(\n                card = card,\n                isSelected = card.id in selectedIds,\n                onClick = {\n                    // BUG: This mutates the set but doesn't trigger recomposition!\n                    if (card.id in selectedIds) selectedIds.remove(card.id)\n                    else selectedIds.add(card.id)\n                }\n            )\n        }\n    }\n}",
+      "checks": [
+        {
+          "pattern": "mutableStateListOf|mutableStateSetOf|mutableStateOf|SnapshotStateList",
+          "message": "Use a Compose-observable collection (mutableStateSetOf or mutableStateOf(setOf()))",
+          "required": true
+        }
+      ],
+      "solution": "@Composable\nfun CardListScreen() {\n    val cards = remember { listOf(\n        Card(\"1\", \"Kotlin\"), Card(\"2\", \"Compose\"), Card(\"3\", \"Room\")\n    )}\n    var selectedIds by remember { mutableStateOf(setOf<String>()) }\n\n    LazyColumn {\n        items(cards, key = { it.id }) { card ->\n            CardItem(\n                card = card,\n                isSelected = card.id in selectedIds,\n                onClick = {\n                    selectedIds = if (card.id in selectedIds)\n                        selectedIds - card.id\n                    else\n                        selectedIds + card.id\n                }\n            )\n        }\n    }\n}",
+      "explanation": "A plain <code>mutableSetOf()</code> is NOT observable by Compose — mutating it does not trigger recomposition. Fix: use <code>mutableStateOf(setOf())</code> and create a <b>new set</b> on each update (using + and - operators). Alternatively, use <code>mutableStateSetOf()</code> which is a Compose-observable set. The key insight: Compose only recomposes when it can <b>detect</b> the change.",
+      "hints": [
+        "Regular Kotlin collections are invisible to Compose recomposition",
+        "You need either a State wrapper or a Compose snapshot collection"
+      ]
+    },
+    {
+      "id": "sm-3",
+      "type": "what-does-this-do",
+      "title": "SnapshotStateList",
+      "difficulty": "advanced",
+      "description": "What happens when <code>cards[0] = cards[0].copy(isClicked = true)</code> is called?",
+      "code": "@Composable\nfun CardListScreen() {\n    val cards = remember {\n        mutableStateListOf(\n            Card(\"1\", \"Kotlin\", false),\n            Card(\"2\", \"Compose\", false),\n            Card(\"3\", \"Room\", false)\n        )\n    }\n\n    LazyColumn {\n        items(cards.size, key = { cards[it].id }) { index ->\n            val card = cards[index]\n            CardItem(\n                card = card,\n                onClick = {\n                    cards[index] = card.copy(isClicked = !card.isClicked)\n                }\n            )\n        }\n    }\n}",
+      "options": [
+        "Nothing — SnapshotStateList doesn't trigger recomposition",
+        "Only the clicked card recomposes (because of keys + SnapshotStateList detects index-level changes)",
+        "The entire LazyColumn recomposes",
+        "The app crashes — you can't modify a list during composition"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>mutableStateListOf()</code> creates a <b>SnapshotStateList</b> — a list that Compose observes at the element level. When you replace an item at index 0, only composables reading that index recompose. Combined with <code>key = { cards[it].id }</code>, LazyColumn knows exactly which item changed and only recomposes that one <code>CardItem</code>. This is the most efficient pattern for local mutable lists.",
+      "hints": [
+        "SnapshotStateList tracks reads and writes at the index level",
+        "Keys tell LazyColumn which items are which"
+      ]
+    },
+    {
+      "id": "sm-4",
+      "type": "write-code",
+      "title": "@Stable Class with Internal State",
+      "difficulty": "advanced",
+      "description": "Create a @Stable CardState class where each card manages its own observable selected/expanded state. The composable should NOT need a callback — the card updates itself.",
+      "starterCode": "// TODO: Create a @Stable CardState class with:\n// - card: Card (immutable data)\n// - isSelected: Boolean (observable, toggleable)\n// - isExpanded: Boolean (observable, toggleable)\n// - toggleSelected() and toggleExpanded() methods\n\n@Composable\nfun SmartCardList(cards: List<Card>) {\n    val cardStates = remember(cards) {\n        cards.map { CardState(it) }\n    }\n    LazyColumn {\n        items(cardStates, key = { it.card.id }) { state ->\n            SmartCardItem(state) // No callbacks needed!\n        }\n    }\n}",
+      "checks": [
+        {
+          "pattern": "@Stable|@stable",
+          "message": "Annotate with @Stable",
+          "required": true
+        },
+        {
+          "pattern": "mutableStateOf",
+          "message": "Use mutableStateOf for observable properties",
+          "required": true
+        },
+        {
+          "pattern": "toggleSelected|toggle",
+          "message": "Include toggle methods",
+          "required": true
+        }
+      ],
+      "solution": "@Stable\nclass CardState(val card: Card) {\n    var isSelected by mutableStateOf(false)\n        private set\n    var isExpanded by mutableStateOf(false)\n        private set\n    \n    fun toggleSelected() { isSelected = !isSelected }\n    fun toggleExpanded() { isExpanded = !isExpanded }\n}\n\n@Composable\nfun SmartCardItem(state: CardState) {\n    Card(\n        modifier = Modifier\n            .fillMaxWidth()\n            .clickable { state.toggleSelected() }\n            .background(if (state.isSelected) Color.Blue.copy(alpha = 0.1f) else Color.Transparent)\n    ) {\n        Text(state.card.title)\n        if (state.isExpanded) {\n            Text(state.card.description)\n        }\n    }\n}",
+      "explanation": "The <code>@Stable</code> annotation tells Compose this class is safe to skip during recomposition IF the reference hasn't changed. Inside, <code>mutableStateOf</code> properties are individually observable — when <code>isSelected</code> changes, only composables reading that specific property recompose. This is the \"per-item state\" pattern: each card manages its own state without needing callbacks to a parent. The parent just holds a list of <code>CardState</code> objects.",
+      "hints": [
+        "@Stable tells Compose: trust me, this object is well-behaved",
+        "Each mutableStateOf property is independently observable"
+      ]
+    },
+    {
+      "id": "sm-5",
+      "type": "multiple-choice",
+      "title": "@Immutable vs @Stable",
+      "difficulty": "advanced",
+      "description": "What is the difference between <code>@Immutable</code> and <code>@Stable</code>?",
+      "options": [
+        "They are the same annotation",
+        "@Immutable = object never changes after creation (all properties are val). @Stable = object may change, but Compose will be notified of changes (via mutableStateOf). Both enable skipping",
+        "@Immutable is for classes, @Stable is for functions",
+        "@Stable is deprecated in favor of @Immutable"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>@Immutable</code> is a stronger guarantee: the object's publicly visible properties will NEVER change. All properties should be <code>val</code> with immutable types. <code>@Stable</code> is weaker: properties CAN change, but changes are always observable (via <code>mutableStateOf</code>). Both tell Compose it's safe to skip recomposition based on reference equality. Use <code>@Immutable</code> for pure data, <code>@Stable</code> for stateful objects.",
+      "hints": [
+        "Think about whether the object can change after creation",
+        "Both enable smart recomposition, but make different promises"
+      ]
+    },
+    {
+      "id": "sm-6",
+      "type": "fix-bug",
+      "title": "Lambda Causing Unnecessary Recomposition",
+      "difficulty": "advanced",
+      "description": "Every time the parent recomposes, ALL items in this LazyColumn recompose — even unchanged ones. The lambda is the culprit. Fix it.",
+      "starterCode": "@Composable\nfun TaskList(viewModel: TaskViewModel) {\n    val tasks by viewModel.tasks.collectAsStateWithLifecycle()\n    val count by viewModel.completedCount.collectAsStateWithLifecycle()\n\n    Column {\n        Text(\"Completed: $count\")\n        LazyColumn {\n            items(tasks, key = { it.id }) { task ->\n                // BUG: This lambda captures 'viewModel', making it unstable\n                // Every recomposition creates a new lambda instance\n                TaskItem(\n                    task = task,\n                    onToggle = { viewModel.toggleTask(task.id) }\n                )\n            }\n        }\n    }\n}",
+      "checks": [
+        {
+          "pattern": "remember|useCallback|\\bcallback\\b",
+          "message": "Stabilize the lambda with remember or extract the handler",
+          "required": false
+        },
+        {
+          "pattern": "toggleTask|onToggle",
+          "message": "Keep the toggle functionality",
+          "required": true
+        }
+      ],
+      "solution": "@Composable\nfun TaskList(viewModel: TaskViewModel) {\n    val tasks by viewModel.tasks.collectAsStateWithLifecycle()\n    val count by viewModel.completedCount.collectAsStateWithLifecycle()\n\n    Column {\n        Text(\"Completed: $count\")\n        \n        val onToggle = remember<(String) -> Unit> {\n            { id -> viewModel.toggleTask(id) }\n        }\n        \n        LazyColumn {\n            items(tasks, key = { it.id }) { task ->\n                TaskItem(\n                    task = task,\n                    onToggle = { onToggle(task.id) }\n                )\n            }\n        }\n    }\n}",
+      "explanation": "The lambda <code>{ viewModel.toggleTask(task.id) }</code> captures <code>viewModel</code> (unstable) — Compose treats it as a new lambda on every recomposition. Wrapping the handler in <code>remember</code> creates a stable reference. Since <code>viewModel</code> never changes identity (ViewModel survives recomposition), it's safe to remember. This prevents all <code>TaskItem</code>s from recomposing when <code>count</code> changes.",
+      "hints": [
+        "A lambda that captures unstable objects is itself unstable",
+        "If the captured reference never changes, you can remember the lambda"
+      ]
+    },
+    {
+      "id": "sm-7",
+      "type": "trivia",
+      "title": "Choosing the Right State Pattern",
+      "difficulty": "intermediate",
+      "description": "You have a list of cards rendered in a LazyColumn. Clicking a card should toggle its \"selected\" visual. Describe at least three different patterns to implement this and when to use each.",
+      "keywords": [
+        "state hoisting",
+        "callback",
+        "SnapshotStateList",
+        "mutableStateListOf",
+        "@Stable",
+        "mutableStateOf",
+        "ViewModel",
+        "local state",
+        "remember"
+      ],
+      "answer": "Pattern 1: State Hoisting — Parent holds selectedIds as mutableStateOf(setOf()). Pass isSelected boolean and onClick callback down. Best for: simple lists where parent needs to know selections (e.g., bulk delete). Pattern 2: SnapshotStateList — Use mutableStateListOf and replace items with .copy(isSelected = !isSelected). Changes at index level trigger per-item recomposition. Best for: local UI lists without a ViewModel. Pattern 3: @Stable wrapper — Create a @Stable class with mutableStateOf properties and toggle methods. Each item manages its own state, no callbacks needed. Best for: complex per-item state (selected + expanded + editing) where many independent properties change.",
+      "explanation": "All three patterns work, but optimize differently. <b>State hoisting</b> follows the standard Compose pattern (state down, events up) and works naturally with ViewModels. <b>SnapshotStateList</b> gives granular reactivity for local lists. <b>@Stable wrappers</b> are most efficient for complex per-item state because only the changed property triggers recomposition. Choose based on: Who needs the state? How complex is per-item state? Is there a ViewModel?",
+      "hints": [
+        "Think about where state lives: parent, list, or individual items",
+        "Each pattern trades simplicity for performance differently"
+      ]
+    },
+    {
+      "id": "sm-8",
+      "type": "fix-bug",
+      "title": "derivedStateOf Misuse",
+      "difficulty": "advanced",
+      "description": "This code uses <code>derivedStateOf</code> incorrectly. The filtered list never updates. Fix it.",
+      "starterCode": "@Composable\nfun FilteredList(viewModel: ListViewModel) {\n    val items by viewModel.items.collectAsStateWithLifecycle()\n    var filterText by remember { mutableStateOf(\"\") }\n\n    // BUG: derivedStateOf captures the initial items value!\n    val filteredItems = remember {\n        derivedStateOf { items.filter { it.name.contains(filterText) } }\n    }\n\n    TextField(value = filterText, onValueChange = { filterText = it })\n    LazyColumn {\n        items(filteredItems.value, key = { it.id }) { ItemRow(it) }\n    }\n}",
+      "checks": [
+        {
+          "pattern": "remember\\(|remember \\{\\s*derivedStateOf",
+          "message": "derivedStateOf must be able to read the current state values, not captured initial values",
+          "required": false
+        }
+      ],
+      "solution": "@Composable\nfun FilteredList(viewModel: ListViewModel) {\n    val items by viewModel.items.collectAsStateWithLifecycle()\n    var filterText by remember { mutableStateOf(\"\") }\n\n    val filteredItems by remember {\n        derivedStateOf { items.filter { it.name.contains(filterText) } }\n    }\n\n    TextField(value = filterText, onValueChange = { filterText = it })\n    LazyColumn {\n        items(filteredItems, key = { it.id }) { ItemRow(it) }\n    }\n}",
+      "explanation": "Actually, this code DOES work correctly! <code>derivedStateOf</code> reads <code>items</code> and <code>filterText</code> as State objects inside the lambda — Compose tracks these reads and re-runs the derivation when they change. The <code>by</code> delegation is the main fix — using <code>.value</code> inside the LazyColumn items call also works. The key insight: <code>derivedStateOf</code> tracks State reads, not variable captures. As long as <code>items</code> and <code>filterText</code> are backed by State (they are — collectAsStateWithLifecycle and mutableStateOf), the derivation updates correctly. Common misunderstanding: people think remember \"freezes\" the values, but derivedStateOf reads State objects reactively.",
+      "hints": [
+        "derivedStateOf tracks reads of State objects — it's reactive, not a one-time capture",
+        "Make sure you're reading .value (State) not a captured snapshot"
+      ]
+    },
+    {
+      "id": "sm-9",
+      "type": "multiple-choice",
+      "title": "remember(key) vs remember",
+      "difficulty": "intermediate",
+      "description": "What does providing a key to <code>remember(key)</code> do?",
+      "code": "@Composable\nfun UserProfile(userId: String) {\n    // Option A:\n    val formatter = remember { DateFormatter() }\n    \n    // Option B:\n    val formatter = remember(userId) { DateFormatter(userId) }\n}",
+      "options": [
+        "The key makes it thread-safe",
+        "remember(key) recreates the value when the key changes. remember (no key) keeps the initial value forever",
+        "The key is used for debugging only",
+        "remember(key) is deprecated"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>remember</code> (no key) creates the value once and keeps it for the lifetime of the composable in the composition. <code>remember(key)</code> invalidates and recreates the value when the key changes. If <code>userId</code> changes, Option B creates a new <code>DateFormatter</code> with the new user. Option A would keep using the old one. Use keys when the remembered value depends on a parameter.",
+      "hints": [
+        "What if the user navigates to a different profile? Should the formatter stay the same?"
+      ]
+    },
+    {
+      "id": "sm-10",
+      "type": "what-does-this-do",
+      "title": "@Stable Self-Mutating Card",
+      "difficulty": "advanced",
+      "description": "What happens when the user clicks the first card? Trace the recomposition path.",
+      "code": "@Stable\nclass CardState(val id: String, val title: String, isSelected: Boolean = false) {\n    var isSelected by mutableStateOf(isSelected)\n        private set\n    fun toggleSelected() { isSelected = !isSelected }\n}\n\n@Composable\nfun CardList() {\n    val cards = remember {\n        listOf(CardState(\"1\",\"Kotlin\"), CardState(\"2\",\"Compose\"), CardState(\"3\",\"Room\"))\n    }\n    LazyColumn {\n        items(cards, key = { it.id }) { card ->\n            CardItem(\n                title = card.title,\n                isSelected = card.isSelected,  // reads mutableStateOf\n                onClick = { card.toggleSelected() }  // mutates in place\n            )\n        }\n    }\n}",
+      "options": [
+        "All three CardItems recompose because the list changed",
+        "Only CardItem for \"Kotlin\" recomposes — its mutableStateOf(isSelected) changed, and Compose only tracks readers of that specific State object. The list itself is unchanged.",
+        "Nothing recomposes because the list reference did not change",
+        "The app crashes because you cannot mutate @Stable objects"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>@Stable</code> tells Compose: \"trust this object's snapshot-observable properties.\" When <code>card.toggleSelected()</code> flips <code>isSelected</code>, the <code>mutableStateOf</code> snapshot system notifies <b>only the composable that read that property</b> — the CardItem at position 0. The list reference is unchanged, the other CardState objects are untouched, so cards 2 and 3 are completely skipped. This is the most granular recomposition possible.",
+      "hints": [
+        "mutableStateOf tracks individual readers — who called .get() on this State?",
+        "The list itself never changes — no new list, no .copy()"
+      ]
+    },
+    {
+      "id": "sm-11",
+      "type": "write-code",
+      "title": "@Stable Todo Item with Multiple States",
+      "difficulty": "advanced",
+      "description": "Create a @Stable TodoItemState class with: title (fixed), isCompleted (toggleable), isExpanded (toggleable), and note (editable). Then write a composable that uses it — no callbacks to parent needed.",
+      "starterCode": "// TODO: Create a @Stable class with observable properties\n// and toggle/update methods\n\n// TODO: Write a composable that renders it\n// - Show title with strikethrough if completed\n// - Show checkbox for completion\n// - Expand/collapse to show note\n// - Editable note text field when expanded",
+      "checks": [
+        {
+          "pattern": "@Stable",
+          "message": "Annotate class with @Stable",
+          "required": true
+        },
+        {
+          "pattern": "mutableStateOf",
+          "message": "Use mutableStateOf for observable properties",
+          "required": true
+        },
+        {
+          "pattern": "by",
+          "message": "Use by delegation for clean property access",
+          "required": true
+        },
+        {
+          "pattern": "@Composable",
+          "message": "Write the composable function",
+          "required": true
+        }
+      ],
+      "solution": "@Stable\nclass TodoItemState(\n    val id: String,\n    val title: String,\n    isCompleted: Boolean = false,\n    note: String = \"\"\n) {\n    var isCompleted by mutableStateOf(isCompleted)\n        private set\n    var isExpanded by mutableStateOf(false)\n        private set\n    var note by mutableStateOf(note)\n    \n    fun toggleCompleted() { isCompleted = !isCompleted }\n    fun toggleExpanded() { isExpanded = !isExpanded }\n}\n\n@Composable\nfun TodoItem(state: TodoItemState) {\n    Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {\n        Row(verticalAlignment = Alignment.CenterVertically) {\n            Checkbox(\n                checked = state.isCompleted,\n                onCheckedChange = { state.toggleCompleted() }\n            )\n            Text(\n                text = state.title,\n                textDecoration = if (state.isCompleted)\n                    TextDecoration.LineThrough else TextDecoration.None,\n                modifier = Modifier.weight(1f)\n            )\n            IconButton(onClick = { state.toggleExpanded() }) {\n                Icon(\n                    if (state.isExpanded) Icons.Default.ExpandLess\n                    else Icons.Default.ExpandMore,\n                    contentDescription = \"Expand\"\n                )\n            }\n        }\n        AnimatedVisibility(visible = state.isExpanded) {\n            TextField(\n                value = state.note,\n                onValueChange = { state.note = it },\n                label = { Text(\"Note\") },\n                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)\n            )\n        }\n    }\n}",
+      "explanation": "Each <code>mutableStateOf</code> property is independently observable. Checking the checkbox only recomposes composables reading <code>isCompleted</code>. Expanding only recomposes composables reading <code>isExpanded</code>. Typing in the note only recomposes the TextField area. No callbacks to parent, no new list, no .copy(). The <code>TodoItem</code> composable is fully self-contained. Use <code>private set</code> on properties that should only be changed through methods (encapsulation).",
+      "hints": [
+        "Each mutableStateOf property triggers recomposition independently",
+        "private set means external code must use the toggle methods, not set directly"
+      ]
+    },
+    {
+      "id": "sm-12",
+      "type": "fix-bug",
+      "title": "@Stable with ViewModel Integration",
+      "difficulty": "advanced",
+      "description": "This code tries to use @Stable states with a ViewModel but the states are lost on configuration change (rotation). Fix it.",
+      "starterCode": "// BUG: CardStates are created in the Composable with remember\n// They are lost on rotation!\n@Composable\nfun CardListScreen(viewModel: CardViewModel) {\n    val cards by viewModel.cards.collectAsStateWithLifecycle()\n    \n    // This is recreated on rotation!\n    val cardStates = remember {\n        cards.map { CardState(it.id, it.title) }\n    }\n    \n    LazyColumn {\n        items(cardStates, key = { it.id }) { state ->\n            CardItem(state)\n        }\n    }\n}",
+      "checks": [
+        {
+          "pattern": "ViewModel|viewModel|StateFlow|stateIn",
+          "message": "Keep the state in the ViewModel where it survives rotation",
+          "required": true
+        },
+        {
+          "pattern": "@Stable|CardState",
+          "message": "Use @Stable state objects",
+          "required": true
+        }
+      ],
+      "solution": "// Move CardState management into the ViewModel\nclass CardViewModel : ViewModel() {\n    private val _cardStates = MutableStateFlow<List<CardState>>(emptyList())\n    val cardStates: StateFlow<List<CardState>> = _cardStates.asStateFlow()\n    \n    init {\n        viewModelScope.launch {\n            val cards = repository.getCards()\n            _cardStates.value = cards.map { CardState(it.id, it.title) }\n        }\n    }\n}\n\n@Composable\nfun CardListScreen(viewModel: CardViewModel) {\n    val cardStates by viewModel.cardStates.collectAsStateWithLifecycle()\n    \n    LazyColumn {\n        items(cardStates, key = { it.id }) { state ->\n            CardItem(state)  // state.toggleSelected() still works!\n        }\n    }\n}",
+      "explanation": "<code>remember</code> does NOT survive configuration changes — only <code>rememberSaveable</code> and <code>ViewModel</code> state do. Move the <code>CardState</code> list into the ViewModel, which survives rotation. The <code>@Stable</code> objects inside still work — <code>mutableStateOf</code> properties are still independently observable. The ViewModel holds the list reference (StateFlow), and each item manages its own UI state internally. Best of both worlds: ViewModel lifecycle + per-item granular reactivity.",
+      "hints": [
+        "remember is lost on rotation — what survives configuration changes?",
+        "The @Stable pattern still works even when the objects live in a ViewModel"
+      ]
+    },
+    {
+      "id": "sm-13",
+      "type": "multiple-choice",
+      "title": "Three Approaches Compared",
+      "difficulty": "intermediate",
+      "description": "You have a list of 100 cards in a LazyColumn. The user clicks one card to select it. Which approach causes the <b>least</b> recomposition?",
+      "options": [
+        "State hoisting: parent holds selectedId StateFlow, passes isSelected boolean to each CardItem. On click, update StateFlow with new ID → entire list recomposes to re-evaluate isSelected for each item.",
+        "SnapshotStateList with @Immutable items: cards[i] = cards[i].copy(isSelected = true). Only the changed index recomposes (with keys).",
+        "@Stable wrapper: card.toggleSelected() mutates mutableStateOf internally. Only the clicked card's composable recomposes — Compose tracks the exact State reader.",
+        "All three cause the same recomposition"
+      ],
+      "correctIndex": 2,
+      "explanation": "<b>@Stable wrapper wins</b> for minimal recomposition. State hoisting recomposes the parent (which re-evaluates all items). SnapshotStateList recomposes only the changed index but still creates a new item object. <code>@Stable</code> with <code>mutableStateOf</code> has the narrowest scope: only the composable that reads <code>isSelected</code> on that specific object recomposes. No parent involvement, no new objects, no list changes. For 100 items, this means 1 recomposition vs potentially 100.",
+      "hints": [
+        "Think about what triggers each recomposition and how many composables are affected",
+        "Who \"reads\" the changed state in each approach?"
+      ]
+    },
+    {
+      "id": "sm-14",
+      "type": "what-does-this-do",
+      "title": "@Immutable vs @Stable Contract",
+      "difficulty": "advanced",
+      "description": "What is the contract difference between these two approaches, and what could go wrong with each?",
+      "code": "// Approach A:\n@Immutable\ndata class UserCard(\n    val id: String,\n    val name: String,\n    val isSelected: Boolean\n)\n\n// Approach B:\n@Stable\nclass UserCardState(\n    val id: String,\n    val name: String,\n    isSelected: Boolean = false\n) {\n    var isSelected by mutableStateOf(isSelected)\n}",
+      "options": [
+        "They are identical — @Immutable and @Stable mean the same thing",
+        "@Immutable promises NOTHING changes after creation — if you violate this (e.g., var inside), Compose may show stale UI. @Stable promises changes are OBSERVABLE via snapshot system — safe to mutate, but you MUST use mutableStateOf for mutable fields.",
+        "@Immutable is faster than @Stable",
+        "@Stable is deprecated"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>@Immutable</code> = \"I will NEVER change. All properties are val with immutable types.\" Compose can skip recomposition purely on reference equality. If you lie (put a var or mutable collection inside), Compose won't detect changes → stale UI, subtle bugs.<br><br><code>@Stable</code> = \"I might change, but ALL changes go through <code>mutableStateOf</code>, so Compose will be notified.\" Safer for mutable objects. If you put a plain var (without mutableStateOf) inside a @Stable class, Compose won't see those changes either.<br><br><b>Rule:</b> Every mutable property in a @Stable class MUST be <code>by mutableStateOf()</code>.",
+      "hints": [
+        "What happens if you put a plain var inside an @Immutable class?",
+        "Both annotations are promises to the Compose compiler — what are you promising?"
+      ]
+    }
+  ]
+}

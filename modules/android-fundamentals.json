@@ -1,0 +1,229 @@
+{
+  "id": "android-fundamentals",
+  "title": "Android Fundamentals",
+  "icon": "📱",
+  "description": "Core building blocks of Android applications",
+  "references": [
+    {"title": "Android Developers — Activity Lifecycle", "url": "https://developer.android.com/guide/components/activities/activity-lifecycle", "type": "docs"},
+    {"title": "Android Developers — Intents and Intent Filters", "url": "https://developer.android.com/guide/components/intents-filters", "type": "docs"},
+    {"title": "Android Developers — Tasks and Back Stack", "url": "https://developer.android.com/guide/components/activities/tasks-and-back-stack", "type": "docs"},
+    {"title": "Android Developers — App Components", "url": "https://developer.android.com/guide/components/fundamentals", "type": "docs"},
+    {"title": "AOSP ActivityManagerService", "url": "https://cs.android.com/android/platform/superproject/+/main:frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java", "type": "source"}
+  ],
+  "lesson": "<h3>The Android Application Model</h3>\n<p>Android apps are built from <b>four core components</b> — Activity, Service, BroadcastReceiver, and ContentProvider. Unlike web apps with a single entry point, Android apps have <b>multiple entry points</b>.</p>\n<table>\n<tr><th>Component</th><th>Purpose</th><th>Managed By</th><th>Lifetime</th></tr>\n<tr><td><b>Activity</b></td><td>Single screen with UI</td><td>ActivityManagerService</td><td>Until finished or system destroys</td></tr>\n<tr><td><b>Service</b></td><td>Background work, no UI</td><td>ActiveServices (part of AMS)</td><td>Until stopped or killed</td></tr>\n<tr><td><b>BroadcastReceiver</b></td><td>Responds to system events</td><td>BroadcastQueue (part of AMS)</td><td>Duration of onReceive() only</td></tr>\n<tr><td><b>ContentProvider</b></td><td>Shared data interface</td><td>ContentProviderManager</td><td>While in use by clients</td></tr>\n</table>\n\n<h3>Activity Lifecycle</h3>\n<div class=\"diagram\">onCreate() → onStart() → onResume()\n                         [RUNNING - visible & interactive]\n              onPause() ← user partially obscured (dialog, multi-window)\n            onStop()    ← fully hidden (home button, new activity)\n          onDestroy()   ← finishing or system reclaiming memory\n\nRotation: onPause → onStop → onDestroy → onCreate → onStart → onResume\n          (entire Activity recreated! ViewModel survives this)</div>\n\n<hr class=\"section-divider\">\n<h3>How Intents Work — The System Path</h3>\n<p>When you call <code>startActivity(intent)</code>, the request travels via <b>Binder IPC</b> to <b>ActivityManagerService</b> in the system_server process:</p>\n<div class=\"diagram\">Your App Process                     system_server Process\n─────────────────                    ────────────────────\nstartActivity(intent)\n    │\n    └──► Binder IPC ──────────────► ActivityManagerService (AMS)\n                                        │\n                                        ├── resolveIntent()\n                                        │     └── PackageManagerService\n                                        │           └── scans all apps'\n                                        │               AndroidManifest.xml\n                                        │               for matching intent-filters\n                                        ├── Check permissions\n                                        ├── Find or create target Task\n                                        ├── Find or create target Process\n                                        │     └── Zygote forks if needed\n                                        └── Send to target app\n                                              │\nTarget App ◄──────────────────────────────────┘\n    ActivityThread.handleLaunchActivity()\n        └── activity.onCreate(bundle)</div>\n<ul>\n<li><b>Explicit Intent</b> — specifies exact target: <code>Intent(this, DetailActivity::class.java)</code></li>\n<li><b>Implicit Intent</b> — declares an action: <code>Intent(ACTION_SEND)</code>. PMS scans all manifests for matching <code>&lt;intent-filter&gt;</code>. Multiple matches → chooser dialog</li>\n</ul>\n\n<hr class=\"section-divider\">\n<h3>Tasks vs Activities vs Processes</h3>\n<p>These are three separate concepts that are commonly confused:</p>\n<div class=\"diagram\">Process (Linux process — one per app, has PID and memory)\n  └── Application (singleton, global state)\n       └── ActivityThread (main/UI thread)\n\nTask (logical back stack — can span processes!)\n  └── Activity A (bottom of stack)\n  └── Activity B\n  └── Activity C (top — foreground, visible)</div>\n<div class=\"info-box\"><b>Key insight:</b> A Task is NOT a process. Tasks can contain Activities from different apps/processes. When your app launches the Camera app, the Camera Activity joins YOUR task's back stack.</div>\n\n<h4>When Is a New Task Created?</h4>\n<ul>\n<li>User taps app icon → Launcher sends <code>FLAG_ACTIVITY_NEW_TASK</code> → new Task</li>\n<li>Code uses <code>FLAG_ACTIVITY_NEW_TASK</code></li>\n<li>Activity has <code>launchMode=\"singleTask\"</code> in manifest</li>\n<li>Deep link or notification with NEW_TASK flag</li>\n</ul>\n\n<h4>What Happens When Activity B Opens an Already-Existing Activity A?</h4>\n<table>\n<tr><th>launchMode</th><th>Behavior</th></tr>\n<tr><td><code>standard</code> (default)</td><td>New instance of A created in B's Task. Two copies of A now exist.</td></tr>\n<tr><td><code>singleTop</code></td><td>If A is on TOP of current Task → reuse + <code>onNewIntent()</code>. Otherwise → new instance.</td></tr>\n<tr><td><code>singleTask</code></td><td>A's Task comes to foreground. Activities above A are destroyed. A gets <code>onNewIntent()</code>.</td></tr>\n<tr><td><code>singleInstance</code></td><td>A is alone in its Task. Brought to front, gets <code>onNewIntent()</code>. No other Activity can join.</td></tr>\n</table>\n\n<hr class=\"section-divider\">\n<h3>Window Management & DecorView</h3>\n<div class=\"diagram\">┌─────────────────────────────────────────────────┐\n│                 SurfaceFlinger                   │\n│  (composites all surfaces into final frame)      │\n├──────────┬──────────────────┬────────────────────┤\n│ StatusBar│   App Surface    │  NavigationBar     │\n│ (SystemUI│   (DecorView)    │  (SystemUI)        │\n│  window) │                  │                    │\n└──────────┴──────────────────┴────────────────────┘\n\nWindowManagerService (WMS) — in system_server\n  ├── Manages all windows (Z-ordering, bounds)\n  ├── Input dispatching (touch → correct window)\n  └── Window animations\n\nActivityManagerService (AMS)\n  └── Activity lifecycle, tasks, back stack\n      └── Tells WMS to add/remove windows\n\nDecorView (in YOUR app process)\n  └── Root View of every Activity window\n      └── PhoneWindow creates it\n          └── Your setContentView() layout goes inside</div>\n<div class=\"info-box\"><b>Multi-window (AAOS/split-screen):</b> SystemUI doesn't modify your DecorView. Instead, WMS assigns bounds to each Task's window, and SystemUI adds separate <b>caption bar windows</b> (via WindowDecorService) positioned at the top of each Task's bounds. The app's window area is simply made smaller.</div>\n\n<h4>SurfaceView vs TextureView</h4>\n<table>\n<tr><th></th><th>SurfaceView</th><th>TextureView</th></tr>\n<tr><td>Surfaces</td><td>Own surface (2 total — punches a hole)</td><td>Uses app surface (1)</td></tr>\n<tr><td>Thread</td><td>Any thread</td><td>Any thread</td></tr>\n<tr><td>Alpha/rotation</td><td>No</td><td>Yes</td></tr>\n<tr><td>Performance</td><td>Best (HW overlay)</td><td>Good (GPU texture copy)</td></tr>\n<tr><td>Use case</td><td>Camera preview, video, maps</td><td>Video with alpha/effects</td></tr>\n</table>",
+  "questions": [
+    {
+      "id": "af-1",
+      "type": "multiple-choice",
+      "title": "The Four Components",
+      "difficulty": "beginner",
+      "description": "What are the 4 fundamental building blocks of an Android application?",
+      "options": [
+        "Activity, Fragment, Service, Intent",
+        "Activity, Service, BroadcastReceiver, ContentProvider",
+        "Activity, Service, ViewModel, Repository",
+        "Activity, Fragment, BroadcastReceiver, ContentProvider"
+      ],
+      "correctIndex": 1,
+      "explanation": "The four fundamental Android components are: <b>Activity</b> (UI screens), <b>Service</b> (background operations), <b>BroadcastReceiver</b> (responds to system-wide events), and <b>ContentProvider</b> (manages shared data). Fragments are UI components within Activities, not standalone components. Intents are messaging objects, not components.",
+      "hints": [
+        "Think about what you register in AndroidManifest.xml",
+        "Fragments live inside Activities — they are not top-level components"
+      ]
+    },
+    {
+      "id": "af-2",
+      "type": "multiple-choice",
+      "title": "Activity Lifecycle",
+      "difficulty": "beginner",
+      "description": "Which lifecycle callback is called when an Activity first becomes visible to the user (but may not yet be in the foreground)?",
+      "options": [
+        "onCreate()",
+        "onStart()",
+        "onResume()",
+        "onVisible()"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>onCreate()</code> initializes the Activity but it is not yet visible. <code>onStart()</code> is called when the Activity becomes visible. <code>onResume()</code> is called when it moves to the foreground and becomes interactive. <code>onVisible()</code> does not exist in the Android lifecycle.",
+      "hints": [
+        "The lifecycle order is: onCreate → onStart → onResume",
+        "Visible and interactive are two different states"
+      ]
+    },
+    {
+      "id": "af-3",
+      "type": "fill-blank",
+      "title": "Creating an Intent",
+      "difficulty": "beginner",
+      "description": "Fill in the blanks to navigate from the current Activity to DetailActivity, passing an item ID.",
+      "code": "// Navigate to DetailActivity\nval intent = ___1___(this, DetailActivity::class.java)\nintent.putExtra(\"ITEM_ID\", itemId)\n___2___(intent)",
+      "blanks": [
+        {
+          "answer": [
+            "Intent"
+          ],
+          "hint": "Constructor for the messaging object"
+        },
+        {
+          "answer": [
+            "startActivity"
+          ],
+          "hint": "Method to launch the new Activity"
+        }
+      ],
+      "explanation": "An <code>Intent</code> is created with the current context and target Activity class. <code>startActivity(intent)</code> launches the target Activity. Data is passed via <code>putExtra()</code> key-value pairs.",
+      "hints": [
+        "The class that represents a messaging object in Android",
+        "The Activity method that launches another Activity"
+      ]
+    },
+    {
+      "id": "af-4",
+      "type": "trivia",
+      "title": "What is an Intent?",
+      "difficulty": "beginner",
+      "description": "In your own words, explain what an Intent is in Android and give an example of when you would use one.",
+      "keywords": [
+        "message",
+        "messaging",
+        "action",
+        "component",
+        "start",
+        "launch",
+        "activity",
+        "communicate",
+        "request",
+        "navigate"
+      ],
+      "answer": "An Intent is a messaging object used to request an action from another app component. It can be used to start an Activity, start a Service, or deliver a broadcast. For example, you use an explicit Intent to navigate between screens in your app, or an implicit Intent to open a URL in the browser.",
+      "explanation": "Intents are the primary mechanism for inter-component communication in Android. <b>Explicit intents</b> specify the exact component to start. <b>Implicit intents</b> declare a general action, letting the system find a suitable component.",
+      "hints": [
+        "Think about how different parts of an Android app communicate",
+        "There are two types: explicit and implicit"
+      ]
+    },
+    {
+      "id": "af-5",
+      "type": "fix-bug",
+      "title": "Missing Permission",
+      "difficulty": "beginner",
+      "description": "This app crashes with a SecurityException when trying to fetch data from the internet. Fix the AndroidManifest.xml.",
+      "starterCode": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n\n    <application\n        android:allowBackup=\"true\"\n        android:label=\"@string/app_name\"\n        android:theme=\"@style/Theme.MyApp\">\n\n        <activity\n            android:name=\".MainActivity\"\n            android:exported=\"true\">\n            <intent-filter>\n                <action android:name=\"android.intent.action.MAIN\" />\n                <category android:name=\"android.intent.category.LAUNCHER\" />\n            </intent-filter>\n        </activity>\n\n    </application>\n\n</manifest>",
+      "checks": [
+        {
+          "pattern": "uses-permission",
+          "message": "Add a <uses-permission> tag",
+          "required": true
+        },
+        {
+          "pattern": "android\\.permission\\.INTERNET",
+          "message": "Specify the INTERNET permission",
+          "required": true
+        }
+      ],
+      "solution": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n\n    <uses-permission android:name=\"android.permission.INTERNET\" />\n\n    <application\n        android:allowBackup=\"true\"\n        android:label=\"@string/app_name\"\n        android:theme=\"@style/Theme.MyApp\">\n\n        <activity\n            android:name=\".MainActivity\"\n            android:exported=\"true\">\n            <intent-filter>\n                <action android:name=\"android.intent.action.MAIN\" />\n                <category android:name=\"android.intent.category.LAUNCHER\" />\n            </intent-filter>\n        </activity>\n\n    </application>\n\n</manifest>",
+      "explanation": "Android requires explicit permission declarations. The <code>&lt;uses-permission android:name=\"android.permission.INTERNET\" /&gt;</code> tag must be added before <code>&lt;application&gt;</code>.",
+      "hints": [
+        "What XML tag declares permissions in AndroidManifest.xml?",
+        "The permission should go between <manifest> and <application>"
+      ]
+    },
+    {
+      "id": "af-6",
+      "type": "multiple-choice",
+      "title": "AndroidManifest.xml",
+      "difficulty": "beginner",
+      "description": "What is the primary purpose of the AndroidManifest.xml file?",
+      "options": [
+        "To define the app's visual theme and styling",
+        "To declare app components, permissions, and metadata to the Android system",
+        "To configure build settings like minSdk and dependencies",
+        "To store string resources for localization"
+      ],
+      "correctIndex": 1,
+      "explanation": "The <code>AndroidManifest.xml</code> is the app's identity card to the Android system. It declares all components (Activities, Services, etc.), required permissions, hardware features, and app metadata. The system reads it to know what your app contains and what it needs. Build settings go in <code>build.gradle</code>, themes in <code>themes.xml</code>, and strings in <code>strings.xml</code>.",
+      "hints": [
+        "Think about what the system needs to know about your app before launching it"
+      ]
+    },
+    {
+      "id": "af-7",
+      "type": "what-does-this-do",
+      "title": "Implicit Intent",
+      "difficulty": "intermediate",
+      "description": "What happens when this code runs?",
+      "code": "val sendIntent = Intent().apply {\n    action = Intent.ACTION_SEND\n    putExtra(Intent.EXTRA_TEXT, \"Check out this app!\")\n    type = \"text/plain\"\n}\nval chooser = Intent.createChooser(sendIntent, \"Share via\")\nstartActivity(chooser)",
+      "options": [
+        "It opens a specific messaging app and sends the text",
+        "It shows a system dialog letting the user choose which app to share text with",
+        "It sends an SMS message to all contacts",
+        "It crashes because no target Activity is specified"
+      ],
+      "correctIndex": 1,
+      "explanation": "This creates an <b>implicit intent</b> with <code>ACTION_SEND</code> — it doesn't specify a target app. <code>createChooser()</code> wraps it in a chooser dialog that shows all apps capable of handling text/plain sharing (email, messaging, social media, etc.). The user picks which app to use. This is the standard Android sharing mechanism.",
+      "hints": [
+        "No specific Activity class is mentioned — how does the system know where to send it?",
+        "createChooser shows a selection UI"
+      ]
+    },
+    {
+      "id": "af-8",
+      "type": "fill-blank",
+      "title": "Registering a BroadcastReceiver",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to register a BroadcastReceiver that listens for airplane mode changes.",
+      "code": "class AirplaneModeReceiver : ___1___() {\n    override fun ___2___(context: Context, intent: Intent) {\n        val isAirplaneMode = intent.getBooleanExtra(\"state\", false)\n        Log.d(\"Receiver\", \"Airplane mode: $isAirplaneMode\")\n    }\n}\n\n// In Activity onCreate:\nval filter = ___3___(Intent.ACTION_AIRPLANE_MODE_CHANGED)\nregisterReceiver(AirplaneModeReceiver(), filter)",
+      "blanks": [
+        {
+          "answer": [
+            "BroadcastReceiver"
+          ],
+          "hint": "The base class for broadcast listeners"
+        },
+        {
+          "answer": [
+            "onReceive"
+          ],
+          "hint": "The callback method when a broadcast arrives"
+        },
+        {
+          "answer": [
+            "IntentFilter"
+          ],
+          "hint": "Specifies which broadcasts to receive"
+        }
+      ],
+      "explanation": "<code>BroadcastReceiver</code> is the base class. <code>onReceive()</code> is called when a matching broadcast arrives. <code>IntentFilter</code> specifies which broadcasts to listen for. Remember to <code>unregisterReceiver()</code> in <code>onDestroy()</code> to prevent leaks.",
+      "hints": [
+        "The class extends a specific Android component type",
+        "The filter tells the system which broadcasts you care about"
+      ]
+    },
+    {
+      "id": "af-9",
+      "type": "fix-bug",
+      "title": "Activity Not in Manifest",
+      "difficulty": "beginner",
+      "description": "The app crashes with \"ActivityNotFoundException\" when navigating to SettingsActivity. The Activity class exists and compiles fine. Fix it.",
+      "starterCode": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    <application\n        android:label=\"@string/app_name\"\n        android:theme=\"@style/Theme.MyApp\">\n\n        <activity\n            android:name=\".MainActivity\"\n            android:exported=\"true\">\n            <intent-filter>\n                <action android:name=\"android.intent.action.MAIN\" />\n                <category android:name=\"android.intent.category.LAUNCHER\" />\n            </intent-filter>\n        </activity>\n\n        <!-- SettingsActivity is missing! -->\n\n    </application>\n</manifest>",
+      "checks": [
+        {
+          "pattern": "SettingsActivity",
+          "message": "Declare SettingsActivity in the manifest",
+          "required": true
+        },
+        {
+          "pattern": "<activity",
+          "message": "Add an <activity> tag for SettingsActivity",
+          "required": true
+        }
+      ],
+      "solution": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    <application\n        android:label=\"@string/app_name\"\n        android:theme=\"@style/Theme.MyApp\">\n\n        <activity\n            android:name=\".MainActivity\"\n            android:exported=\"true\">\n            <intent-filter>\n                <action android:name=\"android.intent.action.MAIN\" />\n                <category android:name=\"android.intent.category.LAUNCHER\" />\n            </intent-filter>\n        </activity>\n\n        <activity android:name=\".SettingsActivity\" />\n\n    </application>\n</manifest>",
+      "explanation": "Every Activity must be declared in <code>AndroidManifest.xml</code>. Even though the class compiles, the Android system doesn't know about it without a manifest entry. Add <code>&lt;activity android:name=\".SettingsActivity\" /&gt;</code> inside <code>&lt;application&gt;</code>.",
+      "hints": [
+        "All Android components must be declared somewhere the system can find them",
+        "Check what's missing between the application tags"
+      ]
+    }
+  ]
+}

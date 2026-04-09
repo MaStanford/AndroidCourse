@@ -1,0 +1,250 @@
+{
+  "id": "binder-ipc",
+  "title": "Binder, Services & IPC",
+  "icon": "🔗",
+  "description": "Binder driver architecture, AIDL, Parcel serialization, service binding, Messenger, ContentProvider as IPC, and PendingIntent security",
+  "references": [
+    {"title": "Android Developers — Bound Services", "url": "https://developer.android.com/develop/background-work/services/bound-services", "type": "docs"},
+    {"title": "Android Developers — AIDL", "url": "https://developer.android.com/guide/components/aidl", "type": "docs"},
+    {"title": "Android Developers — PendingIntent", "url": "https://developer.android.com/privacy-and-security/risks/pending-intent", "type": "docs"},
+    {"title": "AOSP Binder Driver Source (binder.c)", "url": "https://cs.android.com/android/kernel/superproject/+/common-android-mainline:common/drivers/android/binder.c", "type": "source"},
+    {"title": "AOSP Parcel.java", "url": "https://cs.android.com/android/platform/superproject/+/main:frameworks/base/core/java/android/os/Parcel.java", "type": "source"},
+    {"title": "Android Developers — Content Providers", "url": "https://developer.android.com/guide/topics/providers/content-provider-basics", "type": "docs"},
+    {"title": "Video: How Binder Works (Android Backstage)", "url": "https://www.youtube.com/watch?v=XDOG-JEB5HM", "type": "video"}
+  ],
+  "lesson": "<h3>Why Binder Exists</h3>\n<p>Every Android app runs in its own <b>Linux process</b> with its own memory space. You cannot share objects across processes — memory addresses are meaningless to another process. <b>IPC (Inter-Process Communication)</b> is required for any cross-process interaction: calling a system service, binding to another app's service, or even starting an Activity.</p>\n<div class=\"info-box\"><b>Why Binder over pipes/sockets/shared memory?</b><br>• <b>Single-copy transfer</b> — data is copied once from sender to kernel, then mapped into receiver's address space (vs two copies for pipes/sockets)<br>• <b>Identity propagation</b> — the kernel attaches the calling process's UID/PID, so the server can verify who's calling (security!)<br>• <b>Object reference model</b> — Binder objects have identity; you can pass references, not just data<br>• <b>Thread pool model</b> — each process has a Binder thread pool (~16 threads) ready to handle incoming calls</div>\n<hr class=\"section-divider\">\n<h3>Binder Architecture</h3>\n<div class=\"diagram\">Your App Process                    System Server / Other App\n┌──────────────┐                   ┌──────────────┐\n│  Client Code │                   │  Real Service │\n│      │       │                   │      ▲       │\n│      ▼       │                   │      │       │\n│  Proxy Stub  │                   │  Stub (Bn)   │\n│  (Bp)        │                   │      ▲       │\n│      │       │                   │      │       │\n│   Parcel     │                   │   Parcel     │\n│   serialize  │                   │   deserialize│\n└──────┬───────┘                   └──────┴───────┘\n       │         ┌─────────────┐          │\n       └────────▶│ /dev/binder │◀─────────┘\n                 │  (kernel)   │\n                 │ single-copy │\n                 │  transfer   │\n                 └─────────────┘</div>\n<p>The flow: (1) Client calls proxy method → (2) Proxy serializes args into a <code>Parcel</code> → (3) <code>ioctl()</code> sends Parcel to kernel Binder driver → (4) Kernel copies data to server process → (5) Server stub deserializes → (6) Calls real method → (7) Response follows reverse path.</p>\n<hr class=\"section-divider\">\n<h3>Parcel & Serialization</h3>\n<p><code>Parcel</code> is Binder's serialization container. It's a byte buffer optimized for IPC — <b>not</b> for persistent storage.</p>\n<table><tr><th>Parcelable</th><th>Serializable</th></tr><tr><td>Android-specific interface</td><td>Java standard interface</td></tr><tr><td>Explicit read/write order — <b>fast</b></td><td>Uses reflection — <b>10x slower</b></td></tr><tr><td>@Parcelize auto-generates</td><td>Just add <code>: Serializable</code></td></tr><tr><td>Use for IPC & Bundles</td><td>Avoid on Android</td></tr></table>\n<div class=\"lesson-code\"><span class=\"cmt\">// @Parcelize generates writeToParcel/createFromParcel</span>\n@Parcelize\ndata class User(\n    val id: String,\n    val name: String,\n    val email: String\n) : Parcelable</div>\n<div class=\"warn-box\"><b>1MB Transaction Limit:</b> The Binder driver limits each transaction to ~1MB (shared across the entire process). Sending a large Bitmap or huge list via Intent/Bundle will crash with <code>TransactionTooLargeException</code>. For large data, use <b>ContentProvider</b>, <b>FileProvider</b>, or shared memory.</div>\n<hr class=\"section-divider\">\n<h3>AIDL: Defining IPC Interfaces</h3>\n<p>AIDL (Android Interface Definition Language) generates the proxy/stub boilerplate for Binder IPC:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// IRemoteService.aidl</span>\ninterface IRemoteService {\n    int getProcessId();\n    oneway void logMessage(String msg);  <span class=\"cmt\">// async — returns immediately</span>\n    User getUser(in String userId);      <span class=\"cmt\">// 'in' = input only</span>\n}\n\n<span class=\"cmt\">// Generated: IRemoteService.Stub (server implements)</span>\n<span class=\"cmt\">// Generated: IRemoteService.Stub.Proxy (client calls)</span></div>\n<table><tr><th>Modifier</th><th>Meaning</th></tr><tr><td><code>in</code></td><td>Parameter sent to server (default)</td></tr><tr><td><code>out</code></td><td>Parameter filled by server, returned to client</td></tr><tr><td><code>inout</code></td><td>Sent both ways (expensive — avoid if possible)</td></tr><tr><td><code>oneway</code></td><td>Async call — returns immediately, no return value, no exceptions propagated back</td></tr></table>\n<div class=\"info-box\"><b>When to use what:</b><br>• <b>AIDL</b> — Need fine-grained IPC with multiple methods, types, callbacks<br>• <b>Messenger</b> — Simple message passing, single-threaded handler, no concurrency<br>• <b>ContentProvider</b> — URI-based data access, CRUD operations, cursor results</div>\n<hr class=\"section-divider\">\n<h3>Service Binding Mechanics</h3>\n<div class=\"diagram\">Client Activity                AMS (system_server)              Service Process\n     │                              │                              │\n     │── bindService() ───────────▶ │                              │\n     │                              │── startProcess (if needed) ─▶│\n     │                              │                              │── onCreate()\n     │                              │◀── onBind() returns IBinder ─│\n     │◀── onServiceConnected() ─────│                              │\n     │     (receives proxy)         │                              │\n     │                              │                              │\n     │── proxy.getUser() ──────────────── Binder IPC ─────────────▶│── real getUser()\n     │◀── result ──────────────────────── Binder IPC ──────────────│</div>\n<table><tr><th>Type</th><th>Lifecycle</th><th>Use Case</th></tr><tr><td><b>Started</b> (startService)</td><td>Lives until stopSelf() or stopService()</td><td>Background work (music, download)</td></tr><tr><td><b>Bound</b> (bindService)</td><td>Lives while any client is bound</td><td>IPC, client-server interaction</td></tr><tr><td><b>Started+Bound</b></td><td>Lives until stopped AND all unbound</td><td>Music player (plays independently, UI binds to control)</td></tr></table>\n<hr class=\"section-divider\">\n<h3>PendingIntent Security</h3>\n<p>A <code>PendingIntent</code> wraps <b>your identity</b> and an <code>Intent</code>. When another app fires it, it executes with <b>your app's permissions</b>, not theirs.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// SAFE: FLAG_IMMUTABLE prevents modification</span>\nval pi = PendingIntent.getActivity(\n    context, 0, intent,\n    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT\n)\n\n<span class=\"cmt\">// DANGEROUS: FLAG_MUTABLE lets the sender modify the Intent</span>\n<span class=\"cmt\">// Only use when you need fillIn() for inline reply, bubbles, etc.</span>\nval mutablePi = PendingIntent.getActivity(\n    context, 0, intent,\n    PendingIntent.FLAG_MUTABLE\n)</div>\n<div class=\"warn-box\"><b>Android 12+ requirement:</b> You must explicitly specify either <code>FLAG_IMMUTABLE</code> or <code>FLAG_MUTABLE</code>. Omitting both crashes. Always prefer <code>FLAG_IMMUTABLE</code> unless you need the sender to fill in extras (e.g., notification inline reply).</div>\n<hr class=\"section-divider\">\n<h3>ContentProvider as IPC</h3>\n<p>ContentProvider uses Binder underneath. It exposes data via URIs and supports standard CRUD operations cross-process. Each query result is a <code>Cursor</code> backed by a shared memory window (CursorWindow), but the window is limited to ~2MB.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// ContentProvider URI structure</span>\ncontent://com.example.provider/users/42\n  │         │                  │    │\nscheme   authority            path  id\n\n<span class=\"cmt\">// Efficient batch operations</span>\nval ops = ArrayList&lt;ContentProviderOperation&gt;()\nops.add(ContentProviderOperation.newInsert(CONTENT_URI)\n    .withValue(\"name\", \"Alice\").build())\nops.add(ContentProviderOperation.newInsert(CONTENT_URI)\n    .withValue(\"name\", \"Bob\").build())\ncontentResolver.applyBatch(AUTHORITY, ops)  <span class=\"cmt\">// Single Binder transaction!</span></div>",
+  "questions": [
+    {
+      "id": "bi-1",
+      "type": "multiple-choice",
+      "title": "Why Binder Over Standard IPC",
+      "difficulty": "advanced",
+      "description": "Why does Android use Binder for IPC instead of standard Linux mechanisms like pipes or Unix domain sockets?",
+      "options": [
+        "Binder is faster because it uses UDP instead of TCP",
+        "Binder provides single-copy data transfer and automatic caller identity propagation (UID/PID) — essential for Android's security model",
+        "Binder works without a kernel — it's a userspace-only mechanism",
+        "Binder is simpler to implement than pipes"
+      ],
+      "correctIndex": 1,
+      "explanation": "Binder has two critical advantages: (1) <b>Single-copy transfer</b> — data is copied once from sender into kernel-mapped memory that the receiver can read directly (pipes/sockets copy twice: sender→kernel→receiver). (2) <b>Identity propagation</b> — the kernel automatically attaches the calling process's UID and PID to each transaction, so system services can enforce permissions without trusting the caller's self-reported identity. This is the foundation of Android's entire permission system.",
+      "hints": [
+        "Think about security: how does a system service know WHO is calling it?",
+        "Standard IPC copies data twice — Binder optimizes this"
+      ],
+      "learnMore": [
+        {"title": "AOSP Binder Driver Source (binder.c)", "url": "https://cs.android.com/android/kernel/superproject/+/common-android-mainline:common/drivers/android/binder.c"},
+        {"title": "Android Binder Framework (deep dive article)", "url": "https://www.androiddesignpatterns.com/2013/08/binders-window-tokens.html"}
+      ]
+    },
+    {
+      "id": "bi-2",
+      "type": "what-does-this-do",
+      "title": "bindService() Call Trace",
+      "difficulty": "advanced",
+      "description": "Trace what happens when your Activity calls <code>bindService(intent, connection, BIND_AUTO_CREATE)</code>. Which processes are involved and what travels over Binder?",
+      "code": "class MyActivity : AppCompatActivity() {\n    private val connection = object : ServiceConnection {\n        override fun onServiceConnected(name: ComponentName, binder: IBinder) {\n            val service = IRemoteService.Stub.asInterface(binder)\n            val result = service.getData()\n        }\n        override fun onServiceDisconnected(name: ComponentName) {}\n    }\n\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        bindService(\n            Intent(this, RemoteService::class.java),\n            connection, BIND_AUTO_CREATE\n        )\n    }\n}",
+      "options": [
+        "bindService() directly calls the service's onBind() in the same process",
+        "bindService() sends a Binder transaction to AMS in system_server, which starts the service process (if needed), calls onBind() to get an IBinder, then delivers it back to the client via onServiceConnected() — three processes involved",
+        "bindService() uses shared memory to connect the two processes without any system service involvement",
+        "bindService() creates a socket connection between the two processes"
+      ],
+      "correctIndex": 1,
+      "explanation": "Three processes participate: (1) <b>Your app</b> calls bindService() which sends a Binder transaction to <b>system_server</b>. (2) <b>AMS</b> (ActivityManagerService) in system_server starts the service process if needed, then calls its onBind(). (3) The <b>service process</b> returns an IBinder from onBind(). AMS delivers this IBinder back to your app's ServiceConnection.onServiceConnected(). After that, your proxy calls go <b>directly</b> to the service via Binder — AMS is no longer in the path.",
+      "hints": [
+        "AMS mediates the initial connection but not subsequent calls",
+        "BIND_AUTO_CREATE means 'start the service if it's not running'"
+      ],
+      "learnMore": [
+        {"title": "Android Developers — Bound Services Overview", "url": "https://developer.android.com/develop/background-work/services/bound-services"}
+      ]
+    },
+    {
+      "id": "bi-3",
+      "type": "fill-blank",
+      "title": "AIDL Interface Definition",
+      "difficulty": "advanced",
+      "description": "Fill in the blanks to define an AIDL interface for a music player service.",
+      "code": "<span class=\"cmt\">// IMusicService.aidl</span>\n___1___ IMusicService {\n    void play(___2___ String trackId);\n    void pause();\n    ___3___ void reportAnalytics(String event);\n    boolean isPlaying();\n}",
+      "blanks": [
+        {
+          "answer": ["interface"],
+          "hint": "AIDL keyword to define an IPC interface"
+        },
+        {
+          "answer": ["in"],
+          "hint": "Direction modifier: parameter sent to server only"
+        },
+        {
+          "answer": ["oneway"],
+          "hint": "Modifier for async calls that return immediately"
+        }
+      ],
+      "explanation": "AIDL uses <code>interface</code> to define Binder contracts. <code>in</code> means the parameter is sent to the server (default for primitives, explicit for objects). <code>oneway</code> makes the call asynchronous — the client doesn't wait for a result and no exceptions propagate back. Use <code>oneway</code> for fire-and-forget calls like analytics logging.",
+      "hints": [
+        "AIDL syntax looks like Java interfaces with IPC-specific modifiers",
+        "reportAnalytics doesn't need a result — it can be async"
+      ],
+      "learnMore": [
+        {"title": "Android Developers — AIDL Guide", "url": "https://developer.android.com/guide/components/aidl"}
+      ]
+    },
+    {
+      "id": "bi-4",
+      "type": "multiple-choice",
+      "title": "Binder Transaction Limit",
+      "difficulty": "intermediate",
+      "description": "What is the Binder transaction buffer size limit, and what happens when you exceed it?",
+      "options": [
+        "10MB limit — the system logs a warning but continues",
+        "~1MB total per process — exceeding it throws TransactionTooLargeException and can crash the app",
+        "256KB per transaction — the system silently truncates extra data",
+        "No limit — Binder automatically uses shared memory for large payloads"
+      ],
+      "correctIndex": 1,
+      "explanation": "The Binder transaction buffer is <b>~1MB per process</b>, shared across all concurrent transactions. Sending a large Bitmap, huge list, or oversized Bundle via Intent/startActivity/onSaveInstanceState can exceed this. <code>TransactionTooLargeException</code> is thrown, often crashing the app. Solutions: pass URIs instead of data, use FileProvider, ContentProvider, or shared memory (Ashmem). This is also why the saved instance state Bundle should only contain small, essential state.",
+      "hints": [
+        "This is the same limit that affects SavedStateHandle Bundles",
+        "The buffer is shared across ALL concurrent Binder transactions in the process"
+      ]
+    },
+    {
+      "id": "bi-5",
+      "type": "fix-bug",
+      "title": "PendingIntent Security Vulnerability",
+      "difficulty": "advanced",
+      "description": "This notification PendingIntent has a security vulnerability on Android 12+. Additionally, a malicious app receiving this mutable PendingIntent could modify the Intent to launch a different Activity. Fix it.",
+      "starterCode": "fun showNotification(context: Context) {\n    val intent = Intent(context, DetailActivity::class.java).apply {\n        putExtra(\"item_id\", 42)\n    }\n    val pendingIntent = PendingIntent.getActivity(\n        context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT\n    )\n    val notification = NotificationCompat.Builder(context, CHANNEL_ID)\n        .setContentIntent(pendingIntent)\n        .setContentTitle(\"New Item\")\n        .build()\n    notificationManager.notify(1, notification)\n}",
+      "checks": [
+        {
+          "pattern": "FLAG_IMMUTABLE",
+          "message": "Use FLAG_IMMUTABLE to prevent Intent modification",
+          "required": true
+        }
+      ],
+      "solution": "fun showNotification(context: Context) {\n    val intent = Intent(context, DetailActivity::class.java).apply {\n        putExtra(\"item_id\", 42)\n    }\n    val pendingIntent = PendingIntent.getActivity(\n        context, 0, intent,\n        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT\n    )\n    val notification = NotificationCompat.Builder(context, CHANNEL_ID)\n        .setContentIntent(pendingIntent)\n        .setContentTitle(\"New Item\")\n        .build()\n    notificationManager.notify(1, notification)\n}",
+      "explanation": "Android 12+ <b>requires</b> either FLAG_IMMUTABLE or FLAG_MUTABLE — omitting both throws an exception. FLAG_IMMUTABLE prevents anyone who receives the PendingIntent from modifying the wrapped Intent. With FLAG_MUTABLE, a malicious app could change the target component or extras. Always use <b>FLAG_IMMUTABLE</b> unless you specifically need mutability (e.g., notification inline reply which needs fillIn() to add the user's typed text).",
+      "hints": [
+        "Android 12 made this flag mandatory for a reason — security",
+        "A PendingIntent executes with YOUR app's permissions, not the sender's"
+      ],
+      "learnMore": [
+        {"title": "Android Developers — PendingIntent Security Risks", "url": "https://developer.android.com/privacy-and-security/risks/pending-intent"},
+        {"title": "Android 12 PendingIntent Mutability", "url": "https://developer.android.com/about/versions/12/behavior-changes-12#pending-intent-mutability"}
+      ]
+    },
+    {
+      "id": "bi-6",
+      "type": "multiple-choice",
+      "title": "Parcelable vs Serializable",
+      "difficulty": "intermediate",
+      "description": "Why does Android strongly prefer <code>Parcelable</code> over <code>Serializable</code> for IPC?",
+      "options": [
+        "Parcelable encrypts data during IPC, Serializable does not",
+        "Parcelable uses explicit, hand-written serialization (no reflection) — roughly 10x faster than Serializable's reflection-based approach",
+        "Parcelable supports larger data sizes than Serializable",
+        "Parcelable works across different programming languages, Serializable is Java-only"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>Serializable</code> uses Java reflection to discover fields, their types, and their values — this is slow and creates temporary objects. <code>Parcelable</code> has explicit <code>writeToParcel()</code> and <code>createFromParcel()</code> methods with a defined read/write order — no reflection, no extra allocations, ~10x faster. With <code>@Parcelize</code>, the Kotlin compiler generates this code automatically, giving you Parcelable's speed with Serializable's convenience.",
+      "hints": [
+        "Reflection is the key difference — it's slow and creates garbage",
+        "@Parcelize removes the boilerplate argument against Parcelable"
+      ]
+    },
+    {
+      "id": "bi-7",
+      "type": "what-does-this-do",
+      "title": "AIDL oneway Semantics",
+      "difficulty": "advanced",
+      "description": "How does the <code>oneway</code> keyword change the behavior of this AIDL method?",
+      "code": "// IAnalyticsService.aidl\ninterface IAnalyticsService {\n    oneway void trackEvent(in String eventName, in Bundle params);\n    int getEventCount();\n}",
+      "options": [
+        "oneway makes trackEvent() run on the main thread instead of a Binder thread",
+        "oneway makes trackEvent() asynchronous — the client returns immediately without waiting for the server to finish; no return value is possible and exceptions in the server are NOT propagated back to the client",
+        "oneway means the data is only sent from client to server, never from server to client",
+        "oneway encrypts the transaction for security"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>oneway</code> makes the Binder call <b>non-blocking</b>: the client sends the transaction and immediately returns without waiting for the server to process it. Consequences: (1) The method must return <code>void</code>. (2) If the server throws an exception, the client never knows. (3) Multiple oneway calls from the same client are queued and executed in order. <code>getEventCount()</code> without oneway is synchronous — the client blocks until the server returns the int.",
+      "hints": [
+        "Think about the difference between fire-and-forget vs request-response",
+        "oneway is great for logging/analytics where you don't need a result"
+      ],
+      "learnMore": [
+        {"title": "AIDL — oneway keyword", "url": "https://developer.android.com/guide/components/aidl#oneway"}
+      ]
+    },
+    {
+      "id": "bi-8",
+      "type": "write-code",
+      "title": "Bound Service Implementation",
+      "difficulty": "advanced",
+      "description": "Implement a bound service that exposes a method <code>getServerTime(): Long</code> using a Binder subclass (same-process binding). Show both the Service and the client Activity's ServiceConnection.",
+      "starterCode": "// Implement:\n// 1. A Service with a local Binder that has getServerTime(): Long\n// 2. A ServiceConnection in the Activity that binds and calls it\n\nclass TimeService : Service() {\n    // TODO: inner Binder class + onBind()\n}\n\nclass MainActivity : AppCompatActivity() {\n    // TODO: ServiceConnection + bindService()\n}",
+      "checks": [
+        {
+          "pattern": "Binder|IBinder",
+          "message": "Create a Binder subclass",
+          "required": true
+        },
+        {
+          "pattern": "onBind|ServiceConnection",
+          "message": "Implement onBind and ServiceConnection",
+          "required": true
+        },
+        {
+          "pattern": "bindService",
+          "message": "Bind to the service",
+          "required": true
+        }
+      ],
+      "solution": "class TimeService : Service() {\n    inner class TimeBinder : Binder() {\n        fun getService(): TimeService = this@TimeService\n    }\n\n    private val binder = TimeBinder()\n\n    override fun onBind(intent: Intent): IBinder = binder\n\n    fun getServerTime(): Long = System.currentTimeMillis()\n}\n\nclass MainActivity : AppCompatActivity() {\n    private var timeService: TimeService? = null\n    private var bound = false\n\n    private val connection = object : ServiceConnection {\n        override fun onServiceConnected(name: ComponentName, binder: IBinder) {\n            val localBinder = binder as TimeService.TimeBinder\n            timeService = localBinder.getService()\n            bound = true\n        }\n        override fun onServiceDisconnected(name: ComponentName) {\n            bound = false\n        }\n    }\n\n    override fun onStart() {\n        super.onStart()\n        bindService(Intent(this, TimeService::class.java), connection, BIND_AUTO_CREATE)\n    }\n\n    override fun onStop() {\n        super.onStop()\n        if (bound) { unbindService(connection); bound = false }\n    }\n}",
+      "explanation": "For same-process binding, extend <code>Binder</code> directly (no AIDL needed). The inner class pattern lets the client get a reference to the Service itself. Key lifecycle: bind in <code>onStart()</code>, unbind in <code>onStop()</code> — this prevents leaks. <code>BIND_AUTO_CREATE</code> starts the service if it's not running. For cross-process IPC, you'd use AIDL or Messenger instead of a local Binder.",
+      "hints": [
+        "For same-process binding, AIDL is overkill — a Binder subclass works",
+        "Always unbind in the opposite lifecycle method to prevent leaks"
+      ]
+    },
+    {
+      "id": "bi-9",
+      "type": "multiple-choice",
+      "title": "Service Lifecycle: Started vs Bound",
+      "difficulty": "intermediate",
+      "description": "A service is both started (via <code>startService()</code>) and bound (via <code>bindService()</code>). When is it destroyed?",
+      "options": [
+        "When stopService() is called — binding doesn't matter",
+        "When all clients unbind — starting doesn't matter",
+        "When BOTH stopService() is called AND all clients have unbound",
+        "Never — started+bound services run forever"
+      ],
+      "correctIndex": 2,
+      "explanation": "A started+bound service has two lifecycle anchors. It only gets destroyed when <b>both</b> conditions are met: (1) <code>stopService()</code> or <code>stopSelf()</code> has been called, AND (2) all clients have unbound. This is common for music players: the service is started (keeps playing when Activity leaves) and bound (Activity controls playback). It keeps running after unbind because it's still started, and keeps running after stop because clients are still bound.",
+      "hints": [
+        "Think of a music player: it plays when the UI is gone (started) AND has controls when visible (bound)"
+      ]
+    },
+    {
+      "id": "bi-10",
+      "type": "fix-bug",
+      "title": "Service Connection Leak",
+      "difficulty": "intermediate",
+      "description": "This Activity leaks the ServiceConnection — Android logs: \"Activity has leaked ServiceConnection.\" Fix it.",
+      "starterCode": "class DashboardActivity : AppCompatActivity() {\n    private lateinit var dataService: DataService\n\n    private val connection = object : ServiceConnection {\n        override fun onServiceConnected(name: ComponentName, binder: IBinder) {\n            dataService = (binder as DataService.LocalBinder).getService()\n            loadData()\n        }\n        override fun onServiceDisconnected(name: ComponentName) {}\n    }\n\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        bindService(\n            Intent(this, DataService::class.java),\n            connection, BIND_AUTO_CREATE\n        )\n    }\n\n    private fun loadData() {\n        val data = dataService.fetchDashboard()\n        // display data...\n    }\n}",
+      "checks": [
+        {
+          "pattern": "unbindService|onDestroy|onStop",
+          "message": "Unbind the service in a lifecycle method",
+          "required": true
+        }
+      ],
+      "solution": "class DashboardActivity : AppCompatActivity() {\n    private var dataService: DataService? = null\n    private var bound = false\n\n    private val connection = object : ServiceConnection {\n        override fun onServiceConnected(name: ComponentName, binder: IBinder) {\n            dataService = (binder as DataService.LocalBinder).getService()\n            bound = true\n            loadData()\n        }\n        override fun onServiceDisconnected(name: ComponentName) {\n            bound = false\n        }\n    }\n\n    override fun onStart() {\n        super.onStart()\n        bindService(\n            Intent(this, DataService::class.java),\n            connection, BIND_AUTO_CREATE\n        )\n    }\n\n    override fun onStop() {\n        super.onStop()\n        if (bound) {\n            unbindService(connection)\n            bound = false\n        }\n    }\n\n    private fun loadData() {\n        val data = dataService?.fetchDashboard() ?: return\n        // display data...\n    }\n}",
+      "explanation": "The bug: <code>bindService()</code> is called but <code>unbindService()</code> is never called. When the Activity is destroyed, the ServiceConnection leaks. Fix: (1) Move bind to <code>onStart()</code> and unbind to <code>onStop()</code> — matching lifecycle methods. (2) Track the <code>bound</code> flag to avoid double-unbind crashes. (3) Make <code>dataService</code> nullable since it's only available after connection. This is a top Android memory leak pattern.",
+      "hints": [
+        "Every bindService() must have a matching unbindService()",
+        "Bind and unbind should be in matching lifecycle methods (onStart/onStop or onCreate/onDestroy)"
+      ]
+    }
+  ]
+}

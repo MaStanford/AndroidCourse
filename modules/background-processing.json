@@ -1,0 +1,188 @@
+{
+  "id": "background-processing",
+  "title": "Background Processing & WorkManager",
+  "icon": "⚙️",
+  "description": "WorkManager, foreground services, background execution limits, and choosing the right API",
+  "references": [
+    {"title": "Android Developers — WorkManager", "url": "https://developer.android.com/topic/libraries/architecture/workmanager", "type": "docs"},
+    {"title": "Android Developers — Foreground Services", "url": "https://developer.android.com/develop/background-work/services/foreground-services", "type": "docs"},
+    {"title": "Android Developers — Background Work Overview", "url": "https://developer.android.com/develop/background-work/background-tasks", "type": "docs"},
+    {"title": "Android Developers — Background Execution Limits", "url": "https://developer.android.com/about/versions/oreo/background", "type": "docs"}
+  ],
+  "lesson": "<h3>Background Work in Modern Android</h3>\n<p>Android increasingly restricts background work to save battery. Understanding which API to use and <i>when</i> is critical for senior engineers.</p>\n<hr class=\"section-divider\">\n<h3>Choosing the Right API</h3>\n<table><tr><th>Scenario</th><th>API</th><th>Why</th></tr><tr><td>Deferrable, must complete</td><td><b>WorkManager</b></td><td>Survives process death, respects constraints</td></tr><tr><td>User-initiated, long-running</td><td><b>Foreground Service</b></td><td>Visible notification, elevated priority</td></tr><tr><td>Exact timing needed</td><td><b>AlarmManager</b></td><td>Precise scheduling (alarms, reminders)</td></tr><tr><td>Quick async in UI scope</td><td><b>Coroutines</b></td><td>Lightweight, scoped to lifecycle</td></tr></table>\n<hr class=\"section-divider\">\n<h3>WorkManager Deep Dive</h3>\n<div class=\"lesson-code\"><span class=\"cmt\">// One-time work with constraints</span>\nval uploadWork = OneTimeWorkRequestBuilder&lt;UploadWorker&gt;()\n    .setConstraints(\n        Constraints.Builder()\n            .setRequiredNetworkType(NetworkType.CONNECTED)\n            .setRequiresBatteryNotLow(true)\n            .build()\n    )\n    .setInputData(workDataOf(\"imageUri\" to uri.toString()))\n    .addTag(\"upload\")\n    .build()\n\nWorkManager.getInstance(context).enqueue(uploadWork)\n\n<span class=\"cmt\">// Periodic work (minimum 15 minutes)</span>\nval syncWork = PeriodicWorkRequestBuilder&lt;SyncWorker&gt;(\n    repeatInterval = 1, repeatIntervalTimeUnit = TimeUnit.HOURS\n).build()</div>\n<hr class=\"section-divider\">\n<h3>CoroutineWorker with Hilt</h3>\n<div class=\"lesson-code\">@HiltWorker\nclass UploadWorker @AssistedInject constructor(\n    @Assisted context: Context,\n    @Assisted params: WorkerParameters,\n    private val repository: UploadRepository\n) : CoroutineWorker(context, params) {\n\n    override suspend fun doWork(): Result {\n        val uri = inputData.getString(\"imageUri\") ?: return Result.failure()\n        return try {\n            repository.upload(uri)\n            Result.success()\n        } catch (e: Exception) {\n            if (runAttemptCount < 3) Result.retry()\n            else Result.failure()\n        }\n    }\n}</div>\n<hr class=\"section-divider\">\n<h3>Work Chaining & Unique Work</h3>\n<div class=\"lesson-code\"><span class=\"cmt\">// Chain: compress then upload then notify</span>\nWorkManager.getInstance(context)\n    .beginWith(compressWork)\n    .then(uploadWork)\n    .then(notifyWork)\n    .enqueue()\n\n<span class=\"cmt\">// Unique work — prevent duplicates</span>\nWorkManager.getInstance(context).enqueueUniqueWork(\n    \"sync\",\n    ExistingWorkPolicy.KEEP,  <span class=\"cmt\">// KEEP existing, REPLACE, or APPEND</span>\n    syncWork\n)</div>\n<hr class=\"section-divider\">\n<h3>Foreground Services (Android 14+)</h3>\n<p>Since Android 14, you <b>must</b> declare a <code>foregroundServiceType</code> in the manifest:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// AndroidManifest.xml</span>\n&lt;service\n    android:name=\".MusicService\"\n    android:foregroundServiceType=\"mediaPlayback\"\n    android:exported=\"false\" /&gt;\n\n<span class=\"cmt\">// Available types: camera, connectedDevice, dataSync,</span>\n<span class=\"cmt\">// health, location, mediaPlayback, mediaProjection,</span>\n<span class=\"cmt\">// microphone, phoneCall, remoteMessaging, shortService,</span>\n<span class=\"cmt\">// specialUse, systemExempted</span></div>\n<div class=\"warn-box\"><b>Android 15 change:</b> <code>dataSync</code> foreground services are restricted to 6 hours. Google pushes apps toward WorkManager for sync tasks.</div>\n<hr class=\"section-divider\">\n<h3>Background Execution Limits (Android 8+)</h3>\n<ul>\n<li><b>Service limitations</b> — Background services are stopped minutes after the app leaves foreground</li>\n<li><b>Implicit broadcast restrictions</b> — Most implicit broadcasts won't reach background apps</li>\n<li><b>Doze mode</b> — Deep sleep with batched wake windows. Deferred alarms and jobs</li>\n<li><b>App Standby Buckets</b> — Active, Working Set, Frequent, Rare, Restricted — controls job frequency</li>\n</ul>",
+  "questions": [
+    {
+      "id": "bp-1",
+      "type": "multiple-choice",
+      "title": "Choosing the Right API",
+      "difficulty": "intermediate",
+      "description": "You need to upload photos in the background. The upload must complete even if the user kills the app, and should only run on Wi-Fi. Which API is best?",
+      "options": [
+        "A foreground service with a notification",
+        "WorkManager with network constraint set to UNMETERED",
+        "viewModelScope.launch with Dispatchers.IO",
+        "AlarmManager to schedule the upload"
+      ],
+      "correctIndex": 1,
+      "explanation": "WorkManager is perfect here: it survives process death (guaranteed execution), supports constraints (Wi-Fi = <code>NetworkType.UNMETERED</code>), and is battery-friendly. Coroutines die with the process. AlarmManager is for time-based scheduling, not constraint-based.",
+      "hints": [
+        "Which API survives process death AND respects network constraints?"
+      ]
+    },
+    {
+      "id": "bp-2",
+      "type": "fill-blank",
+      "title": "CoroutineWorker Setup",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to create a Hilt-injected WorkManager worker.",
+      "code": "@___1___\nclass SyncWorker @___2___ constructor(\n    @Assisted context: Context,\n    @Assisted params: WorkerParameters,\n    private val repository: SyncRepository\n) : ___3___(context, params) {\n\n    override suspend fun doWork(): ___4___ {\n        return try {\n            repository.sync()\n            Result.___5___()\n        } catch (e: Exception) {\n            Result.retry()\n        }\n    }\n}",
+      "blanks": [
+        {
+          "answer": ["HiltWorker"],
+          "hint": "Hilt annotation for Workers"
+        },
+        {
+          "answer": ["AssistedInject"],
+          "hint": "Injection for runtime + DI parameters"
+        },
+        {
+          "answer": ["CoroutineWorker"],
+          "hint": "Worker base class for coroutines"
+        },
+        {
+          "answer": ["Result"],
+          "hint": "Return type of doWork()"
+        },
+        {
+          "answer": ["success"],
+          "hint": "Indicates work completed successfully"
+        }
+      ],
+      "explanation": "<code>@HiltWorker</code> enables DI in Workers. <code>@AssistedInject</code> handles both runtime params (Context, WorkerParameters) and DI params (repository). <code>CoroutineWorker</code> provides a suspend <code>doWork()</code>. Return <code>Result.success()</code>, <code>Result.failure()</code>, or <code>Result.retry()</code>.",
+      "hints": [
+        "Workers have both runtime params and DI params",
+        "The Result sealed class has three outcomes"
+      ]
+    },
+    {
+      "id": "bp-3",
+      "type": "what-does-this-do",
+      "title": "Work Chain Behavior",
+      "difficulty": "advanced",
+      "description": "What happens if <code>compressWork</code> returns <code>Result.failure()</code>?",
+      "code": "WorkManager.getInstance(context)\n    .beginWith(compressWork)\n    .then(uploadWork)\n    .then(notifyWork)\n    .enqueue()",
+      "options": [
+        "uploadWork and notifyWork still execute with empty input",
+        "The entire chain is cancelled — uploadWork and notifyWork are marked CANCELLED and never run",
+        "WorkManager retries compressWork indefinitely",
+        "uploadWork runs but notifyWork is skipped"
+      ],
+      "correctIndex": 1,
+      "explanation": "WorkManager chains are sequential. If any work returns <code>Result.failure()</code>, all downstream work is <b>cancelled</b>. The chain fails fast — there's no point uploading if compression failed. For parallel work, use <code>beginWith(listOf(work1, work2))</code>.",
+      "hints": [
+        "Think pipeline — what happens if an early stage fails?"
+      ]
+    },
+    {
+      "id": "bp-4",
+      "type": "multiple-choice",
+      "title": "ExistingWorkPolicy",
+      "difficulty": "intermediate",
+      "description": "You're enqueuing a unique sync job. If a sync is already running, you want to keep it and ignore the new request. Which policy?",
+      "options": [
+        "ExistingWorkPolicy.REPLACE — cancel existing, start new",
+        "ExistingWorkPolicy.KEEP — keep existing, ignore new request",
+        "ExistingWorkPolicy.APPEND — chain new after existing",
+        "ExistingWorkPolicy.UPDATE — update existing work's parameters"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>KEEP</code> keeps the existing work and ignores the new enqueue. <code>REPLACE</code> cancels running work and starts fresh. <code>APPEND</code> chains the new work after existing. Choose based on whether duplicate work matters.",
+      "hints": [
+        "You don't want to interrupt an ongoing sync"
+      ]
+    },
+    {
+      "id": "bp-5",
+      "type": "fix-bug",
+      "title": "Foreground Service Crash on Android 14",
+      "difficulty": "advanced",
+      "description": "This foreground service crashes on Android 14+ with <code>MissingForegroundServiceTypeException</code>. Fix it.",
+      "starterCode": "// AndroidManifest.xml\n// <service android:name=\".LocationService\" android:exported=\"false\" />\n\nclass LocationService : Service() {\n    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {\n        val notification = buildNotification()\n        startForeground(1, notification)\n        startLocationUpdates()\n        return START_STICKY\n    }\n    override fun onBind(intent: Intent?): IBinder? = null\n}",
+      "checks": [
+        {
+          "pattern": "foregroundServiceType|FOREGROUND_SERVICE_TYPE",
+          "message": "Declare the foreground service type",
+          "required": true
+        }
+      ],
+      "solution": "// AndroidManifest.xml\n// <service android:name=\".LocationService\"\n//     android:foregroundServiceType=\"location\"\n//     android:exported=\"false\" />\n\nclass LocationService : Service() {\n    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {\n        val notification = buildNotification()\n        startForeground(\n            1, notification,\n            ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION\n        )\n        startLocationUpdates()\n        return START_STICKY\n    }\n    override fun onBind(intent: Intent?): IBinder? = null\n}",
+      "explanation": "Android 14 requires <b>both</b>: (1) <code>android:foregroundServiceType</code> in the manifest, and (2) passing the type to <code>startForeground()</code>. Without these, the system throws <code>MissingForegroundServiceTypeException</code>. You also need the corresponding permission (e.g., <code>ACCESS_FINE_LOCATION</code>).",
+      "hints": [
+        "Android 14 added a new requirement for foreground services",
+        "The type must be declared in TWO places"
+      ]
+    },
+    {
+      "id": "bp-6",
+      "type": "write-code",
+      "title": "Observing Work Progress",
+      "difficulty": "intermediate",
+      "description": "Write code to observe an upload worker's progress in a ViewModel and expose it as a StateFlow. The worker reports progress as an integer (0-100).",
+      "starterCode": "// In the Worker:\nclass UploadWorker(...) : CoroutineWorker(...) {\n    override suspend fun doWork(): Result {\n        // TODO: Report progress (0-100)\n        return Result.success()\n    }\n}\n\n// In the ViewModel:\nclass UploadViewModel(private val workManager: WorkManager) : ViewModel() {\n    // TODO: Observe work progress as StateFlow<Int>\n}",
+      "checks": [
+        {
+          "pattern": "setProgress|setProgressAsync",
+          "message": "Report progress from the worker",
+          "required": true
+        },
+        {
+          "pattern": "getWorkInfoByIdFlow|getWorkInfoByIdLiveData|getWorkInfosByTag",
+          "message": "Observe work info",
+          "required": true
+        }
+      ],
+      "solution": "// In the Worker:\nclass UploadWorker(...) : CoroutineWorker(...) {\n    override suspend fun doWork(): Result {\n        for (i in 0..100 step 10) {\n            setProgress(workDataOf(\"progress\" to i))\n            delay(500) // actual upload work\n        }\n        return Result.success()\n    }\n}\n\n// In the ViewModel:\nclass UploadViewModel(private val workManager: WorkManager) : ViewModel() {\n    fun observeUpload(workId: UUID): StateFlow<Int> {\n        return workManager.getWorkInfoByIdFlow(workId)\n            .map { it?.progress?.getInt(\"progress\", 0) ?: 0 }\n            .stateIn(viewModelScope, SharingStarted.Lazily, 0)\n    }\n}",
+      "explanation": "<code>setProgress()</code> reports progress via <code>Data</code> objects. The ViewModel observes with <code>getWorkInfoByIdFlow()</code> which returns a Flow of <code>WorkInfo</code> updates containing progress, state, and output data.",
+      "hints": [
+        "setProgress takes a Data object, same format as inputData",
+        "WorkInfo has a .progress property"
+      ]
+    },
+    {
+      "id": "bp-7",
+      "type": "multiple-choice",
+      "title": "Doze Mode Impact",
+      "difficulty": "intermediate",
+      "description": "What happens to a periodic WorkManager job when the device enters Doze mode?",
+      "options": [
+        "The job is cancelled permanently",
+        "The job runs normally — WorkManager ignores Doze",
+        "The job is deferred until a maintenance window, then executes",
+        "The job is converted to an expedited job automatically"
+      ],
+      "correctIndex": 2,
+      "explanation": "In Doze mode, the system batches all deferred work into periodic <b>maintenance windows</b>. WorkManager respects Doze — it defers jobs but guarantees they eventually run. This saves battery while ensuring reliability.",
+      "hints": [
+        "Doze batches work to save battery, not cancels it"
+      ]
+    },
+    {
+      "id": "bp-8",
+      "type": "multiple-choice",
+      "title": "Expedited Work",
+      "difficulty": "advanced",
+      "description": "When should you use <code>setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)</code>?",
+      "options": [
+        "For all background work to make it faster",
+        "For time-sensitive tasks that need immediate execution (like sending a message), with graceful fallback when quota is exhausted",
+        "For periodic work that must run at exact intervals",
+        "For work that must survive device reboot"
+      ],
+      "correctIndex": 1,
+      "explanation": "Expedited work gets priority execution — starts immediately with elevated process priority. Use it for user-initiated, time-sensitive tasks. <code>RUN_AS_NON_EXPEDITED</code> falls back gracefully when the system's expedited quota is exhausted. Don't overuse it — the system limits expedited work per app.",
+      "hints": [
+        "Expedited = higher priority, but the system limits how much you can use"
+      ]
+    }
+  ]
+}

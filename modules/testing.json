@@ -1,0 +1,291 @@
+{
+  "id": "testing",
+  "title": "Testing",
+  "icon": "🧪",
+  "description": "Unit tests, UI tests, testing coroutines, screenshot testing, and the testing pyramid",
+  "references": [
+    {"title": "Android Developers — Testing Overview", "url": "https://developer.android.com/training/testing", "type": "docs"},
+    {"title": "Android Developers — Compose Testing", "url": "https://developer.android.com/develop/ui/compose/testing", "type": "docs"},
+    {"title": "Robolectric", "url": "https://robolectric.org/", "type": "docs"},
+    {"title": "Roborazzi (Screenshot Testing)", "url": "https://github.com/takahirom/roborazzi", "type": "github"},
+    {"title": "Android Developers — Testing Coroutines", "url": "https://developer.android.com/kotlin/coroutines/test", "type": "docs"}
+  ],
+  "lesson": "<h3>Testing Android Apps</h3>\n<p>Android testing follows a <b>pyramid</b>: many unit tests, fewer integration tests, fewest UI tests.</p>\n<ul>\n<li><b>Unit tests</b> — Test individual classes (ViewModels, Repositories) with JUnit and fakes</li>\n<li><b>Integration tests</b> — Test component interactions</li>\n<li><b>UI tests</b> — Test user flows with Compose testing APIs</li>\n</ul>\n<h3>Key Tools</h3>\n<div class=\"lesson-code\">// Unit test with coroutines\n@Test\nfun loadUsers_emitsSuccess() = runTest {\n    Dispatchers.setMain(UnconfinedTestDispatcher())\n    // ... test code\n}\n\n// Compose UI test\ncomposeTestRule.onNodeWithText(\"Submit\").performClick()\ncomposeTestRule.onNodeWithText(\"Success\").assertExists()</div>\n<p>Google recommends <b>fakes over mocks</b> for most testing. Fakes have real logic, making tests more reliable.</p>\n<hr class=\"section-divider\">\n<h3>The Testing Pyramid</h3>\n<div class=\"diagram\">        /  UI Tests  \\         ~10% — Slow, flaky, high confidence\n       / Integration  \\       ~20% — Medium speed, real components\n      /   Unit Tests    \\     ~70% — Fast, isolated, deterministic</div>\n<div class=\"info-box\"><b>Key insight:</b> Unit tests are cheap and fast — write many. UI tests are expensive and flaky — write few but covering critical user journeys. Integration tests fill the gap, testing real component interactions without full UI.</div>\n<hr class=\"section-divider\">\n<h3>Screenshot Testing</h3>\n<p>Catch visual regressions by comparing screenshots pixel-by-pixel:</p>\n<table><tr><th>Tool</th><th>Runs on</th><th>Speed</th><th>Setup</th></tr><tr><td><b>Roborazzi</b></td><td>JVM (Robolectric)</td><td>Fast — no emulator</td><td>Simple Gradle plugin</td></tr><tr><td><b>Paparazzi</b></td><td>JVM (layoutlib)</td><td>Fast — no emulator</td><td>Square's library</td></tr><tr><td><b>Compose Preview Screenshot</b></td><td>JVM</td><td>Fast</td><td>Google's official tool</td></tr></table>\n<div class=\"lesson-code\"><span class=\"cmt\">// Roborazzi screenshot test</span>\n@RunWith(RobolectricTestRunner::class)\nclass ProfileScreenTest {\n    @get:Rule val composeTestRule = createComposeRule()\n\n    @Test\n    fun profileScreen_default() {\n        composeTestRule.setContent {\n            ProfileScreen(user = testUser)\n        }\n        composeTestRule.onRoot().captureRoboImage()\n    }\n}</div>\n<hr class=\"section-divider\">\n<h3>Robolectric vs Instrumented Tests</h3>\n<table><tr><th>Robolectric</th><th>Instrumented</th></tr><tr><td>Runs on JVM — fast (seconds)</td><td>Runs on device/emulator — slow (minutes)</td></tr><tr><td>Simulates Android framework</td><td>Real Android framework</td></tr><tr><td>May have fidelity gaps</td><td>100% fidelity</td></tr><tr><td>Great for: logic, simple UI</td><td>Needed for: hardware, sensors, complex UI</td></tr></table>\n<hr class=\"section-divider\">\n<h3>Testing with Hilt</h3>\n<div class=\"lesson-code\">@HiltAndroidTest\n@UninstallModules(RepositoryModule::class)\nclass SearchScreenTest {\n    @get:Rule val hiltRule = HiltAndroidRule(this)\n    @get:Rule val composeTestRule = createComposeRule()\n\n    @BindValue\n    val fakeRepo: UserRepository = FakeUserRepository()\n\n    @Before\n    fun setup() { hiltRule.inject() }\n\n    @Test\n    fun showsResults() {\n        composeTestRule.setContent { SearchScreen() }\n        composeTestRule.onNodeWithText(\"Results\").assertExists()\n    }\n}</div>",
+  "questions": [
+    {
+      "id": "ts-1",
+      "type": "fill-blank",
+      "title": "Compose UI Test",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to write a Compose UI test.",
+      "code": "class CounterTest {\n    @get:Rule\n    val composeTestRule = ___1___()\n\n    @Test\n    fun counter_incrementsOnClick() {\n        composeTestRule.setContent { Counter() }\n\n        composeTestRule\n            .onNodeWithText(\"Count: 0\")\n            .___2___()\n\n        composeTestRule\n            .___3___(hasText(\"Increment\"))\n            .___4___(click())\n\n        composeTestRule\n            .onNodeWithText(\"Count: 1\")\n            .___2___()\n    }\n}",
+      "blanks": [
+        {
+          "answer": [
+            "createComposeRule"
+          ],
+          "hint": "Creates a Compose test rule"
+        },
+        {
+          "answer": [
+            "assertExists",
+            "assertIsDisplayed"
+          ],
+          "hint": "Asserts the node exists"
+        },
+        {
+          "answer": [
+            "onNode"
+          ],
+          "hint": "Finds a node by matcher"
+        },
+        {
+          "answer": [
+            "performClick",
+            "perform"
+          ],
+          "hint": "Simulates interaction"
+        }
+      ],
+      "explanation": "<code>createComposeRule()</code> creates a test environment. <code>onNodeWithText()</code> finds by text. <code>assertExists()</code> verifies presence. <code>onNode(hasText())</code> uses matchers. <code>performClick()</code> simulates user input.",
+      "hints": [
+        "The test rule creates a Compose testing environment"
+      ]
+    },
+    {
+      "id": "ts-2",
+      "type": "fix-bug",
+      "title": "Testing Coroutines",
+      "difficulty": "advanced",
+      "description": "This ViewModel test is flaky — sometimes passes, sometimes fails. Fix the coroutine testing setup.",
+      "starterCode": "class UserViewModelTest {\n    private lateinit var viewModel: UserViewModel\n    private val fakeRepository = FakeUserRepository()\n\n    @Before\n    fun setup() {\n        viewModel = UserViewModel(fakeRepository)\n    }\n\n    @Test\n    fun loadUsers_updatesState() {\n        viewModel.loadUsers()\n\n        assertEquals(\n            UiState.Success(testUsers),\n            viewModel.uiState.value\n        )\n    }\n}",
+      "checks": [
+        {
+          "pattern": "runTest|TestDispatcher|StandardTestDispatcher|UnconfinedTestDispatcher|Dispatchers\\.setMain",
+          "message": "Use runTest and set up a TestDispatcher",
+          "required": true
+        }
+      ],
+      "solution": "class UserViewModelTest {\n    private val testDispatcher = UnconfinedTestDispatcher()\n\n    @Before\n    fun setup() { Dispatchers.setMain(testDispatcher) }\n\n    @After\n    fun tearDown() { Dispatchers.resetMain() }\n\n    @Test\n    fun loadUsers_updatesState() = runTest {\n        val viewModel = UserViewModel(FakeUserRepository())\n        viewModel.loadUsers()\n        assertEquals(UiState.Success(testUsers), viewModel.uiState.value)\n    }\n}",
+      "explanation": "Coroutines in viewModelScope use Dispatchers.Main, which doesn't exist in unit tests. Fix: <code>Dispatchers.setMain(testDispatcher)</code> replaces Main. <code>runTest</code> properly advances coroutine execution. Always reset in @After.",
+      "hints": [
+        "viewModelScope uses Dispatchers.Main — does that exist in a JVM test?"
+      ]
+    },
+    {
+      "id": "ts-3",
+      "type": "multiple-choice",
+      "title": "Test Doubles",
+      "difficulty": "intermediate",
+      "description": "Which test double provides a simplified but working implementation?",
+      "options": [
+        "Mock — records interactions",
+        "Stub — returns hardcoded values",
+        "Fake — has a working implementation (e.g., in-memory database)",
+        "Spy — wraps a real object"
+      ],
+      "correctIndex": 2,
+      "explanation": "A <b>Fake</b> is a simplified but functional implementation. Example: <code>FakeUserRepository</code> using a HashMap instead of a real database. Google recommends fakes over mocks for most Android testing.",
+      "hints": [
+        "Which test double actually has working logic?"
+      ]
+    },
+    {
+      "id": "ts-4",
+      "type": "write-code",
+      "title": "ViewModel Unit Test",
+      "difficulty": "advanced",
+      "description": "Write a unit test for a ViewModel that tests the loading state flow: initial Loading → Success with data.",
+      "starterCode": "// ViewModel under test (given):\n// class UserViewModel(repo: UserRepository) : ViewModel() {\n//     val uiState: StateFlow<UiState<List<User>>>\n//     fun loadUsers()\n// }\n\nclass UserViewModelTest {\n    // TODO: Set up test dispatcher, fake repository, and write the test\n}",
+      "checks": [
+        {
+          "pattern": "runTest",
+          "message": "Use runTest{}",
+          "required": true
+        },
+        {
+          "pattern": "Dispatchers\\.setMain|TestDispatcher",
+          "message": "Set up TestDispatcher",
+          "required": true
+        },
+        {
+          "pattern": "assertEquals|assertThat|shouldBe|uiState",
+          "message": "Assert the UI state",
+          "required": true
+        },
+        {
+          "pattern": "Success",
+          "message": "Verify Success state",
+          "required": true
+        }
+      ],
+      "solution": "class UserViewModelTest {\n    private val testDispatcher = UnconfinedTestDispatcher()\n\n    @Before fun setup() { Dispatchers.setMain(testDispatcher) }\n    @After fun tearDown() { Dispatchers.resetMain() }\n\n    @Test\n    fun loadUsers_emitsSuccess() = runTest {\n        val fakeRepo = FakeUserRepository()\n        fakeRepo.setUsers(listOf(User(\"1\", \"Alice\")))\n        val viewModel = UserViewModel(fakeRepo)\n        viewModel.loadUsers()\n        assertEquals(UiState.Success(listOf(User(\"1\", \"Alice\"))), viewModel.uiState.value)\n    }\n}",
+      "explanation": "Key: test dispatcher replaces Dispatchers.Main, fake repo provides data, runTest handles coroutines, assert against StateFlow value.",
+      "hints": [
+        "You need three things: test dispatcher, fake repository, and runTest"
+      ]
+    },
+    {
+      "id": "ts-5",
+      "type": "what-does-this-do",
+      "title": "Turbine Flow Testing",
+      "difficulty": "advanced",
+      "description": "What does this test verify using the Turbine library?",
+      "code": "@Test\nfun searchFlow_emitsResultsAfterDebounce() = runTest {\n    val viewModel = SearchViewModel(FakeSearchRepo())\n\n    viewModel.results.test {\n        viewModel.onQueryChanged(\"kot\")\n        viewModel.onQueryChanged(\"kotl\")\n        viewModel.onQueryChanged(\"kotlin\")\n\n        advanceTimeBy(500)\n\n        val emission = awaitItem()\n        assertEquals(listOf(\"Kotlin\", \"Kotlin Coroutines\"), emission)\n\n        cancelAndConsumeRemainingEvents()\n    }\n}",
+      "options": [
+        "It verifies that every keystroke triggers a search",
+        "It verifies that the search debounces — only the last query (\"kotlin\") produces results after 500ms",
+        "It verifies that the search filters out short queries",
+        "It verifies that search results are cached"
+      ],
+      "correctIndex": 1,
+      "explanation": "<b>Turbine</b> is a testing library for Kotlin Flows. <code>.test { }</code> collects emissions. Three queries are sent rapidly, then <code>advanceTimeBy(500)</code> simulates the debounce delay. Only one emission is expected — the results for \"kotlin\". This confirms the debounce works: intermediate queries are ignored, only the final one triggers a search after the delay.",
+      "hints": [
+        "advanceTimeBy simulates time passing — why is that needed for debounce?",
+        "Only one awaitItem() is called — meaning only one emission is expected"
+      ]
+    },
+    {
+      "id": "ts-6",
+      "type": "write-code",
+      "title": "Fake Repository",
+      "difficulty": "intermediate",
+      "description": "Write a FakeUserRepository that implements UserRepository interface. It should store users in a mutable list and support getAll(), insert(), and clear() operations.",
+      "starterCode": "interface UserRepository {\n    suspend fun getAll(): List<User>\n    suspend fun insert(user: User)\n}\n\n// Implement FakeUserRepository:\nclass FakeUserRepository : UserRepository {\n    // TODO\n}",
+      "checks": [
+        {
+          "pattern": "MutableList|mutableListOf|ArrayList|list",
+          "message": "Store users in an in-memory list",
+          "required": true
+        },
+        {
+          "pattern": "override.*getAll|override.*insert",
+          "message": "Implement the interface methods",
+          "required": true
+        }
+      ],
+      "solution": "class FakeUserRepository : UserRepository {\n    private val users = mutableListOf<User>()\n\n    override suspend fun getAll(): List<User> = users.toList()\n\n    override suspend fun insert(user: User) {\n        users.add(user)\n    }\n\n    fun clear() { users.clear() }\n\n    fun setUsers(list: List<User>) {\n        users.clear()\n        users.addAll(list)\n    }\n}",
+      "explanation": "A fake uses real data structures (in-memory list) instead of a real database. <code>toList()</code> returns a defensive copy. Extra methods like <code>setUsers()</code> and <code>clear()</code> make test setup easy. This is simpler and more reliable than mocking.",
+      "hints": [
+        "Use a MutableList as the backing store",
+        "Add helper methods for test setup convenience"
+      ]
+    },
+    {
+      "id": "ts-7",
+      "type": "multiple-choice",
+      "title": "Testing Pyramid",
+      "difficulty": "intermediate",
+      "description": "According to the testing pyramid, which type of test should make up the majority of your test suite?",
+      "options": [
+        "UI / end-to-end tests — they give the most confidence",
+        "Integration tests — they balance speed and confidence",
+        "Unit tests — they are fast, isolated, and deterministic",
+        "Manual tests — automated tests can't catch everything"
+      ],
+      "correctIndex": 2,
+      "explanation": "The testing pyramid recommends ~70% unit tests, ~20% integration, ~10% UI tests. Unit tests are fast (milliseconds), run on JVM, and test logic in isolation. They're cheap to write and maintain. UI tests give high confidence but are slow and flaky. A healthy test suite has many fast unit tests and few targeted UI tests for critical flows.",
+      "hints": [
+        "Which test type is fastest and cheapest to maintain?"
+      ]
+    },
+    {
+      "id": "ts-8",
+      "type": "multiple-choice",
+      "title": "Screenshot Testing Tools",
+      "difficulty": "advanced",
+      "description": "Which screenshot testing tool runs entirely on the JVM (no emulator needed) and uses Robolectric's native rendering?",
+      "options": [
+        "Espresso Screenshot",
+        "Roborazzi — JVM-based screenshot capture using Robolectric",
+        "Firebase Test Lab — cloud device screenshots",
+        "Layout Inspector — manual visual comparison"
+      ],
+      "correctIndex": 1,
+      "explanation": "<b>Roborazzi</b> captures screenshots on the JVM using Robolectric's rendering engine. No emulator or device needed — tests run in seconds. It compares against golden images and fails if there are visual differences beyond a threshold. <b>Paparazzi</b> (by Square) is similar but uses Android's layoutlib directly. Both are fast CI-friendly alternatives to device-based screenshot tests.",
+      "hints": [
+        "The fastest screenshot tests don't need a device at all"
+      ]
+    },
+    {
+      "id": "ts-9",
+      "type": "multiple-choice",
+      "title": "Robolectric vs Instrumented",
+      "difficulty": "intermediate",
+      "description": "When should you prefer instrumented tests over Robolectric?",
+      "options": [
+        "Always — Robolectric is outdated and unreliable",
+        "When you need 100% fidelity with real Android behavior, such as testing hardware sensors, complex animations, or multi-process scenarios",
+        "For all ViewModel tests to ensure accuracy",
+        "When testing pure Kotlin logic with no Android dependencies"
+      ],
+      "correctIndex": 1,
+      "explanation": "Robolectric simulates the Android framework on JVM — it's fast but may have fidelity gaps for advanced features. Use instrumented tests when you need the <b>real</b> Android framework: hardware sensors, camera, complex touch gestures, multi-process IPC, or behavior that differs across API levels. For ViewModels, Repositories, and simple UI, Robolectric is faster and sufficient.",
+      "hints": [
+        "Robolectric simulates Android — some edge cases behave differently"
+      ]
+    },
+    {
+      "id": "ts-10",
+      "type": "fill-blank",
+      "title": "Hilt Test Setup",
+      "difficulty": "advanced",
+      "description": "Fill in the blanks to set up a Hilt-enabled test that replaces the real repository with a fake.",
+      "code": "@___1___\n@___2___(RepositoryModule::class)\nclass UserScreenTest {\n    @get:Rule val hiltRule = HiltAndroidRule(this)\n\n    @___3___\n    val fakeRepo: UserRepository = FakeUserRepository()\n\n    @Before\n    fun setup() { hiltRule.___4___() }\n}",
+      "blanks": [
+        {
+          "answer": ["HiltAndroidTest"],
+          "hint": "Marks a test class for Hilt injection"
+        },
+        {
+          "answer": ["UninstallModules"],
+          "hint": "Removes the real module so you can replace it"
+        },
+        {
+          "answer": ["BindValue"],
+          "hint": "Binds this field directly into the Hilt graph"
+        },
+        {
+          "answer": ["inject"],
+          "hint": "Triggers Hilt injection of @Inject fields"
+        }
+      ],
+      "explanation": "<code>@HiltAndroidTest</code> enables Hilt in tests. <code>@UninstallModules</code> removes the production module that provides UserRepository. <code>@BindValue</code> injects the fake directly into the graph — no module needed. <code>hiltRule.inject()</code> triggers injection. This pattern lets you test with controlled data without mocking frameworks.",
+      "hints": [
+        "Three annotations set up the replacement: test marker, uninstall, and bind",
+        "@BindValue is simpler than creating a test module"
+      ]
+    },
+    {
+      "id": "ts-11",
+      "type": "write-code",
+      "title": "Screenshot Test",
+      "difficulty": "advanced",
+      "description": "Write a Roborazzi screenshot test that captures the UserCard composable in both light and dark themes.",
+      "starterCode": "// Write a screenshot test for UserCard in both themes:\n// @Composable fun UserCard(user: User)\n\n@RunWith(RobolectricTestRunner::class)\nclass UserCardScreenshotTest {\n    @get:Rule val composeTestRule = createComposeRule()\n\n    // TODO: Light theme test\n    // TODO: Dark theme test\n}",
+      "checks": [
+        {
+          "pattern": "captureRoboImage|captureToImage|compareScreenshot",
+          "message": "Capture a screenshot",
+          "required": true
+        },
+        {
+          "pattern": "setContent|UserCard",
+          "message": "Render the composable",
+          "required": true
+        },
+        {
+          "pattern": "dark|Dark|light|Light|theme|Theme",
+          "message": "Test both themes",
+          "required": true
+        }
+      ],
+      "solution": "@RunWith(RobolectricTestRunner::class)\nclass UserCardScreenshotTest {\n    @get:Rule val composeTestRule = createComposeRule()\n    private val testUser = User(\"1\", \"Alice\", \"alice@example.com\")\n\n    @Test\n    fun userCard_lightTheme() {\n        composeTestRule.setContent {\n            MyAppTheme(darkTheme = false) {\n                UserCard(user = testUser)\n            }\n        }\n        composeTestRule.onRoot().captureRoboImage(\n            \"screenshots/UserCard_light.png\"\n        )\n    }\n\n    @Test\n    fun userCard_darkTheme() {\n        composeTestRule.setContent {\n            MyAppTheme(darkTheme = true) {\n                UserCard(user = testUser)\n            }\n        }\n        composeTestRule.onRoot().captureRoboImage(\n            \"screenshots/UserCard_dark.png\"\n        )\n    }\n}",
+      "explanation": "Screenshot tests render a composable and capture an image. On first run, it creates golden images. On subsequent runs, it compares against goldens and fails if there's a visual difference. Testing both themes catches color/contrast regressions. <code>captureRoboImage()</code> is Roborazzi's API — Paparazzi uses <code>paparazzi.snapshot { }</code>.",
+      "hints": [
+        "Wrap the composable in your theme with darkTheme parameter",
+        "captureRoboImage saves/compares against a golden image file"
+      ]
+    }
+  ]
+}

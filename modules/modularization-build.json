@@ -1,0 +1,223 @@
+{
+  "id": "modularization-build",
+  "title": "App Modularization & Build System",
+  "icon": "📦",
+  "description": "Module types, dependency graphs, version catalogs, convention plugins, KSP, and build optimization",
+  "references": [
+    {"title": "Android Developers — Guide to App Modularization", "url": "https://developer.android.com/topic/modularization", "type": "docs"},
+    {"title": "Android Developers — Version Catalogs", "url": "https://developer.android.com/build/migrate-to-catalogs", "type": "docs"},
+    {"title": "Android Developers — KSP", "url": "https://developer.android.com/build/migrate-to-ksp", "type": "docs"},
+    {"title": "Now in Android — Build Logic", "url": "https://github.com/android/nowinandroid/tree/main/build-logic", "type": "github"},
+    {"title": "Gradle Convention Plugins Guide", "url": "https://docs.gradle.org/current/userguide/sharing_build_logic_between_subprojects.html", "type": "docs"}
+  ],
+  "lesson": "<h3>Why Modularize?</h3>\n<p>Modularization is the <b>#1 differentiator</b> at senior Android interviews. A well-modularized app has faster builds (parallel compilation), stricter encapsulation, independent feature teams, and reusable components.</p>\n<hr class=\"section-divider\">\n<h3>Module Types (Now in Android Pattern)</h3>\n<div class=\"diagram\">:app\n ├── :feature:home\n ├── :feature:search\n ├── :feature:profile\n │\n ├── :core:data         (repositories, data sources)\n ├── :core:network      (Retrofit, OkHttp setup)\n ├── :core:database     (Room DAOs, entities)\n ├── :core:ui           (shared composables, theme)\n ├── :core:model        (domain models, no Android deps)\n ├── :core:common       (utilities, extensions)\n └── :core:testing      (test utilities, fakes)</div>\n<div class=\"info-box\"><b>Key rule:</b> Feature modules NEVER depend on each other. They only depend on <code>:core:*</code> modules. This prevents circular dependencies and enables parallel builds.</div>\n<hr class=\"section-divider\">\n<h3>api vs implementation</h3>\n<p>Gradle dependency configurations control visibility and build speed:</p>\n<table><tr><th>Configuration</th><th>Behavior</th><th>Use When</th></tr><tr><td><code>implementation</code></td><td>Dependency is internal — consumers can't see it</td><td>Default choice. Keeps build fast.</td></tr><tr><td><code>api</code></td><td>Dependency is exposed — consumers can use it directly</td><td>Only when your public API exposes types from the dependency</td></tr></table>\n<div class=\"lesson-code\"><span class=\"cmt\">// :core:data/build.gradle.kts</span>\ndependencies {\n    implementation(libs.retrofit)       <span class=\"cmt\">// internal — feature modules can't see Retrofit types</span>\n    api(libs.kotlinx.coroutines.core)   <span class=\"cmt\">// exposed — features use Flow/coroutines from this</span>\n    api(project(\":core:model\"))         <span class=\"cmt\">// exposed — features use domain models</span>\n}</div>\n<div class=\"warn-box\"><b>Why this matters:</b> With <code>implementation</code>, changing Retrofit doesn't recompile feature modules. With <code>api</code>, it would. Prefer <code>implementation</code> unless the type appears in your public API.</div>\n<hr class=\"section-divider\">\n<h3>Version Catalogs</h3>\n<p>Centralize all dependency versions in <code>gradle/libs.versions.toml</code>:</p>\n<div class=\"lesson-code\"><span class=\"cmt\"># gradle/libs.versions.toml</span>\n[versions]\nkotlin = \"2.0.0\"\ncompose-bom = \"2024.06.00\"\nretrofit = \"2.11.0\"\nroom = \"2.6.1\"\n\n[libraries]\nretrofit-core = { group = \"com.squareup.retrofit2\", name = \"retrofit\", version.ref = \"retrofit\" }\nroom-runtime = { group = \"androidx.room\", name = \"room-runtime\", version.ref = \"room\" }\nroom-compiler = { group = \"androidx.room\", name = \"room-compiler\", version.ref = \"room\" }\n\n[bundles]\nroom = [\"room-runtime\"]\n\n[plugins]\nkotlin-android = { id = \"org.jetbrains.kotlin.android\", version.ref = \"kotlin\" }</div>\n<p>Then in any module: <code>implementation(libs.retrofit.core)</code> — type-safe, auto-completed by IDE.</p>\n<hr class=\"section-divider\">\n<h3>Convention Plugins</h3>\n<p>Instead of copy-pasting build config across 20 modules, define reusable plugins in <code>build-logic/</code>:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// build-logic/convention/src/main/kotlin/AndroidFeatureConventionPlugin.kt</span>\nclass AndroidFeatureConventionPlugin : Plugin&lt;Project&gt; {\n    override fun apply(target: Project) {\n        with(target) {\n            pluginManager.apply(\"com.android.library\")\n            pluginManager.apply(\"org.jetbrains.kotlin.android\")\n            extensions.configure&lt;LibraryExtension&gt; {\n                compileSdk = 35\n                defaultConfig.minSdk = 26\n            }\n        }\n    }\n}\n\n<span class=\"cmt\">// :feature:home/build.gradle.kts</span>\nplugins {\n    id(\"myapp.android.feature\")  <span class=\"cmt\">// One line instead of 30!</span>\n}</div>\n<hr class=\"section-divider\">\n<h3>KSP vs KAPT</h3>\n<table><tr><th>KAPT</th><th>KSP</th></tr><tr><td>Uses Java annotation processing via stubs</td><td>Kotlin-native symbol processing</td></tr><tr><td>Generates Java stubs first → slow</td><td>Operates on Kotlin directly → <b>up to 2x faster</b></td></tr><tr><td>Legacy: Room, Dagger/Hilt (migrating)</td><td>Room, Moshi, and most modern libraries</td></tr></table>\n<div class=\"lesson-code\"><span class=\"cmt\">// Migration: replace kapt with ksp</span>\nplugins {\n    id(\"com.google.devtools.ksp\") version \"2.0.0-1.0.22\"\n}\ndependencies {\n    ksp(libs.room.compiler)       <span class=\"cmt\">// ✅ Fast</span>\n    <span class=\"cmt\">// kapt(libs.room.compiler)   // ❌ Slow — remove this</span>\n}</div>\n<hr class=\"section-divider\">\n<h3>Build Performance</h3>\n<ul>\n<li><b>Configuration cache</b> — Caches the build configuration phase: <code>org.gradle.configuration-cache=true</code></li>\n<li><b>Parallel execution</b> — Build independent modules simultaneously: <code>org.gradle.parallel=true</code></li>\n<li><b>Build cache</b> — Reuse outputs from previous builds: <code>org.gradle.caching=true</code></li>\n</ul>\n<hr class=\"section-divider\">\n<h3>R8 Full Mode vs Compat Mode</h3>\n<p>R8 full mode enables more aggressive optimizations:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// gradle.properties</span>\nandroid.enableR8.fullMode=true</div>\n<p>Full mode: removes more unused code, may break if you rely on implicit keep rules (e.g., reflection). Always test after enabling. Compat mode is the safe default that follows ProGuard behavior.</p>",
+  "questions": [
+    {
+      "id": "mb-1",
+      "type": "multiple-choice",
+      "title": "Module Dependency Rules",
+      "difficulty": "intermediate",
+      "description": "In a properly modularized Android app following the Now in Android (NIA) architecture, which dependency rule is correct?",
+      "options": [
+        "Feature modules can depend on other feature modules for code sharing",
+        "Feature modules depend only on :core:* modules, never on each other",
+        "Core modules can depend on feature modules for UI components",
+        ":app depends only on :core:data, features register themselves"
+      ],
+      "correctIndex": 1,
+      "explanation": "Feature modules must NEVER depend on each other — this would create tight coupling and slow builds. Features depend only on <code>:core:*</code> modules. The <code>:app</code> module depends on all features to assemble them. Core modules never depend on features. This DAG (directed acyclic graph) enables parallel compilation.",
+      "hints": [
+        "What would happen to build parallelism if :feature:home depended on :feature:profile?"
+      ]
+    },
+    {
+      "id": "mb-2",
+      "type": "multiple-choice",
+      "title": "api vs implementation",
+      "difficulty": "intermediate",
+      "description": "If <code>:core:data</code> uses <code>implementation(libs.retrofit)</code>, what happens when a <code>:feature:home</code> module depends on <code>:core:data</code>?",
+      "options": [
+        ":feature:home can use Retrofit classes directly",
+        ":feature:home cannot see Retrofit classes — they are internal to :core:data",
+        "The build fails because Retrofit is not available",
+        ":feature:home gets Retrofit but only at runtime, not compile time"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>implementation</code> means the dependency is internal. <code>:feature:home</code> can use <code>:core:data</code>'s public API but cannot access Retrofit types. This is encapsulation — if <code>:core:data</code> switches from Retrofit to Ktor, no feature modules need to change. Use <code>api</code> only when your module's public interface exposes types from the dependency.",
+      "hints": [
+        "implementation = private, api = public in terms of transitive visibility"
+      ]
+    },
+    {
+      "id": "mb-3",
+      "type": "fill-blank",
+      "title": "Version Catalog Structure",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to complete this version catalog entry in <code>libs.versions.toml</code>.",
+      "code": "[___1___]\nroom = \"2.6.1\"\n\n[___2___]\nroom-runtime = { group = \"androidx.room\", name = \"room-runtime\", version.ref = \"___3___\" }\nroom-compiler = { group = \"androidx.room\", name = \"room-compiler\", version.ref = \"___3___\" }",
+      "blanks": [
+        {
+          "answer": ["versions"],
+          "hint": "Section that defines version numbers"
+        },
+        {
+          "answer": ["libraries"],
+          "hint": "Section that defines dependency coordinates"
+        },
+        {
+          "answer": ["room"],
+          "hint": "References the version defined above"
+        }
+      ],
+      "explanation": "Version catalogs have four sections: <code>[versions]</code> (version numbers), <code>[libraries]</code> (Maven coordinates), <code>[bundles]</code> (groups of libraries), and <code>[plugins]</code> (Gradle plugins). <code>version.ref</code> links a library to a version, ensuring consistency.",
+      "hints": [
+        "The TOML file has sections in square brackets",
+        "version.ref points to a key in the versions section"
+      ]
+    },
+    {
+      "id": "mb-4",
+      "type": "what-does-this-do",
+      "title": "Convention Plugin",
+      "difficulty": "advanced",
+      "description": "What does this convention plugin achieve?",
+      "code": "class AndroidFeatureConventionPlugin : Plugin<Project> {\n    override fun apply(target: Project) {\n        with(target) {\n            pluginManager.apply(\"com.android.library\")\n            pluginManager.apply(\"org.jetbrains.kotlin.android\")\n            pluginManager.apply(\"dagger.hilt.android.plugin\")\n            extensions.configure<LibraryExtension> {\n                compileSdk = 35\n                defaultConfig.minSdk = 26\n                buildFeatures.compose = true\n            }\n            dependencies {\n                add(\"implementation\", project(\":core:ui\"))\n                add(\"implementation\", project(\":core:model\"))\n            }\n        }\n    }\n}",
+      "options": [
+        "It creates a new Android feature module from scratch at runtime",
+        "It applies a standard set of plugins, SDK versions, Compose support, and shared dependencies so every feature module has consistent configuration with one line",
+        "It enforces that feature modules cannot depend on each other by analyzing the dependency graph",
+        "It generates build variants for debug and release configurations"
+      ],
+      "correctIndex": 1,
+      "explanation": "Convention plugins centralize build configuration. Instead of repeating compileSdk, minSdk, Compose setup, Hilt, and common dependencies in every <code>build.gradle.kts</code>, this plugin applies them all with <code>id(\"myapp.android.feature\")</code>. This is the <code>build-logic/</code> pattern used by Now in Android — it reduces duplication and ensures consistency across all feature modules.",
+      "hints": [
+        "Think DRY principle applied to build configuration",
+        "The Now in Android project uses this pattern in build-logic/"
+      ]
+    },
+    {
+      "id": "mb-5",
+      "type": "multiple-choice",
+      "title": "KSP vs KAPT",
+      "difficulty": "intermediate",
+      "description": "Why is KSP (Kotlin Symbol Processing) faster than KAPT?",
+      "options": [
+        "KSP generates less code than KAPT",
+        "KSP operates directly on Kotlin symbols without generating intermediate Java stubs",
+        "KSP runs at runtime instead of compile time",
+        "KSP uses incremental processing while KAPT processes everything from scratch"
+      ],
+      "correctIndex": 1,
+      "explanation": "KAPT first generates Java stubs from Kotlin code, then runs Java annotation processing on those stubs — a costly extra step. KSP is Kotlin-native and processes Kotlin symbols directly, skipping stub generation entirely. This makes it up to <b>2x faster</b>. Most modern libraries (Room, Moshi) now support KSP.",
+      "hints": [
+        "The bottleneck in KAPT is an intermediate conversion step"
+      ]
+    },
+    {
+      "id": "mb-6",
+      "type": "fix-bug",
+      "title": "Leaking Internal Dependencies",
+      "difficulty": "advanced",
+      "description": "This module's build configuration leaks implementation details. Feature modules are now tightly coupled to Retrofit. Fix it.",
+      "starterCode": "// :core:network/build.gradle.kts\nplugins {\n    id(\"myapp.android.library\")\n}\n\ndependencies {\n    api(libs.retrofit.core)\n    api(libs.retrofit.moshi)\n    api(libs.okhttp.logging)\n    api(project(\":core:model\"))\n}",
+      "checks": [
+        {
+          "pattern": "implementation",
+          "message": "Use implementation for internal dependencies",
+          "required": true
+        }
+      ],
+      "solution": "// :core:network/build.gradle.kts\nplugins {\n    id(\"myapp.android.library\")\n}\n\ndependencies {\n    implementation(libs.retrofit.core)\n    implementation(libs.retrofit.moshi)\n    implementation(libs.okhttp.logging)\n    api(project(\":core:model\"))  // Models are part of the public API\n}",
+      "explanation": "Retrofit, Moshi converter, and OkHttp logging are <b>implementation details</b> of <code>:core:network</code>. Feature modules should call <code>repository.getUsers()</code> — they don't need to know it uses Retrofit underneath. Only <code>:core:model</code> should be <code>api</code> because data classes from it appear in the module's public function signatures.",
+      "hints": [
+        "Ask: do feature modules need to directly use Retrofit classes?",
+        "Which dependency's types appear in the module's public API?"
+      ]
+    },
+    {
+      "id": "mb-7",
+      "type": "write-code",
+      "title": "Inter-Module Navigation",
+      "difficulty": "advanced",
+      "description": "Feature modules can't depend on each other, so how do you navigate from :feature:home to :feature:profile? Write a shared navigation route definition in :core:navigation and the navigation graph setup.",
+      "starterCode": "// :core:navigation/Routes.kt\n// Define routes that any feature can reference:\n\n// TODO: Define sealed class or object for type-safe routes\n\n// :feature:home - navigating to profile:\n// TODO: Show how home navigates to profile without depending on :feature:profile",
+      "checks": [
+        {
+          "pattern": "sealed|object|Route|Screen",
+          "message": "Define type-safe routes in the shared module",
+          "required": true
+        },
+        {
+          "pattern": "navigate|navController|NavHost",
+          "message": "Show navigation using the shared routes",
+          "required": true
+        }
+      ],
+      "solution": "// :core:navigation/Routes.kt\nsealed class Route(val route: String) {\n    data object Home : Route(\"home\")\n    data class Profile(val userId: String) : Route(\"profile/{userId}\") {\n        fun createRoute(userId: String) = \"profile/$userId\"\n    }\n}\n\n// :feature:home/HomeScreen.kt\n@Composable\nfun HomeScreen(onNavigateToProfile: (String) -> Unit) {\n    Button(onClick = { onNavigateToProfile(userId) }) {\n        Text(\"View Profile\")\n    }\n}\n\n// :app/NavHost setup\nNavHost(navController, startDestination = Route.Home.route) {\n    composable(Route.Home.route) {\n        HomeScreen(onNavigateToProfile = { userId ->\n            navController.navigate(Route.Profile.createRoute(userId))\n        })\n    }\n    composable(\"profile/{userId}\") { backStackEntry ->\n        ProfileScreen(userId = backStackEntry.arguments?.getString(\"userId\") ?: \"\")\n    }\n}",
+      "explanation": "The pattern: (1) Define routes in <code>:core:navigation</code> which all modules can access. (2) Feature screens expose navigation events as lambda callbacks (e.g., <code>onNavigateToProfile</code>). (3) The <code>:app</code> module wires everything together in NavHost, since it depends on all features. This way <code>:feature:home</code> never imports anything from <code>:feature:profile</code>.",
+      "hints": [
+        "The :app module is the only one that depends on all feature modules",
+        "Feature screens should expose navigation events as callbacks, not perform navigation directly"
+      ]
+    },
+    {
+      "id": "mb-8",
+      "type": "multiple-choice",
+      "title": "Build Performance",
+      "difficulty": "intermediate",
+      "description": "Which Gradle property enables reusing task outputs from previous builds, significantly speeding up incremental builds?",
+      "options": [
+        "org.gradle.parallel=true",
+        "org.gradle.caching=true",
+        "org.gradle.configuration-cache=true",
+        "org.gradle.daemon=true"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>org.gradle.caching=true</code> enables the build cache, which stores and reuses task outputs. If inputs haven't changed, the cached output is used instead of re-running the task. <code>parallel</code> runs independent modules simultaneously. <code>configuration-cache</code> caches the build configuration phase. All three should be enabled for optimal build speed.",
+      "hints": [
+        "Which setting is specifically about reusing previous outputs?"
+      ]
+    },
+    {
+      "id": "mb-9",
+      "type": "multiple-choice",
+      "title": "R8 Full Mode",
+      "difficulty": "advanced",
+      "description": "What is the key difference between R8 full mode and R8 compat mode?",
+      "options": [
+        "Full mode only works on Kotlin code, compat mode handles Java",
+        "Full mode does not obfuscate, compat mode does",
+        "Full mode applies more aggressive optimizations and may remove classes kept implicitly by ProGuard rules — requires explicit keep rules for reflection",
+        "Full mode produces larger APKs with better runtime performance"
+      ],
+      "correctIndex": 2,
+      "explanation": "R8 compat mode follows ProGuard semantics — it keeps classes that ProGuard would keep implicitly. Full mode is more aggressive: it may remove classes only accessed via reflection unless you add explicit <code>-keep</code> rules. This produces smaller APKs but requires testing. Enable with <code>android.enableR8.fullMode=true</code>.",
+      "hints": [
+        "Full mode breaks implicit assumptions about which classes are kept"
+      ]
+    },
+    {
+      "id": "mb-10",
+      "type": "fill-blank",
+      "title": "Build Variants",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to define product flavors for a free and paid version of the app.",
+      "code": "android {\n    ___1___ {\n        create(\"free\") {\n            ___2___ = \"com.example.app.free\"\n            buildConfigField(\"Boolean\", \"SHOW_ADS\", \"true\")\n        }\n        create(\"paid\") {\n            ___2___ = \"com.example.app.paid\"\n            buildConfigField(\"Boolean\", \"SHOW_ADS\", \"false\")\n        }\n    }\n}",
+      "blanks": [
+        {
+          "answer": ["productFlavors", "flavorDimensions"],
+          "hint": "The block that defines app variants"
+        },
+        {
+          "answer": ["applicationId", "applicationIdSuffix"],
+          "hint": "Unique identifier for each variant on the Play Store"
+        }
+      ],
+      "explanation": "<code>productFlavors</code> create variants of your app with different configurations. Each flavor can have its own <code>applicationId</code> (allowing both free and paid versions on the same device), <code>buildConfigField</code> values, resources, and source sets. Combined with build types (debug/release), they produce build variants like <code>freeDebug</code>, <code>paidRelease</code>.",
+      "hints": [
+        "Product flavors let you build multiple versions of the same app",
+        "Each variant needs a unique package identifier to coexist on a device"
+      ]
+    }
+  ]
+}

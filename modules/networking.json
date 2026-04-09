@@ -1,0 +1,248 @@
+{
+  "id": "networking",
+  "title": "Networking",
+  "icon": "🌐",
+  "description": "Retrofit, OkHttp, serialization, API patterns, GraphQL, retry policies, and real-time data",
+  "references": [
+    {"title": "Retrofit Documentation", "url": "https://square.github.io/retrofit/", "type": "docs"},
+    {"title": "OkHttp Documentation", "url": "https://square.github.io/okhttp/", "type": "docs"},
+    {"title": "Kotlin Serialization Guide", "url": "https://kotlinlang.org/docs/serialization.html", "type": "docs"},
+    {"title": "Android Developers — Network Operations", "url": "https://developer.android.com/develop/connectivity/network-ops", "type": "docs"},
+    {"title": "GraphQL Introduction", "url": "https://graphql.org/learn/", "type": "article"}
+  ],
+  "lesson": "<h3>Networking in Android</h3>\n<p><b>Retrofit</b> is the standard HTTP client for Android. It turns your API into a Kotlin interface with annotations. <b>OkHttp</b> handles the actual HTTP calls underneath.</p>\n<div class=\"lesson-code\">interface UserApi {\n    @GET(\"users/{id}\")\n    suspend fun getUser(@Path(\"id\") id: String): User\n\n    @POST(\"users\")\n    suspend fun createUser(@Body user: User): User\n}</div>\n<h3>Key Patterns</h3>\n<ul>\n<li><b>Interceptors</b> — middleware for auth headers, logging, caching</li>\n<li><b>Serialization</b> — Moshi, Gson, or kotlinx.serialization for JSON</li>\n<li><b>Error handling</b> — Always wrap network calls in try/catch with a Result type</li>\n</ul>\n<hr class=\"section-divider\">\n<h3>GraphQL with Apollo-Android</h3>\n<p>GraphQL lets clients request exactly the data they need — no over-fetching or under-fetching:</p>\n<table><tr><th>REST</th><th>GraphQL</th></tr><tr><td>Fixed response shape</td><td>Client specifies fields</td></tr><tr><td>Multiple endpoints</td><td>Single endpoint</td></tr><tr><td>Over/under-fetching common</td><td>Exact data requested</td></tr><tr><td>Simpler caching (HTTP cache)</td><td>Normalized cache (by ID)</td></tr></table>\n<div class=\"lesson-code\"><span class=\"cmt\">// Apollo-Android GraphQL query</span>\nval response = apolloClient.query(\n    GetUserQuery(id = \"123\")\n).execute()\n\nval user = response.data?.user</div>\n<hr class=\"section-divider\">\n<h3>Retry Policies</h3>\n<div class=\"lesson-code\"><span class=\"cmt\">// Exponential backoff with jitter</span>\nsuspend fun &lt;T&gt; retryWithBackoff(\n    maxRetries: Int = 3,\n    initialDelay: Long = 1000,\n    maxDelay: Long = 16000,\n    factor: Double = 2.0,\n    block: suspend () -&gt; T\n): T {\n    var currentDelay = initialDelay\n    repeat(maxRetries - 1) {\n        try { return block() }\n        catch (e: IOException) {\n            delay(currentDelay + Random.nextLong(0, currentDelay / 2)) <span class=\"cmt\">// jitter</span>\n            currentDelay = (currentDelay * factor).toLong().coerceAtMost(maxDelay)\n        }\n    }\n    return block() <span class=\"cmt\">// Final attempt — let exception propagate</span>\n}</div>\n<div class=\"info-box\"><b>Jitter</b> adds randomness to prevent the thundering herd problem — without it, all retrying clients hit the server at exactly the same time.</div>\n<hr class=\"section-divider\">\n<h3>Real-Time Data</h3>\n<ul>\n<li><b>WebSocket</b> — Full-duplex, persistent connection. Use for: chat, live scores, collaborative editing. OkHttp has built-in WebSocket support.</li>\n<li><b>SSE (Server-Sent Events)</b> — Server pushes events over HTTP. One-directional (server → client). Simpler than WebSocket for notifications/feeds.</li>\n<li><b>Firebase Realtime DB / Firestore</b> — Managed real-time sync with offline support.</li>\n</ul>",
+  "questions": [
+    {
+      "id": "nw-1",
+      "type": "fill-blank",
+      "title": "Retrofit Interface",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to define a Retrofit API interface.",
+      "code": "interface UserApi {\n    @___1___(\"users/{id}\")\n    suspend fun getUser(@___2___(\"id\") userId: String): User\n\n    @___3___(\"users\")\n    suspend fun createUser(@___4___ user: User): User\n}",
+      "blanks": [
+        {
+          "answer": [
+            "GET"
+          ],
+          "hint": "HTTP method for reading"
+        },
+        {
+          "answer": [
+            "Path"
+          ],
+          "hint": "URL path parameter"
+        },
+        {
+          "answer": [
+            "POST"
+          ],
+          "hint": "HTTP method for creating"
+        },
+        {
+          "answer": [
+            "Body"
+          ],
+          "hint": "Request body"
+        }
+      ],
+      "explanation": "Retrofit uses annotations to define HTTP APIs. <code>@GET/@POST</code> specify HTTP methods. <code>@Path</code> substitutes URL path variables. <code>@Body</code> serializes the parameter as request body. <code>suspend</code> makes them coroutine-friendly.",
+      "hints": [
+        "The four most common HTTP methods are GET, POST, PUT, DELETE"
+      ]
+    },
+    {
+      "id": "nw-2",
+      "type": "fix-bug",
+      "title": "Network on Main Thread",
+      "difficulty": "intermediate",
+      "description": "This code causes the app to freeze (ANR). Fix it.",
+      "starterCode": "class UserViewModel : ViewModel() {\n    private val api = RetrofitClient.userApi\n    private val _users = MutableLiveData<List<User>>()\n    val users: LiveData<List<User>> = _users\n\n    fun loadUsers() {\n        val response = api.getUsers()\n        if (response.isSuccessful) {\n            _users.value = response.body()\n        }\n    }\n}",
+      "checks": [
+        {
+          "pattern": "viewModelScope|launch|async|withContext",
+          "message": "Use coroutines to move network call off the main thread",
+          "required": true
+        }
+      ],
+      "solution": "class UserViewModel : ViewModel() {\n    private val api = RetrofitClient.userApi\n    private val _users = MutableLiveData<List<User>>()\n    val users: LiveData<List<User>> = _users\n\n    fun loadUsers() {\n        viewModelScope.launch {\n            try {\n                val response = api.getUsers()\n                if (response.isSuccessful) {\n                    _users.value = response.body()\n                }\n            } catch (e: Exception) { /* handle error */ }\n        }\n    }\n}",
+      "explanation": "Network calls on the main thread block the UI, causing ANR after 5 seconds. Wrap in <code>viewModelScope.launch</code>. With Retrofit's suspend functions, it automatically switches to a background thread.",
+      "hints": [
+        "What scope should you use for coroutines in a ViewModel?"
+      ]
+    },
+    {
+      "id": "nw-3",
+      "type": "multiple-choice",
+      "title": "OkHttp Interceptors",
+      "difficulty": "intermediate",
+      "description": "What is the primary use case for OkHttp Interceptors?",
+      "options": [
+        "To parse JSON responses",
+        "To intercept and modify HTTP requests/responses (add headers, log, retry, cache)",
+        "To handle deep links",
+        "To encrypt traffic with SSL"
+      ],
+      "correctIndex": 1,
+      "explanation": "Interceptors sit in the request/response pipeline. Common uses: auth interceptor (adds Bearer token), logging interceptor, cache interceptor, retry interceptor. They chain together for clean separation of concerns.",
+      "hints": [
+        "Think middleware — sitting between your code and the network"
+      ]
+    },
+    {
+      "id": "nw-4",
+      "type": "optimize",
+      "title": "API Error Handling",
+      "difficulty": "intermediate",
+      "description": "This code has no error handling. Add proper error handling with a sealed Result type.",
+      "starterCode": "class UserRepository(private val api: UserApi) {\n    suspend fun getUser(id: String): User {\n        val response = api.getUser(id)\n        return response.body()!!\n    }\n}",
+      "checks": [
+        {
+          "pattern": "try|catch|Result|sealed|when|Exception",
+          "message": "Add error handling",
+          "required": true
+        }
+      ],
+      "solution": "sealed class ApiResult<out T> {\n    data class Success<T>(val data: T) : ApiResult<T>()\n    data class Error(val message: String, val code: Int? = null) : ApiResult<Nothing>()\n}\n\nclass UserRepository(private val api: UserApi) {\n    suspend fun getUser(id: String): ApiResult<User> {\n        return try {\n            val response = api.getUser(id)\n            if (response.isSuccessful) {\n                response.body()?.let { ApiResult.Success(it) }\n                    ?: ApiResult.Error(\"Empty response\")\n            } else {\n                ApiResult.Error(\"API error\", response.code())\n            }\n        } catch (e: Exception) {\n            ApiResult.Error(e.message ?: \"Unknown error\")\n        }\n    }\n}",
+      "explanation": "The original crashes on null body (<code>!!</code>) and has no handling for network failures or HTTP errors. A proper solution: try/catch for network exceptions, check <code>isSuccessful</code> for HTTP errors, handle null body, and return a sealed type.",
+      "hints": [
+        "What happens if the network is off? Or the server returns 500?"
+      ]
+    },
+    {
+      "id": "nw-5",
+      "type": "fill-blank",
+      "title": "kotlinx.serialization",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to define a serializable data class for JSON parsing.",
+      "code": "@___1___\ndata class Article(\n    val id: Int,\n    val title: String,\n    @___2___(name = \"published_at\")\n    val publishedAt: String,\n    val tags: List<String> = emptyList()\n)",
+      "blanks": [
+        {
+          "answer": [
+            "Serializable"
+          ],
+          "hint": "Marks the class for serialization"
+        },
+        {
+          "answer": [
+            "SerialName"
+          ],
+          "hint": "Maps JSON key to Kotlin property name"
+        }
+      ],
+      "explanation": "<code>@Serializable</code> marks a class for kotlinx.serialization. <code>@SerialName</code> maps JSON field names to Kotlin property names when they differ (snake_case → camelCase). Default values handle missing fields gracefully.",
+      "hints": [
+        "The annotation tells the compiler to generate serialization code",
+        "JSON APIs often use snake_case, but Kotlin uses camelCase"
+      ]
+    },
+    {
+      "id": "nw-6",
+      "type": "write-code",
+      "title": "Network Connectivity Observer",
+      "difficulty": "intermediate",
+      "description": "Write a function that observes network connectivity changes using ConnectivityManager and returns a Flow<Boolean>.",
+      "starterCode": "// Write a function that returns a Flow<Boolean> indicating connectivity:\nfun observeConnectivity(\n    context: Context\n): Flow<Boolean> {\n    // TODO: Use ConnectivityManager.NetworkCallback\n    // Emit true when connected, false when disconnected\n}",
+      "checks": [
+        {
+          "pattern": "callbackFlow|channelFlow|flow",
+          "message": "Use callbackFlow or flow builder",
+          "required": true
+        },
+        {
+          "pattern": "NetworkCallback|ConnectivityManager",
+          "message": "Use ConnectivityManager.NetworkCallback",
+          "required": true
+        },
+        {
+          "pattern": "awaitClose|onDispose",
+          "message": "Clean up the callback when the flow is cancelled",
+          "required": true
+        }
+      ],
+      "solution": "fun observeConnectivity(context: Context): Flow<Boolean> = callbackFlow {\n    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager\n    val callback = object : ConnectivityManager.NetworkCallback() {\n        override fun onAvailable(network: Network) { trySend(true) }\n        override fun onLost(network: Network) { trySend(false) }\n    }\n    val request = NetworkRequest.Builder().build()\n    cm.registerNetworkCallback(request, callback)\n    \n    // Emit initial state\n    val current = cm.activeNetwork != null\n    trySend(current)\n    \n    awaitClose { cm.unregisterNetworkCallback(callback) }\n}",
+      "explanation": "<code>callbackFlow</code> bridges callback-based APIs to Kotlin Flows. Register the callback, emit values with <code>trySend()</code>, and unregister in <code>awaitClose</code>. This creates a reactive stream of connectivity state that cleans up automatically when the collector stops.",
+      "hints": [
+        "callbackFlow bridges callback-based APIs to Flow",
+        "Always clean up in awaitClose to prevent leaks"
+      ]
+    },
+    {
+      "id": "nw-7",
+      "type": "what-does-this-do",
+      "title": "Cache Interceptor",
+      "difficulty": "advanced",
+      "description": "What does this OkHttp interceptor do?",
+      "code": "class CacheInterceptor : Interceptor {\n    override fun intercept(chain: Interceptor.Chain): Response {\n        val request = chain.request()\n        val response = chain.proceed(request)\n\n        return response.newBuilder()\n            .header(\"Cache-Control\", \"public, max-age=300\")\n            .removeHeader(\"Pragma\")\n            .build()\n    }\n}",
+      "options": [
+        "It blocks all network requests and serves only cached data",
+        "It adds a Cache-Control header to responses, telling OkHttp to cache them for 5 minutes (300 seconds)",
+        "It encrypts the response before caching",
+        "It retries failed requests up to 300 times"
+      ],
+      "correctIndex": 1,
+      "explanation": "This interceptor modifies API responses to add a <code>Cache-Control: public, max-age=300</code> header. This tells OkHttp's cache to store the response for 300 seconds (5 minutes). During that window, identical requests are served from cache without hitting the network. It also removes the <code>Pragma</code> header which can interfere with caching. This is useful when the server doesn't set proper cache headers.",
+      "hints": [
+        "max-age is measured in seconds",
+        "300 seconds = 5 minutes"
+      ]
+    },
+    {
+      "id": "nw-8",
+      "type": "multiple-choice",
+      "title": "REST vs GraphQL",
+      "difficulty": "intermediate",
+      "description": "What is the primary advantage of GraphQL over REST for mobile clients?",
+      "options": [
+        "GraphQL is faster because it uses HTTP/3",
+        "Clients request exactly the fields they need, eliminating over-fetching and reducing bandwidth on mobile networks",
+        "GraphQL doesn't require a server — it works locally",
+        "GraphQL automatically caches all responses"
+      ],
+      "correctIndex": 1,
+      "explanation": "GraphQL's killer feature for mobile: the client specifies exactly which fields it needs. A REST endpoint might return 50 fields when you only need 5 — wasting bandwidth on mobile networks. GraphQL also solves under-fetching (needing multiple REST calls to assemble one screen's data). Trade-off: GraphQL is harder to cache (no URL-based HTTP caching) and requires a normalized cache (Apollo) for good performance.",
+      "hints": [
+        "Mobile networks have limited bandwidth — every byte matters",
+        "REST: server decides shape. GraphQL: client decides shape"
+      ]
+    },
+    {
+      "id": "nw-9",
+      "type": "what-does-this-do",
+      "title": "Exponential Backoff",
+      "difficulty": "advanced",
+      "description": "What retry delays does this produce for 3 failures?",
+      "code": "suspend fun <T> retry(block: suspend () -> T): T {\n    var delay = 1000L\n    repeat(2) {\n        try { return block() }\n        catch (e: IOException) {\n            delay(delay + Random.nextLong(0, delay / 2))\n            delay *= 2\n        }\n    }\n    return block()\n}",
+      "options": [
+        "1s, 1s, 1s — constant delay",
+        "~1-1.5s, ~2-3s, then final attempt — exponential backoff with jitter",
+        "0s, 0s, 0s — immediate retries",
+        "1s, 4s, 16s — quadratic backoff"
+      ],
+      "correctIndex": 1,
+      "explanation": "First retry: <code>delay(1000 + random(0..500))</code> ≈ 1-1.5s. Then delay doubles to 2000. Second retry: <code>delay(2000 + random(0..1000))</code> ≈ 2-3s. Third attempt runs immediately (no catch). This is <b>exponential backoff with jitter</b> — delays grow exponentially to avoid overwhelming the server, and random jitter prevents all clients from retrying simultaneously (thundering herd).",
+      "hints": [
+        "delay starts at 1000 and doubles each iteration",
+        "Random.nextLong adds jitter to spread out retries"
+      ]
+    },
+    {
+      "id": "nw-10",
+      "type": "multiple-choice",
+      "title": "WebSocket vs SSE",
+      "difficulty": "intermediate",
+      "description": "For a live sports score app that only receives updates from the server, which real-time technology is simpler and more appropriate?",
+      "options": [
+        "WebSocket — it's the only option for real-time data",
+        "SSE (Server-Sent Events) — it's simpler for one-directional server-to-client updates and works over standard HTTP",
+        "Long polling — it's more efficient than both",
+        "REST with 1-second polling interval"
+      ],
+      "correctIndex": 1,
+      "explanation": "SSE is ideal for <b>one-directional</b> server → client updates. It works over standard HTTP (easy through proxies/firewalls), auto-reconnects, and is simpler than WebSocket. WebSocket is <b>full-duplex</b> (both directions) — use it for chat, collaborative editing, or gaming where the client also sends frequent messages. Polling is wasteful (constant requests even when nothing changed).",
+      "hints": [
+        "The client only receives updates, never sends — which tech fits?",
+        "Full-duplex is overkill for one-directional communication"
+      ]
+    }
+  ]
+}

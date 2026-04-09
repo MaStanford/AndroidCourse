@@ -1,0 +1,235 @@
+{
+  "id": "kotlin-advanced",
+  "title": "Advanced Kotlin",
+  "icon": "🧬",
+  "description": "Generics variance, reified types, value classes, DSLs, contracts, and delegation",
+  "references": [
+    {"title": "Kotlin Language Reference — Generics", "url": "https://kotlinlang.org/docs/generics.html", "type": "docs"},
+    {"title": "Kotlin Language Reference — Inline Classes", "url": "https://kotlinlang.org/docs/inline-classes.html", "type": "docs"},
+    {"title": "Kotlin Language Reference — Type-Safe Builders (DSLs)", "url": "https://kotlinlang.org/docs/type-safe-builders.html", "type": "docs"},
+    {"title": "Kotlin Language Reference — Contracts", "url": "https://kotlinlang.org/docs/whatsnew13.html#contracts", "type": "docs"}
+  ],
+  "lesson": "<h3>Senior-Level Kotlin</h3>\n<p>These features separate senior Kotlin developers from intermediate ones. They appear frequently in library code, custom DSLs, and interview discussions about type safety and performance.</p>\n<hr class=\"section-divider\">\n<h3>Generics Variance</h3>\n<p>Variance controls subtype relationships for generic types:</p>\n<table><tr><th>Keyword</th><th>Variance</th><th>Meaning</th><th>Analogy</th></tr><tr><td><code>out T</code></td><td>Covariant</td><td>Can only produce T, never consume</td><td><code>List&lt;out Animal&gt;</code> = producer (read-only)</td></tr><tr><td><code>in T</code></td><td>Contravariant</td><td>Can only consume T, never produce</td><td><code>Comparable&lt;in String&gt;</code> = consumer</td></tr><tr><td>none</td><td>Invariant</td><td>Can both produce and consume</td><td><code>MutableList&lt;T&gt;</code></td></tr></table>\n<div class=\"lesson-code\"><span class=\"cmt\">// Declaration-site variance</span>\ninterface Source&lt;out T&gt; {        <span class=\"cmt\">// Producer — T appears only in return positions</span>\n    fun next(): T\n}\n\ninterface Sink&lt;in T&gt; {          <span class=\"cmt\">// Consumer — T appears only in parameter positions</span>\n    fun put(item: T)\n}\n\n<span class=\"cmt\">// Use-site variance (type projection)</span>\nfun copy(from: Array&lt;out Any&gt;, to: Array&lt;Any&gt;) {\n    for (i in from.indices) to[i] = from[i]\n}\n\n<span class=\"cmt\">// Star projection — unknown type</span>\nfun printAll(list: List&lt;*&gt;) {\n    list.forEach { println(it) }  <span class=\"cmt\">// items are Any?</span>\n}</div>\n<div class=\"info-box\"><b>Rule of thumb:</b> Use <code>out</code> when the class only returns T (producers). Use <code>in</code> when the class only accepts T (consumers). This is the PECS principle: Producer Extends, Consumer Super.</div>\n<hr class=\"section-divider\">\n<h3>Reified Type Parameters</h3>\n<div class=\"lesson-code\"><span class=\"cmt\">// Without reified — type erased at runtime</span>\nfun &lt;T&gt; checkType(obj: Any): Boolean {\n    <span class=\"cmt\">// return obj is T  ← COMPILE ERROR: Cannot check for erased type</span>\n    return false\n}\n\n<span class=\"cmt\">// With reified — type preserved via inlining</span>\ninline fun &lt;reified T&gt; checkType(obj: Any): Boolean {\n    return obj is T  <span class=\"cmt\">// ✅ Works! Type is inlined at call site</span>\n}\n\n<span class=\"cmt\">// Common use: avoiding Class&lt;T&gt; parameter</span>\ninline fun &lt;reified T : Activity&gt; Context.startActivity() {\n    startActivity(Intent(this, T::class.java))\n}</div>\n<hr class=\"section-divider\">\n<h3>Inline Functions: crossinline & noinline</h3>\n<div class=\"lesson-code\"><span class=\"cmt\">// crossinline — no non-local returns allowed</span>\ninline fun runOnUiThread(crossinline action: () -&gt; Unit) {\n    handler.post { action() }  <span class=\"cmt\">// action runs in a different context</span>\n}\n\n<span class=\"cmt\">// noinline — don't inline this specific lambda</span>\ninline fun doWork(inlined: () -&gt; Unit, noinline stored: () -&gt; Unit) {\n    inlined()            <span class=\"cmt\">// inlined at call site</span>\n    callbacks += stored  <span class=\"cmt\">// stored as object — can't be inlined</span>\n}</div>\n<hr class=\"section-divider\">\n<h3>Value Classes</h3>\n<p>Zero-overhead type safety wrappers. At runtime, the wrapper is eliminated and only the underlying value exists:</p>\n<div class=\"lesson-code\">@JvmInline\nvalue class UserId(val value: String)\n\n@JvmInline\nvalue class Email(val value: String)\n\n<span class=\"cmt\">// Compiler prevents mixing up String parameters:</span>\nfun sendEmail(to: Email, from: UserId) { ... }\n\n<span class=\"cmt\">// sendEmail(userId, email)  ← COMPILE ERROR! Type-safe.</span></div>\n<div class=\"warn-box\"><b>When boxing occurs:</b> Value classes get boxed (allocated on heap) when used as nullable types, generic type arguments, or interface implementations. In hot paths, check if boxing happens.</div>\n<hr class=\"section-divider\">\n<h3>Kotlin Contracts</h3>\n<div class=\"lesson-code\">@OptIn(ExperimentalContracts::class)\nfun requireNotEmpty(value: String?) {\n    contract {\n        returns() implies (value != null)\n    }\n    if (value.isNullOrEmpty()) throw IllegalArgumentException()\n}\n\nfun process(input: String?) {\n    requireNotEmpty(input)\n    println(input.length)  <span class=\"cmt\">// ✅ Smart cast — compiler knows input is non-null</span>\n}</div>\n<hr class=\"section-divider\">\n<h3>DSL Building</h3>\n<div class=\"lesson-code\"><span class=\"cmt\">// Type-safe builder pattern</span>\n@DslMarker\nannotation class HtmlDsl\n\n@HtmlDsl\nclass HTML {\n    private val children = mutableListOf&lt;String&gt;()\n    fun body(init: Body.() -&gt; Unit) {\n        val body = Body().apply(init)\n        children += body.render()\n    }\n    fun render() = \"&lt;html&gt;${children.joinToString(\"\")}\"  \n}\n\n@HtmlDsl\nclass Body {\n    private val content = StringBuilder()\n    fun p(text: String) { content.append(\"&lt;p&gt;$text\") }\n    fun render() = \"&lt;body&gt;$content\"  \n}\n\nfun html(init: HTML.() -&gt; Unit): HTML = HTML().apply(init)\n\n<span class=\"cmt\">// Usage:</span>\nval page = html {\n    body {\n        p(\"Hello, DSL!\")\n    }\n}</div>\n<div class=\"info-box\"><code>@DslMarker</code> prevents accidental access to outer receivers. Without it, inside <code>body { }</code> you could accidentally call <code>html</code>'s methods.</div>",
+  "questions": [
+    {
+      "id": "ka-1",
+      "type": "multiple-choice",
+      "title": "Covariance with out",
+      "difficulty": "advanced",
+      "description": "Given <code>interface Source&lt;out T&gt; { fun next(): T }</code>, which assignment is valid?",
+      "options": [
+        "val src: Source<Any> = Source<String>() — because String is a subtype of Any and Source is covariant",
+        "val src: Source<String> = Source<Any>() — because Any is a supertype",
+        "Neither — generic types are always invariant in Kotlin",
+        "Both — Kotlin ignores variance annotations"
+      ],
+      "correctIndex": 0,
+      "explanation": "<code>out T</code> makes <code>Source</code> covariant: <code>Source&lt;String&gt;</code> is a subtype of <code>Source&lt;Any&gt;</code> because String is a subtype of Any. This works because Source only produces T (returns it) — you can safely treat a String producer as an Any producer. The reverse doesn't work: an Any producer might give you something that isn't a String.",
+      "hints": [
+        "out = covariant = subtyping follows the type parameter",
+        "A producer of Strings is safely a producer of Any"
+      ]
+    },
+    {
+      "id": "ka-2",
+      "type": "fill-blank",
+      "title": "Reified Type Parameter",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to create an extension function that starts an Activity without passing the class explicitly.",
+      "code": "___1___ fun <___2___ T : Activity> Context.launchActivity() {\n    val intent = Intent(this, T::___3___.java)\n    startActivity(intent)\n}\n\n<span class=\"cmt\">// Usage: context.launchActivity&lt;ProfileActivity&gt;()</span>",
+      "blanks": [
+        {
+          "answer": ["inline"],
+          "hint": "Required for reified — the function body is inlined at the call site"
+        },
+        {
+          "answer": ["reified"],
+          "hint": "Preserves the type parameter at runtime"
+        },
+        {
+          "answer": ["class"],
+          "hint": "Kotlin reflection to get the Java Class"
+        }
+      ],
+      "explanation": "<code>reified</code> can only be used with <code>inline</code> functions. The compiler inlines the function body at each call site, substituting the actual type. This lets you use <code>T::class</code> at runtime — normally impossible due to type erasure. This pattern eliminates the need for <code>fun launchActivity(clazz: Class<*>)</code>.",
+      "hints": [
+        "Type parameters are normally erased at runtime",
+        "inline + reified = type info preserved"
+      ]
+    },
+    {
+      "id": "ka-3",
+      "type": "multiple-choice",
+      "title": "Value Class Boxing",
+      "difficulty": "advanced",
+      "description": "Given <code>@JvmInline value class UserId(val value: String)</code>, in which case does boxing (heap allocation) occur?",
+      "options": [
+        "val id: UserId = UserId(\"123\") — always boxed",
+        "fun process(id: UserId) — boxed because it's a parameter",
+        "val id: UserId? = UserId(\"123\") — boxed because nullable types require an object on the heap",
+        "Value classes are never boxed under any circumstances"
+      ],
+      "correctIndex": 2,
+      "explanation": "Value classes are eliminated at runtime (no heap allocation) in most cases — <code>UserId(\"123\")</code> becomes just <code>\"123\"</code>. But boxing occurs in three cases: <b>nullable</b> types (<code>UserId?</code>), <b>generic</b> type arguments (<code>List&lt;UserId&gt;</code>), and when used as an <b>interface</b> type. Nullable requires boxing because the compiler needs to distinguish null from the unwrapped value.",
+      "hints": [
+        "When does the JVM need an actual object rather than the raw underlying value?"
+      ]
+    },
+    {
+      "id": "ka-4",
+      "type": "what-does-this-do",
+      "title": "Contract Smart Cast",
+      "difficulty": "advanced",
+      "description": "What does the <code>contract</code> block enable in the calling code?",
+      "code": "@OptIn(ExperimentalContracts::class)\nfun String?.isNotNullOrEmpty(): Boolean {\n    contract {\n        returns(true) implies (this@isNotNullOrEmpty != null)\n    }\n    return this != null && isNotEmpty()\n}\n\nfun greet(name: String?) {\n    if (name.isNotNullOrEmpty()) {\n        println(\"Hello, ${name.length}\")\n    }\n}",
+      "options": [
+        "It makes the function throw an exception if the string is null",
+        "It tells the compiler that if the function returns true, the receiver is guaranteed non-null — enabling smart cast to String in the if block",
+        "It prevents the function from being called on null receivers",
+        "It caches the result so repeated calls are faster"
+      ],
+      "correctIndex": 1,
+      "explanation": "The contract tells the compiler: \"if this function returns <code>true</code>, then the receiver (<code>this@isNotNullOrEmpty</code>) is non-null.\" This enables <b>smart casting</b> in the calling code — inside the <code>if</code> block, the compiler knows <code>name</code> is non-null, so <code>name.length</code> compiles without <code>!!</code> or <code>?.</code>. This is exactly how <code>isNullOrEmpty()</code> works in the stdlib.",
+      "hints": [
+        "Without the contract, you'd need name!!.length or name?.length inside the if block",
+        "The stdlib's isNullOrEmpty() uses this same pattern"
+      ]
+    },
+    {
+      "id": "ka-5",
+      "type": "write-code",
+      "title": "Type-Safe DSL Builder",
+      "difficulty": "advanced",
+      "description": "Write a DSL for building a simple HTTP request configuration. Usage should look like:\n<pre>val req = request {\n    url(\"https://api.example.com/users\")\n    method(\"GET\")\n    header(\"Authorization\", \"Bearer token123\")\n}</pre>",
+      "starterCode": "// Define:\n// 1. RequestBuilder class with url(), method(), header() functions\n// 2. A data class Request(url, method, headers)\n// 3. A top-level request() DSL function\n\n// TODO",
+      "checks": [
+        {
+          "pattern": "class RequestBuilder|class.*Builder",
+          "message": "Create a builder class",
+          "required": true
+        },
+        {
+          "pattern": "fun request|fun buildRequest",
+          "message": "Create a top-level DSL function",
+          "required": true
+        },
+        {
+          "pattern": "RequestBuilder\\.\\(\\)|init:",
+          "message": "Use a lambda with receiver for the DSL syntax",
+          "required": false
+        }
+      ],
+      "solution": "data class Request(\n    val url: String,\n    val method: String,\n    val headers: Map<String, String>\n)\n\nclass RequestBuilder {\n    private var url = \"\"\n    private var method = \"GET\"\n    private val headers = mutableMapOf<String, String>()\n\n    fun url(value: String) { url = value }\n    fun method(value: String) { method = value }\n    fun header(key: String, value: String) { headers[key] = value }\n\n    fun build() = Request(url, method, headers)\n}\n\nfun request(init: RequestBuilder.() -> Unit): Request {\n    return RequestBuilder().apply(init).build()\n}",
+      "explanation": "The DSL pattern uses a <b>lambda with receiver</b>: <code>RequestBuilder.() -> Unit</code>. Inside the lambda, <code>this</code> is the RequestBuilder, so you can call <code>url()</code>, <code>method()</code>, <code>header()</code> directly. <code>apply(init)</code> executes the lambda on the builder, then <code>build()</code> creates the immutable result. This is how Kotlin's <code>buildList {}</code>, Ktor's routing, and Compose's <code>Column {}</code> work.",
+      "hints": [
+        "The key is the lambda with receiver: RequestBuilder.() -> Unit",
+        "apply() runs the lambda with the builder as 'this'"
+      ]
+    },
+    {
+      "id": "ka-6",
+      "type": "multiple-choice",
+      "title": "crossinline vs noinline",
+      "difficulty": "advanced",
+      "description": "When should you use <code>crossinline</code> on a lambda parameter of an inline function?",
+      "options": [
+        "When you want the lambda to be stored in a variable",
+        "When the lambda is invoked from a different execution context (like a Runnable or another lambda) where non-local returns would be unsafe",
+        "When you want to allow non-local returns from the lambda",
+        "When the lambda is the last parameter and you want trailing lambda syntax"
+      ],
+      "correctIndex": 1,
+      "explanation": "In an inline function, lambdas can use <code>return</code> to exit the calling function (non-local return). But if the lambda is passed to another execution context (like <code>Runnable { action() }</code>), a non-local return would be unsafe — it can't return from a function that's already exited. <code>crossinline</code> forbids non-local returns while still allowing inlining. <code>noinline</code> is different: it prevents inlining entirely, allowing the lambda to be stored.",
+      "hints": [
+        "Non-local returns are dangerous when the lambda outlives the calling function",
+        "Think about what happens if you 'return' inside a Runnable"
+      ]
+    },
+    {
+      "id": "ka-7",
+      "type": "fix-bug",
+      "title": "Variance Mismatch",
+      "difficulty": "advanced",
+      "description": "This code doesn't compile. Fix the variance to allow adding animals to any compatible list.",
+      "starterCode": "open class Animal\nclass Dog : Animal()\nclass Cat : Animal()\n\nfun addAnimals(animals: MutableList<Animal>) {\n    animals.add(Dog())\n    animals.add(Cat())\n}\n\nfun main() {\n    val dogs: MutableList<Dog> = mutableListOf()\n    addAnimals(dogs)  // COMPILE ERROR: Type mismatch\n}",
+      "checks": [
+        {
+          "pattern": "in Animal|MutableList<in|<in Animal>|List<Animal>|animals: MutableList<Animal>",
+          "message": "Fix the variance — think about whether the list is a consumer or producer",
+          "required": true
+        }
+      ],
+      "solution": "open class Animal\nclass Dog : Animal()\nclass Cat : Animal()\n\nfun addAnimals(animals: MutableList<in Animal>) {\n    animals.add(Dog())\n    animals.add(Cat())\n}\n\n// But wait — this now allows adding Dogs AND Cats to a MutableList<Dog>!\n// The real fix is to change the design:\nfun addAnimals(animals: MutableList<Animal>) {\n    animals.add(Dog())\n    animals.add(Cat())\n}\n\nfun main() {\n    val animals: MutableList<Animal> = mutableListOf()\n    addAnimals(animals)  // ✅ Works\n}",
+      "explanation": "MutableList is invariant: <code>MutableList&lt;Dog&gt;</code> is NOT a subtype of <code>MutableList&lt;Animal&gt;</code>. Why? If it were, you could add a Cat to a list of Dogs — type-unsafe! Using <code>in Animal</code> (contravariance) technically compiles but defeats type safety. The real fix is usually to change the design: use <code>MutableList&lt;Animal&gt;</code> directly, or use <code>List&lt;out Animal&gt;</code> (covariant, read-only) if you only need to read.",
+      "hints": [
+        "MutableList is invariant for good reason — what would happen if you could add a Cat to a Dog list?",
+        "Sometimes the fix is in the calling code, not the function signature"
+      ]
+    },
+    {
+      "id": "ka-8",
+      "type": "fill-blank",
+      "title": "Property Delegation",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to create a custom property delegate that logs every read and write.",
+      "code": "class LoggingDelegate<T>(private var value: T) : ___1___<Any?, T> {\n    override operator fun ___2___(thisRef: Any?, property: KProperty<*>): T {\n        println(\"Reading ${property.name}: $value\")\n        return value\n    }\n    override operator fun ___3___(thisRef: Any?, property: KProperty<*>, newValue: T) {\n        println(\"Writing ${property.name}: $value -> $newValue\")\n        value = newValue\n    }\n}\n\nvar name: String by LoggingDelegate(\"Alice\")",
+      "blanks": [
+        {
+          "answer": ["ReadWriteProperty"],
+          "hint": "The interface for delegates of var properties"
+        },
+        {
+          "answer": ["getValue"],
+          "hint": "Called when the property is read"
+        },
+        {
+          "answer": ["setValue"],
+          "hint": "Called when the property is written"
+        }
+      ],
+      "explanation": "<code>ReadWriteProperty&lt;R, T&gt;</code> is the interface for delegating <code>var</code> properties. <code>getValue</code> is called on read, <code>setValue</code> on write. For <code>val</code> properties, use <code>ReadOnlyProperty</code> (only <code>getValue</code>). The <code>by</code> keyword delegates property access to the delegate object. Common stdlib delegates: <code>lazy</code>, <code>observable</code>, <code>vetoable</code>, and map delegation.",
+      "hints": [
+        "var needs both read and write, val needs only read",
+        "The 'by' keyword is syntactic sugar for delegation"
+      ]
+    },
+    {
+      "id": "ka-9",
+      "type": "what-does-this-do",
+      "title": "Destructuring and componentN",
+      "difficulty": "intermediate",
+      "description": "What does this code print?",
+      "code": "data class Result(\n    val status: String,\n    val data: List<String>,\n    val errorMessage: String?\n)\n\nfun main() {\n    val result = Result(\"success\", listOf(\"a\", \"b\"), null)\n    val (status, items) = result\n    println(\"$status: $items\")\n}",
+      "options": [
+        "success: [a, b]",
+        "Compile error: must destructure all 3 components",
+        "success: null",
+        "Compile error: 'items' doesn't match property name 'data'"
+      ],
+      "correctIndex": 0,
+      "explanation": "Destructuring uses <code>componentN()</code> functions by <b>position</b>, not by name. <code>val (status, items) = result</code> calls <code>result.component1()</code> (status) and <code>result.component2()</code> (data). You don't need to destructure all components — trailing ones can be skipped. The variable name <code>items</code> doesn't need to match the property name <code>data</code>. <b>Caution:</b> reordering data class properties silently changes destructuring!",
+      "hints": [
+        "Destructuring works by position (component1, component2), not by name",
+        "You can skip trailing components"
+      ]
+    },
+    {
+      "id": "ka-10",
+      "type": "multiple-choice",
+      "title": "@DslMarker Purpose",
+      "difficulty": "advanced",
+      "description": "What problem does <code>@DslMarker</code> solve in Kotlin DSLs?",
+      "options": [
+        "It makes the DSL functions available only in test code",
+        "It prevents accidental access to outer receiver scopes in nested lambdas — without it, inner lambdas could call methods from outer builders",
+        "It automatically generates documentation for the DSL",
+        "It enables compile-time validation of DSL structure"
+      ],
+      "correctIndex": 1,
+      "explanation": "Without <code>@DslMarker</code>, in nested builder lambdas, you can accidentally call methods from outer builders. Example: inside <code>body { }</code>, you could call <code>head { }</code> from the outer HTML builder — which is almost certainly a bug. <code>@DslMarker</code> restricts access to only the closest receiver, forcing explicit <code>this@html</code> if you truly need the outer scope. Compose uses this pattern.",
+      "hints": [
+        "Think about what 'this' refers to inside nested lambdas with receivers"
+      ]
+    }
+  ]
+}

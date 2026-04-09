@@ -1,0 +1,171 @@
+{
+  "id": "accessibility-quality",
+  "title": "Accessibility & Quality",
+  "icon": "♿",
+  "description": "TalkBack, Compose semantics, touch targets, Android Vitals, staged rollouts, and release management",
+  "references": [
+    {"title": "Android Developers — Accessibility Overview", "url": "https://developer.android.com/guide/topics/ui/accessibility", "type": "docs"},
+    {"title": "Android Developers — Compose Semantics", "url": "https://developer.android.com/develop/ui/compose/accessibility/semantics", "type": "docs"},
+    {"title": "Android Developers — Android Vitals", "url": "https://developer.android.com/topic/performance/vitals", "type": "docs"},
+    {"title": "Material Design — Accessibility", "url": "https://m3.material.io/foundations/accessible-design/overview", "type": "docs"}
+  ],
+  "lesson": "<h3>Accessibility is Not Optional</h3>\n<p>15% of the world's population has some form of disability. Accessibility is a legal requirement in many markets and a Google Play quality signal. Senior engineers build it in from the start.</p>\n<hr class=\"section-divider\">\n<h3>TalkBack & Screen Readers</h3>\n<p>TalkBack reads UI elements aloud. It navigates by swiping (next/previous element) or exploring by touch. Elements need meaningful descriptions and logical ordering.</p>\n<hr class=\"section-divider\">\n<h3>Compose Semantics</h3>\n<div class=\"lesson-code\"><span class=\"cmt\">// Basic content description</span>\nImage(\n    painter = painterResource(R.drawable.profile),\n    contentDescription = \"User profile photo\"  <span class=\"cmt\">// Read by TalkBack</span>\n)\n\n<span class=\"cmt\">// Decorative image — skip for screen readers</span>\nImage(\n    painter = painterResource(R.drawable.divider),\n    contentDescription = null  <span class=\"cmt\">// TalkBack ignores this</span>\n)\n\n<span class=\"cmt\">// Merge children into single TalkBack element</span>\nRow(modifier = Modifier.semantics(mergeDescendants = true) {}) {\n    Icon(Icons.Default.Star, contentDescription = null)\n    Text(\"4.5 stars\")\n}\n<span class=\"cmt\">// TalkBack reads: \"4.5 stars\" (one element, not two)</span></div>\n<hr class=\"section-divider\">\n<h3>Advanced Semantics</h3>\n<div class=\"lesson-code\"><span class=\"cmt\">// Override all children's semantics</span>\nBox(modifier = Modifier.clearAndSetSemantics {\n    contentDescription = \"Rating: 4.5 out of 5 stars\"\n}) {\n    StarRating(rating = 4.5f)  <span class=\"cmt\">// Children's semantics are cleared</span>\n}\n\n<span class=\"cmt\">// Mark as heading for TalkBack navigation</span>\nText(\n    \"Settings\",\n    modifier = Modifier.semantics { heading() }\n)\n\n<span class=\"cmt\">// Role for correct TalkBack announcement</span>\nBox(modifier = Modifier\n    .clickable { onClick() }\n    .semantics { role = Role.Button }\n) { Text(\"Submit\") }\n\n<span class=\"cmt\">// Live region — announces changes automatically</span>\nText(\n    errorMessage,\n    modifier = Modifier.semantics {\n        liveRegion = LiveRegionMode.Polite\n    }\n)</div>\n<hr class=\"section-divider\">\n<h3>Touch Targets</h3>\n<p>Minimum touch target size: <b>48dp x 48dp</b> (Material Design / WCAG). Small icons must expand their touch area:</p>\n<div class=\"lesson-code\">IconButton(onClick = { ... }) {  <span class=\"cmt\">// Already 48dp minimum</span>\n    Icon(Icons.Default.Close, \"Close\", modifier = Modifier.size(24.dp))\n}\n\n<span class=\"cmt\">// For custom components without built-in padding:</span>\nModifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)</div>\n<hr class=\"section-divider\">\n<h3>Color Contrast</h3>\n<p>WCAG AA requires minimum <b>4.5:1</b> contrast ratio for normal text and <b>3:1</b> for large text (18sp+ or 14sp+ bold). Use the Accessibility Scanner app to check.</p>\n<hr class=\"section-divider\">\n<h3>Android Vitals</h3>\n<p>Google Play Console tracks app quality via Android Vitals. Bad metrics reduce your app's visibility:</p>\n<table><tr><th>Metric</th><th>Bad Threshold</th><th>Meaning</th></tr><tr><td>Crash rate</td><td>&gt; 1.09%</td><td>User-perceived crash sessions</td></tr><tr><td>ANR rate</td><td>&gt; 0.47%</td><td>App Not Responding (main thread blocked 5s+)</td></tr><tr><td>Excessive wakeups</td><td>&gt; 10/hour</td><td>AlarmManager waking device too often</td></tr><tr><td>Stuck wake locks</td><td>&gt; 0.10%</td><td>Wake locks held for 1+ hour</td></tr></table>\n<hr class=\"section-divider\">\n<h3>Release Management</h3>\n<ul>\n<li><b>Internal testing</b> — Team only, instant publish, no review</li>\n<li><b>Closed testing</b> — Invited users, some review</li>\n<li><b>Open testing</b> — Anyone can join, full review</li>\n<li><b>Production</b> — Staged rollout: 1% → 5% → 10% → 25% → 50% → 100%</li>\n</ul>\n<div class=\"info-box\"><b>Pre-launch reports:</b> Google Play automatically runs your app on Firebase Test Lab devices during review, catching crashes and accessibility issues before users see them.</div>",
+  "questions": [
+    {
+      "id": "aq-1",
+      "type": "multiple-choice",
+      "title": "Minimum Touch Target",
+      "difficulty": "beginner",
+      "description": "What is the minimum recommended touch target size for interactive elements?",
+      "options": [
+        "24dp x 24dp",
+        "36dp x 36dp",
+        "48dp x 48dp",
+        "64dp x 64dp"
+      ],
+      "correctIndex": 2,
+      "explanation": "Material Design and WCAG guidelines require a minimum <b>48dp x 48dp</b> touch target. This ensures users with motor impairments can reliably tap elements. Note: the visual size can be smaller (e.g., a 24dp icon), but the touchable area must be at least 48dp. Material components like <code>IconButton</code> handle this automatically.",
+      "hints": [
+        "This is a Material Design fundamental"
+      ]
+    },
+    {
+      "id": "aq-2",
+      "type": "fill-blank",
+      "title": "Compose Semantics",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to make a custom rating component accessible to TalkBack.",
+      "code": "Box(\n    modifier = Modifier.___1___ {\n        ___2___ = \"Rating: $rating out of 5 stars\"\n    }\n) {\n    <span class=\"cmt\">// Custom star drawing — not accessible on its own</span>\n    Canvas(modifier = Modifier.size(120.dp, 24.dp)) {\n        drawStars(rating)\n    }\n}",
+      "blanks": [
+        {
+          "answer": ["clearAndSetSemantics"],
+          "hint": "Clears children's semantics and sets custom ones"
+        },
+        {
+          "answer": ["contentDescription"],
+          "hint": "The text TalkBack will read aloud"
+        }
+      ],
+      "explanation": "<code>clearAndSetSemantics</code> replaces all children's semantic data with a single, clear description. Without it, TalkBack would try to read the Canvas — which has no meaningful semantics. This is essential for custom-drawn components like star ratings, charts, or progress indicators.",
+      "hints": [
+        "Canvas elements have no inherent accessibility — you must provide it",
+        "You want ONE description for the whole component, not per-star"
+      ]
+    },
+    {
+      "id": "aq-3",
+      "type": "what-does-this-do",
+      "title": "mergeDescendants",
+      "difficulty": "intermediate",
+      "description": "How does TalkBack treat this composable?",
+      "code": "Row(\n    modifier = Modifier\n        .clickable { onItemClick(item.id) }\n        .semantics(mergeDescendants = true) {}\n) {\n    Image(\n        painter = painterResource(item.imageRes),\n        contentDescription = null\n    )\n    Column {\n        Text(item.title)\n        Text(item.subtitle, style = MaterialTheme.typography.bodySmall)\n    }\n}",
+      "options": [
+        "TalkBack reads each element separately: image, title, subtitle — 3 swipes to navigate",
+        "TalkBack reads all text as one element: \"[title], [subtitle]\" — 1 swipe, image is skipped because contentDescription is null",
+        "TalkBack skips the entire Row because mergeDescendants hides it",
+        "TalkBack only reads the first child element"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>mergeDescendants = true</code> combines all children into a single TalkBack element. The Image has <code>contentDescription = null</code> so it's skipped. TalkBack reads \"[title], [subtitle]\" as one unit with one swipe. The <code>clickable</code> modifier makes the entire Row tappable. This is the correct pattern for list items — users shouldn't have to swipe through each sub-element.",
+      "hints": [
+        "List items should be one TalkBack element, not many",
+        "contentDescription = null means 'decorative, skip this'"
+      ]
+    },
+    {
+      "id": "aq-4",
+      "type": "multiple-choice",
+      "title": "Color Contrast Ratio",
+      "difficulty": "beginner",
+      "description": "What is the minimum color contrast ratio required by WCAG AA for normal-sized text?",
+      "options": [
+        "2:1",
+        "3:1 (large text only)",
+        "4.5:1",
+        "7:1 (that's WCAG AAA)"
+      ],
+      "correctIndex": 2,
+      "explanation": "WCAG AA requires <b>4.5:1</b> for normal text and <b>3:1</b> for large text (18sp+ regular or 14sp+ bold). WCAG AAA requires 7:1. Low contrast makes text unreadable for users with low vision — and difficult for everyone in bright sunlight. Test with Android's Accessibility Scanner.",
+      "hints": [
+        "AA is the standard level, AAA is the enhanced level"
+      ]
+    },
+    {
+      "id": "aq-5",
+      "type": "multiple-choice",
+      "title": "Android Vitals Thresholds",
+      "difficulty": "intermediate",
+      "description": "Above which crash rate does Google Play flag your app as having bad behavior in Android Vitals?",
+      "options": [
+        "0.1% — essentially crash-free",
+        "0.47% — same as ANR threshold",
+        "1.09% — user-perceived crash rate",
+        "5% — only very crashy apps"
+      ],
+      "correctIndex": 2,
+      "explanation": "Google Play flags apps with a user-perceived crash rate above <b>1.09%</b> and ANR rate above <b>0.47%</b>. Exceeding these thresholds can reduce your app's discoverability in the Play Store and show warnings to users. Monitor via Play Console → Android Vitals.",
+      "hints": [
+        "ANR has a stricter threshold than crashes"
+      ]
+    },
+    {
+      "id": "aq-6",
+      "type": "fix-bug",
+      "title": "Missing Accessibility",
+      "difficulty": "intermediate",
+      "description": "TalkBack users can't interact with this custom toggle. Fix it so TalkBack announces the state and toggle action.",
+      "starterCode": "@Composable\nfun CustomToggle(isOn: Boolean, onToggle: () -> Unit) {\n    Box(\n        modifier = Modifier\n            .size(56.dp, 28.dp)\n            .background(\n                if (isOn) Color.Green else Color.Gray,\n                RoundedCornerShape(14.dp)\n            )\n            .clickable { onToggle() }\n    ) {\n        // Draw thumb circle\n        Box(\n            modifier = Modifier\n                .size(24.dp)\n                .offset(x = if (isOn) 28.dp else 2.dp, y = 2.dp)\n                .background(Color.White, CircleShape)\n        )\n    }\n}",
+      "checks": [
+        {
+          "pattern": "semantics|role|Role\\.Switch|toggleableState|stateDescription|contentDescription",
+          "message": "Add semantic information for accessibility",
+          "required": true
+        }
+      ],
+      "solution": "@Composable\nfun CustomToggle(isOn: Boolean, onToggle: () -> Unit) {\n    Box(\n        modifier = Modifier\n            .size(56.dp, 28.dp)\n            .background(\n                if (isOn) Color.Green else Color.Gray,\n                RoundedCornerShape(14.dp)\n            )\n            .toggleable(\n                value = isOn,\n                onValueChange = { onToggle() },\n                role = Role.Switch\n            )\n            .semantics {\n                stateDescription = if (isOn) \"On\" else \"Off\"\n            }\n    ) {\n        Box(\n            modifier = Modifier\n                .size(24.dp)\n                .offset(x = if (isOn) 28.dp else 2.dp, y = 2.dp)\n                .background(Color.White, CircleShape)\n        )\n    }\n}",
+      "explanation": "Custom toggles need: (1) <code>Role.Switch</code> so TalkBack announces \"Switch\" instead of \"Button\", (2) <code>toggleable</code> instead of <code>clickable</code> to convey on/off semantics, and (3) <code>stateDescription</code> so TalkBack says \"On\" or \"Off\". Without these, TalkBack users have no idea what the element does or its current state.",
+      "hints": [
+        "TalkBack needs to know: what is this? (Role) and what state is it in? (stateDescription)",
+        "Use toggleable instead of clickable for on/off controls"
+      ]
+    },
+    {
+      "id": "aq-7",
+      "type": "multiple-choice",
+      "title": "LiveRegion",
+      "difficulty": "advanced",
+      "description": "When should you use <code>liveRegion = LiveRegionMode.Polite</code> in Compose semantics?",
+      "options": [
+        "For all Text composables to ensure TalkBack reads them",
+        "For dynamically changing content (error messages, status updates) that should be announced without the user navigating to it",
+        "For interactive elements like buttons and text fields",
+        "For images that change based on state"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>LiveRegion.Polite</code> tells TalkBack to announce content changes <b>without interrupting</b> current speech. Use it for: error messages that appear, status updates (\"Upload complete\"), timer displays, and snackbar content. <code>LiveRegionMode.Assertive</code> interrupts immediately — use only for critical alerts. Don't overuse either, or TalkBack becomes noisy.",
+      "hints": [
+        "The key is 'dynamic content that changes without user navigation'",
+        "Polite waits for current speech to finish, Assertive interrupts"
+      ]
+    },
+    {
+      "id": "aq-8",
+      "type": "multiple-choice",
+      "title": "Staged Rollout Strategy",
+      "difficulty": "intermediate",
+      "description": "You've released v2.0 to 5% of users and Android Vitals shows the crash rate jumped to 2.5%. What should you do?",
+      "options": [
+        "Continue the rollout — 5% is too small to be meaningful",
+        "Halt the rollout immediately, investigate the crash, fix it, and either resume with a patch or roll back to v1.x",
+        "Increase to 50% to get more data on the crash",
+        "Wait 48 hours to see if the crash rate stabilizes"
+      ],
+      "correctIndex": 1,
+      "explanation": "A 2.5% crash rate is well above the 1.09% bad behavior threshold. <b>Halt immediately</b> — Google Play allows you to pause a staged rollout, keeping existing users on v2.0 but stopping new ones from getting it. Investigate the crash, ship a fix as v2.0.1, and resume the rollout. If the crash is severe, roll back to v1.x entirely. Never expand a rollout with a known high crash rate.",
+      "hints": [
+        "1.09% is the bad behavior threshold — 2.5% is way over",
+        "Staged rollouts exist precisely for this scenario"
+      ]
+    }
+  ]
+}

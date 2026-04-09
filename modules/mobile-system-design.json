@@ -1,0 +1,172 @@
+{
+  "id": "mobile-system-design",
+  "title": "Mobile System Design",
+  "icon": "📐",
+  "description": "Design patterns for real-world mobile architecture: offline-first, image loading, feeds, and more",
+  "references": [
+    {"title": "Mobile System Design (Alex Lementuev)", "url": "https://github.com/nickelulz/mobile-system-design", "type": "github"},
+    {"title": "Android Developers — Offline-First", "url": "https://developer.android.com/topic/architecture/data-layer/offline-first", "type": "docs"},
+    {"title": "Coil Image Loading Library", "url": "https://coil-kt.github.io/coil/", "type": "docs"},
+    {"title": "Android Developers — Paging Library", "url": "https://developer.android.com/topic/libraries/architecture/paging/v3-overview", "type": "docs"}
+  ],
+  "lesson": "<h3>Mobile System Design Interviews</h3>\n<p>Unlike backend system design (distributed systems, databases), mobile system design focuses on:</p>\n<ul>\n<li><b>Offline-first architecture</b> — how does the app work without internet?</li>\n<li><b>Data sync</b> — how do you reconcile local and remote state?</li>\n<li><b>Performance</b> — smooth scrolling, fast startup, low memory</li>\n<li><b>Architecture layers</b> — UI → ViewModel → Repository → DataSource</li>\n<li><b>Caching</b> — memory cache → disk cache → network</li>\n</ul>\n<h3>The Standard Mobile Architecture</h3>\n<div class=\"lesson-code\">UI Layer (Compose)\n    ↕ observes StateFlow\nViewModel (state holder)\n    ↕ calls suspend functions\nRepository (single source of truth)\n    ↕ coordinates\nLocal (Room DB)  ←→  Remote (Retrofit API)</div>\n<h3>Common Design Scenarios</h3>\n<ul>\n<li><b>Social feed</b> — pagination, pull-to-refresh, optimistic updates, image loading</li>\n<li><b>Chat app</b> — real-time messages, offline queue, delivery receipts</li>\n<li><b>Image loading library</b> — memory/disk cache, downsampling, lifecycle-aware</li>\n<li><b>Offline note-taking</b> — local-first, background sync, conflict resolution</li>\n</ul>",
+  "questions": [
+    {
+      "id": "sd-1",
+      "type": "trivia",
+      "title": "Design an Offline-First News Reader",
+      "difficulty": "advanced",
+      "description": "Design the architecture for a news reader app that works offline. Describe the data flow, caching strategy, and sync mechanism.",
+      "keywords": [
+        "Room",
+        "database",
+        "cache",
+        "repository",
+        "single source of truth",
+        "network",
+        "API",
+        "sync",
+        "refresh",
+        "stale",
+        "offline",
+        "local",
+        "Flow",
+        "StateFlow"
+      ],
+      "answer": "Architecture: UI observes ViewModel StateFlow → ViewModel collects from Repository → Repository uses Room DB as single source of truth. On launch: (1) Immediately show cached articles from Room. (2) Fetch fresh articles from API in background. (3) Insert new articles into Room. (4) Room Flow automatically emits updated list to UI. Cache strategy: Room stores articles with timestamps. On fetch, compare timestamps and merge (insert new, update changed, optionally delete old). Stale data policy: show cached data immediately, show refresh indicator while fetching, show error only if cache is empty AND network fails. Pull-to-refresh triggers a forced network fetch. This is the \"single source of truth\" pattern — UI always reads from Room, never directly from network.",
+      "explanation": "The key insight is making the <b>local database the single source of truth</b>. The network is just a way to update the database. This gives you: instant startup (cached data), offline support (Room works without network), consistency (one source, no conflicts), and reactive updates (Room returns Flows that auto-emit on changes).",
+      "hints": [
+        "Think: where does the UI read from? Where does the network write to?",
+        "The \"single source of truth\" pattern: DB is truth, network updates DB"
+      ]
+    },
+    {
+      "id": "sd-2",
+      "type": "write-code",
+      "title": "Repository with Cache Strategy",
+      "difficulty": "advanced",
+      "description": "Write a Repository that implements the offline-first pattern: return cached data immediately, fetch fresh data in background, update cache.",
+      "starterCode": "class ArticleRepository(\n    private val api: NewsApi,\n    private val dao: ArticleDao\n) {\n    // TODO: Return a Flow that:\n    // 1. Emits cached articles immediately\n    // 2. Fetches fresh articles from API\n    // 3. Saves to database (which auto-emits via Room Flow)\n    fun getArticles(): Flow<List<Article>> {\n        TODO()\n    }\n}",
+      "checks": [
+        {
+          "pattern": "dao|Dao",
+          "message": "Read from local database",
+          "required": true
+        },
+        {
+          "pattern": "api|Api|fetch|network",
+          "message": "Fetch from network",
+          "required": true
+        },
+        {
+          "pattern": "Flow|flow|emit",
+          "message": "Return a Flow",
+          "required": true
+        }
+      ],
+      "solution": "class ArticleRepository(\n    private val api: NewsApi,\n    private val dao: ArticleDao\n) {\n    fun getArticles(): Flow<List<Article>> {\n        // Room Flow is the single source of truth\n        // It auto-emits when data changes\n        return dao.getAllArticles() // Returns Flow<List<Article>>\n    }\n\n    suspend fun refreshArticles() {\n        try {\n            val fresh = api.getLatestArticles()\n            dao.insertAll(fresh) // Room Flow auto-emits\n        } catch (e: Exception) {\n            // Network error — cached data still available\n        }\n    }\n}",
+      "explanation": "The Repository exposes Room's Flow directly. When the ViewModel collects this Flow, it gets cached data immediately. <code>refreshArticles()</code> fetches from the API and writes to Room — the Flow automatically re-emits with updated data. The UI gets updates reactively without polling. This clean separation means the UI doesn't care WHERE the data came from.",
+      "hints": [
+        "Room DAOs can return Flow<List<T>> — they auto-emit when the table changes",
+        "The network write goes INTO the database, the UI reads FROM the database"
+      ]
+    },
+    {
+      "id": "sd-3",
+      "type": "multiple-choice",
+      "title": "Image Loading Architecture",
+      "difficulty": "advanced",
+      "description": "When designing an image loading library (like Coil/Glide), what is the correct cache hierarchy?",
+      "options": [
+        "Network → Disk → Memory",
+        "Memory cache (LRU HashMap) → Disk cache (file storage) → Network fetch — check fastest first",
+        "Disk → Network → Memory",
+        "Load everything into memory on app start"
+      ],
+      "correctIndex": 1,
+      "explanation": "The three-level cache: <b>Memory</b> (LruCache, ~50ms, limited by heap) → <b>Disk</b> (DiskLruCache, ~5ms from SSD, large capacity) → <b>Network</b> (100-2000ms, unlimited). Always check the fastest cache first. Memory cache uses decoded Bitmaps for instant display. Disk cache stores encoded files (JPEG/PNG). Network is the fallback. Images are downsized to the ImageView dimensions before caching to save memory. Lifecycle-aware loading cancels requests when the view is detached.",
+      "hints": [
+        "Which storage is fastest? Which is slowest?",
+        "Think about the tradeoff between speed and capacity at each level"
+      ]
+    },
+    {
+      "id": "sd-4",
+      "type": "trivia",
+      "title": "Design a Chat App Architecture",
+      "difficulty": "advanced",
+      "description": "Design the message delivery architecture for a mobile chat app. How do you handle real-time messages, offline sending, and delivery status?",
+      "keywords": [
+        "WebSocket",
+        "offline",
+        "queue",
+        "pending",
+        "sent",
+        "delivered",
+        "read",
+        "Room",
+        "database",
+        "retry",
+        "optimistic",
+        "sync",
+        "push notification",
+        "FCM"
+      ],
+      "answer": "Real-time: WebSocket connection for live messages. When connected, messages arrive instantly and are saved to Room DB. When disconnected, FCM push notifications trigger a sync. Offline sending: Messages typed offline go into a \"pending\" queue in Room with status PENDING. When connection restores, a SyncWorker (WorkManager) sends pending messages in order. Status flow: PENDING → SENT (server ACK) → DELIVERED (recipient received) → READ (recipient opened). UI shows status indicators. Optimistic UI: Show the message immediately in the chat with PENDING status — don't wait for server confirmation. If send fails after retries, mark as FAILED with a retry button. Architecture: ChatRepository holds WebSocket + Room. Messages always write to Room first (offline-first). WebSocket listener writes incoming messages to Room. Room Flow drives the UI.",
+      "explanation": "Key design decisions: (1) <b>Offline-first</b>: Room is truth, network syncs. (2) <b>Optimistic updates</b>: show immediately, update status later. (3) <b>Message ordering</b>: use server timestamps for ordering, local timestamps for display while pending. (4) <b>Dual transport</b>: WebSocket for real-time, FCM for wake-up when app is killed.",
+      "hints": [
+        "How does WhatsApp show messages you typed while offline?",
+        "Think about the message lifecycle: pending → sent → delivered → read"
+      ]
+    },
+    {
+      "id": "sd-5",
+      "type": "multiple-choice",
+      "title": "Pagination Pattern",
+      "difficulty": "intermediate",
+      "description": "What is the recommended way to implement infinite scrolling pagination in a modern Android app?",
+      "options": [
+        "Load all data at once and filter locally",
+        "Use Paging 3 library with PagingSource + LazyColumn + collectAsLazyPagingItems(). It handles loading states, caching, and scroll position automatically",
+        "Manually track page numbers and append to a list in the ViewModel",
+        "Use RecyclerView.OnScrollListener to detect bottom"
+      ],
+      "correctIndex": 1,
+      "explanation": "Paging 3 provides: <code>PagingSource</code> (defines how to load pages from network/DB), <code>Pager</code> (configures page size and creates PagingData flow), <code>collectAsLazyPagingItems()</code> (Compose integration). It handles: automatic next-page loading, loading/error states per page, separator insertion, caching with <code>RemoteMediator</code> for offline-first, and efficient memory usage (drops pages not visible). It integrates with both Room and Retrofit.",
+      "hints": [
+        "Google provides a library specifically for this — it handles the hard parts"
+      ]
+    },
+    {
+      "id": "sd-6",
+      "type": "write-code",
+      "title": "Optimistic Update Pattern",
+      "difficulty": "advanced",
+      "description": "Write a \"like\" function that shows the like immediately (optimistic) and reverts if the API call fails.",
+      "starterCode": "class PostViewModel(private val repo: PostRepository) : ViewModel() {\n    private val _posts = MutableStateFlow<List<Post>>(emptyList())\n    val posts: StateFlow<List<Post>> = _posts.asStateFlow()\n\n    fun toggleLike(postId: String) {\n        // TODO: Optimistic update pattern\n        // 1. Immediately update UI (toggle the like)\n        // 2. Call API in background\n        // 3. If API fails, revert the UI change\n    }\n}",
+      "checks": [
+        {
+          "pattern": "_posts\\.update|_posts\\.value",
+          "message": "Update the local state immediately",
+          "required": true
+        },
+        {
+          "pattern": "try|catch|runCatching",
+          "message": "Handle API failure",
+          "required": true
+        },
+        {
+          "pattern": "revert|undo|restore|original|previous|old",
+          "message": "Revert on failure",
+          "required": false
+        }
+      ],
+      "solution": "fun toggleLike(postId: String) {\n    // 1. Save current state for rollback\n    val previousPosts = _posts.value\n    \n    // 2. Optimistic update — instant UI feedback\n    _posts.update { posts ->\n        posts.map { post ->\n            if (post.id == postId) post.copy(\n                isLiked = !post.isLiked,\n                likeCount = post.likeCount + if (post.isLiked) -1 else 1\n            ) else post\n        }\n    }\n    \n    // 3. API call in background\n    viewModelScope.launch {\n        try {\n            repo.toggleLike(postId)\n        } catch (e: Exception) {\n            // 4. Revert on failure\n            _posts.value = previousPosts\n            _events.emit(UiEvent.ShowError(\"Failed to update like\"))\n        }\n    }\n}",
+      "explanation": "The optimistic update pattern: (1) Save current state for rollback, (2) Update immediately for instant feedback, (3) Make API call in background, (4) Revert if it fails. This makes the app feel instant — the user sees the like immediately instead of waiting 200ms+ for a network round trip. Social media apps (Instagram, Twitter) all use this pattern.",
+      "hints": [
+        "Save the old state BEFORE modifying, so you can restore it on error",
+        "Update the StateFlow immediately, then try the API call"
+      ]
+    }
+  ]
+}

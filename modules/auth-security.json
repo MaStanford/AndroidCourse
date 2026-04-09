@@ -1,0 +1,166 @@
+{
+  "id": "auth-security",
+  "title": "Auth & Security",
+  "icon": "🔐",
+  "description": "Authentication, token storage, and security best practices",
+  "references": [
+    {"title": "Android Developers — Security Best Practices", "url": "https://developer.android.com/privacy-and-security/security-tips", "type": "docs"},
+    {"title": "Android Developers — EncryptedSharedPreferences", "url": "https://developer.android.com/reference/androidx/security/crypto/EncryptedSharedPreferences", "type": "docs"},
+    {"title": "Android Developers — Credential Manager", "url": "https://developer.android.com/identity/sign-in/credential-manager", "type": "docs"},
+    {"title": "OWASP Mobile Security Testing Guide", "url": "https://mas.owasp.org/MASTG/", "type": "article"}
+  ],
+  "lesson": "<h3>Security on Android</h3>\n<p>Android apps need to handle authentication tokens, sensitive data, and network security carefully. Key principles:</p>\n<ul>\n<li><b>Never</b> store tokens in plain SharedPreferences — use EncryptedSharedPreferences</li>\n<li><b>Never</b> hardcode API keys — use BuildConfig with local.properties</li>\n<li>Use <b>certificate pinning</b> for sensitive API communication</li>\n<li>Apply <b>ProGuard/R8</b> to obfuscate release builds</li>\n</ul>\n<h3>Token Storage</h3>\n<div class=\"lesson-code\">// BAD: Plain text, readable on rooted devices\nSharedPreferences.edit().putString(\"token\", token).apply()\n\n// GOOD: Encrypted with Android Keystore\nEncryptedSharedPreferences.create(...).edit()\n    .putString(\"token\", token).apply()</div>",
+  "questions": [
+    {
+      "id": "as-1",
+      "type": "multiple-choice",
+      "title": "Secure Token Storage",
+      "difficulty": "intermediate",
+      "description": "Where is the most secure place to store authentication tokens on Android?",
+      "options": [
+        "SharedPreferences",
+        "A text file in internal storage",
+        "EncryptedSharedPreferences (AndroidX Security)",
+        "A static variable in the Application class"
+      ],
+      "correctIndex": 2,
+      "explanation": "<code>EncryptedSharedPreferences</code> encrypts both keys and values using AES-256. Regular SharedPreferences stores plain XML. Static variables are lost on process death. For highest security, use the Android Keystore for key material.",
+      "hints": [
+        "Regular SharedPreferences files are stored as plain XML"
+      ]
+    },
+    {
+      "id": "as-2",
+      "type": "fix-bug",
+      "title": "Insecure Token Storage",
+      "difficulty": "intermediate",
+      "description": "This code stores the auth token insecurely. Fix it to use encrypted storage.",
+      "starterCode": "class TokenManager(context: Context) {\n    private val prefs = context.getSharedPreferences(\n        \"auth_prefs\", Context.MODE_PRIVATE\n    )\n\n    fun saveToken(token: String) {\n        prefs.edit().putString(\"auth_token\", token).apply()\n    }\n\n    fun getToken(): String? {\n        return prefs.getString(\"auth_token\", null)\n    }\n}",
+      "checks": [
+        {
+          "pattern": "EncryptedSharedPreferences|encrypted|MasterKey|MasterKeys",
+          "message": "Use EncryptedSharedPreferences",
+          "required": true
+        }
+      ],
+      "solution": "class TokenManager(context: Context) {\n    private val masterKey = MasterKey.Builder(context)\n        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)\n        .build()\n\n    private val prefs = EncryptedSharedPreferences.create(\n        context, \"auth_prefs\", masterKey,\n        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,\n        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM\n    )\n\n    fun saveToken(token: String) {\n        prefs.edit().putString(\"auth_token\", token).apply()\n    }\n\n    fun getToken(): String? {\n        return prefs.getString(\"auth_token\", null)\n    }\n}",
+      "explanation": "<code>EncryptedSharedPreferences</code> is a drop-in replacement encrypting both keys (AES256_SIV) and values (AES256_GCM). The <code>MasterKey</code> is stored in the Android Keystore (hardware-backed on most devices).",
+      "hints": [
+        "There is a direct encrypted replacement in AndroidX"
+      ]
+    },
+    {
+      "id": "as-3",
+      "type": "trivia",
+      "title": "Certificate Pinning",
+      "difficulty": "advanced",
+      "description": "What is certificate pinning and why would you implement it?",
+      "keywords": [
+        "certificate",
+        "pin",
+        "man-in-the-middle",
+        "MITM",
+        "trust",
+        "CA",
+        "public key",
+        "hash",
+        "ssl",
+        "tls",
+        "intercept"
+      ],
+      "answer": "Certificate pinning validates that the server's certificate matches a known, expected certificate (or public key hash), rather than trusting any CA-signed certificate. This prevents MITM attacks where an attacker uses a rogue CA certificate to intercept HTTPS traffic.",
+      "explanation": "Normally, Android trusts any certificate signed by a trusted CA. Pinning adds a second check: the certificate must match a specific hash embedded in the app. Tradeoff: if the server's certificate changes, you must update the app.",
+      "hints": [
+        "What if someone installs a rogue CA on the device?"
+      ]
+    },
+    {
+      "id": "as-4",
+      "type": "fill-blank",
+      "title": "Biometric Authentication",
+      "difficulty": "advanced",
+      "description": "Fill in the blanks to set up biometric authentication.",
+      "code": "val promptInfo = BiometricPrompt.___1___.Builder()\n    .setTitle(\"Authenticate\")\n    .setSubtitle(\"Use biometrics to access your account\")\n    .setNegativeButtonText(\"Cancel\")\n    .___2___()\n\nval biometricPrompt = BiometricPrompt(\n    this, executor,\n    object : BiometricPrompt.___3___() {\n        override fun onAuthenticationSucceeded(\n            result: BiometricPrompt.AuthenticationResult\n        ) { /* success */ }\n    }\n)\n\nbiometricPrompt.___4___(promptInfo)",
+      "blanks": [
+        {
+          "answer": [
+            "PromptInfo"
+          ],
+          "hint": "Configuration object"
+        },
+        {
+          "answer": [
+            "build"
+          ],
+          "hint": "Builder pattern finalizer"
+        },
+        {
+          "answer": [
+            "AuthenticationCallback"
+          ],
+          "hint": "Callback for results"
+        },
+        {
+          "answer": [
+            "authenticate"
+          ],
+          "hint": "Show the prompt"
+        }
+      ],
+      "explanation": "The Biometric API uses a builder for configuration, a callback for results, and <code>authenticate()</code> to show the system dialog. Always check <code>BiometricManager.canAuthenticate()</code> first.",
+      "hints": [
+        "The dialog configuration uses a Builder pattern"
+      ]
+    },
+    {
+      "id": "as-5",
+      "type": "multiple-choice",
+      "title": "OAuth2 Flow",
+      "difficulty": "advanced",
+      "description": "In the OAuth2 Authorization Code flow for a mobile app, what is the correct order of steps?",
+      "options": [
+        "Get token → Redirect to provider → Exchange code → Use token",
+        "Redirect to auth provider → User grants permission → Receive auth code → Exchange code for tokens",
+        "Send username/password directly → Receive token → Use token",
+        "Generate token locally → Validate with server → Use token"
+      ],
+      "correctIndex": 1,
+      "explanation": "The Authorization Code flow: 1) Redirect user to the auth provider's login page. 2) User authenticates and grants permission. 3) Provider redirects back to your app with an authorization code. 4) Your app exchanges the code for access and refresh tokens. Mobile apps should use PKCE (Proof Key for Code Exchange) for additional security. Never send credentials directly — that's the Resource Owner Password flow, which is deprecated.",
+      "hints": [
+        "The user authenticates with the provider, not your app directly",
+        "An intermediate \"code\" is exchanged for the final tokens"
+      ]
+    },
+    {
+      "id": "as-6",
+      "type": "write-code",
+      "title": "Auth Interceptor",
+      "difficulty": "intermediate",
+      "description": "Write an OkHttp Interceptor that adds a Bearer token from a TokenManager to every request. If the token is null, proceed without it.",
+      "starterCode": "class AuthInterceptor(\n    private val tokenManager: TokenManager\n) : Interceptor {\n    override fun intercept(chain: Interceptor.Chain): Response {\n        // TODO: Get token, add Authorization header if present\n    }\n}",
+      "checks": [
+        {
+          "pattern": "chain\\.request|chain\\.proceed",
+          "message": "Get the original request and proceed with the chain",
+          "required": true
+        },
+        {
+          "pattern": "Authorization|Bearer|addHeader|header",
+          "message": "Add the Authorization header with Bearer token",
+          "required": true
+        },
+        {
+          "pattern": "getToken|token",
+          "message": "Retrieve the token from TokenManager",
+          "required": true
+        }
+      ],
+      "solution": "class AuthInterceptor(\n    private val tokenManager: TokenManager\n) : Interceptor {\n    override fun intercept(chain: Interceptor.Chain): Response {\n        val request = chain.request()\n        val token = tokenManager.getToken()\n\n        val authenticatedRequest = if (token != null) {\n            request.newBuilder()\n                .addHeader(\"Authorization\", \"Bearer $token\")\n                .build()\n        } else {\n            request\n        }\n\n        return chain.proceed(authenticatedRequest)\n    }\n}",
+      "explanation": "The interceptor gets the original request, checks for a token, and creates a new request with the Authorization header if a token exists. <code>chain.proceed()</code> sends the request down the chain. This centralizes auth logic — every API call automatically includes the token.",
+      "hints": [
+        "Build a new request from the original, adding the header",
+        "chain.proceed() must always be called to continue the request"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,337 @@
+{
+  "id": "architecture",
+  "title": "Architecture Patterns",
+  "icon": "🏗️",
+  "description": "MVVM, MVI, Repository pattern, UiState, UseCases, and architecture at scale",
+  "references": [
+    {"title": "Android Developers — Guide to App Architecture", "url": "https://developer.android.com/topic/architecture", "type": "docs"},
+    {"title": "Android Developers — UI Layer", "url": "https://developer.android.com/topic/architecture/ui-layer", "type": "docs"},
+    {"title": "Android Developers — Domain Layer", "url": "https://developer.android.com/topic/architecture/domain-layer", "type": "docs"},
+    {"title": "Android Developers — Data Layer", "url": "https://developer.android.com/topic/architecture/data-layer", "type": "docs"},
+    {"title": "Now in Android (Google sample app)", "url": "https://github.com/android/nowinandroid", "type": "github"}
+  ],
+  "lesson": "<h3>Android Architecture Guide</h3>\n<p>Google recommends <b>MVVM with Unidirectional Data Flow</b>: state flows down (ViewModel → UI), events flow up (UI → ViewModel). This makes your app predictable, testable, and maintainable.</p>\n<h3>The Architecture Layers</h3>\n<ul>\n<li><b>UI Layer</b> — Composables observe ViewModel state</li>\n<li><b>ViewModel</b> — Holds UI state, handles business logic, survives config changes</li>\n<li><b>Domain Layer (optional)</b> — UseCase/Interactor classes for reusable business logic</li>\n<li><b>Repository</b> — Single source of truth, abstracts data sources</li>\n<li><b>Data Sources</b> — Network (Retrofit), local (Room), preferences (DataStore)</li>\n</ul>\n<div class=\"diagram\">UI Layer          Domain Layer (optional)       Data Layer\n┌──────────┐     ┌───────────────────┐     ┌──────────────┐\n│Composable│────▶│   UseCase         │────▶│  Repository  │\n│          │◀────│ (operator invoke) │◀────│              │\n└──────────┘     └───────────────────┘     └──────┬───────┘\n      │                                           │\n      ▼                                     ┌─────┴─────┐\n┌──────────┐                                │           │\n│ViewModel │                           DataSource  DataSource\n│(StateFlow│                           (Network)   (Local DB)\n│ &lt;UiState&gt;│\n└──────────┘\n\nState flows DOWN ↓    Events flow UP ↑</div>\n<h3>UiState Pattern</h3>\n<p>Represent screen state as a sealed class: <code>Loading</code>, <code>Success(data)</code>, <code>Error(message)</code>. The ViewModel exposes a single <code>StateFlow&lt;UiState&gt;</code>, and the UI handles each case with <code>when</code>.</p>\n<hr class=\"section-divider\">\n<h3>MVI (Model-View-Intent)</h3>\n<p>MVI extends UDF by formalizing user actions as <b>Intents</b> (not Android Intents!) and processing them through a <b>Reducer</b> that produces new state. This makes state transitions explicit and debuggable.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// 1. Define user actions as sealed class</span>\nsealed class HomeIntent {\n    object LoadData : HomeIntent()\n    data class Search(val query: String) : HomeIntent()\n    data class ToggleFavorite(val itemId: String) : HomeIntent()\n}\n\n<span class=\"cmt\">// 2. Reducer produces new state from current state + intent</span>\nfun reduce(state: HomeState, intent: HomeIntent): HomeState =\n    when (intent) {\n        is HomeIntent.LoadData -&gt; state.copy(isLoading = true)\n        is HomeIntent.Search -&gt; state.copy(query = intent.query)\n        is HomeIntent.ToggleFavorite -&gt; state.copy(\n            items = state.items.map {\n                if (it.id == intent.itemId) it.copy(isFav = !it.isFav) else it\n            }\n        )\n    }</div>\n<div class=\"info-box\"><b>MVVM vs MVI:</b> MVVM exposes multiple methods on ViewModel (<code>search()</code>, <code>refresh()</code>). MVI funnels all actions through a single <code>onIntent()</code> entry point. MVI is better for complex screens with many interactions; MVVM is simpler for straightforward screens.</div>\n<hr class=\"section-divider\">\n<h3>UseCase / Interactor Pattern</h3>\n<p>The <b>Domain Layer</b> sits between ViewModel and Repository. Each UseCase encapsulates one piece of reusable business logic. Google's convention: a single public <code>operator fun invoke()</code> method.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Convention: verb + noun + UseCase</span>\nclass GetFilteredArticlesUseCase(\n    private val articlesRepository: ArticlesRepository,\n    private val userPrefsRepository: UserPrefsRepository\n) {\n    <span class=\"hl\">operator fun invoke</span>(): Flow&lt;List&lt;Article&gt;&gt; {\n        return combine(\n            articlesRepository.getArticles(),\n            userPrefsRepository.getPrefs()\n        ) { articles, prefs -&gt;\n            articles.filter { it.topic in prefs.followedTopics }\n        }\n    }\n}\n\n<span class=\"cmt\">// ViewModel calls it like a function:</span>\nval articles = getFilteredArticlesUseCase()</div>\n<div class=\"warn-box\"><b>When NOT to use UseCases:</b> If a UseCase simply delegates to a single repository method without adding logic, it's unnecessary boilerplate. Only create UseCases when they combine data from multiple repositories or contain business logic shared across ViewModels.</div>\n<hr class=\"section-divider\">\n<h3>Architecture at Scale</h3>\n<p>Architecture patterns change as apps grow. Key considerations:</p>\n<ul>\n<li><b>Small app (1-3 devs):</b> MVVM + Repository is sufficient. Domain layer is optional overhead.</li>\n<li><b>Medium app (5-15 devs):</b> Add UseCases for shared logic. Modularize into feature modules.</li>\n<li><b>Large app (20+ devs):</b> Full Clean Architecture with strict layer boundaries. Feature modules with independent navigation. Shared core modules. Convention plugins for build config.</li>\n</ul>\n<div class=\"info-box\"><b>Key Principle — SSOT (Single Source of Truth):</b> Every data type should have exactly one owner responsible for mutations. For user data, it's <code>UserRepository</code>. For UI state, it's the <code>ViewModel</code>. Multiple sources of truth = inconsistent state = bugs.</div>",
+  "questions": [
+    {
+      "id": "ar-1",
+      "type": "multiple-choice",
+      "title": "Recommended UI Architecture",
+      "difficulty": "intermediate",
+      "description": "Which architecture pattern does Google officially recommend for Android UI development?",
+      "options": [
+        "MVC (Model-View-Controller)",
+        "MVP (Model-View-Presenter)",
+        "MVVM with Unidirectional Data Flow",
+        "Flux/Redux"
+      ],
+      "correctIndex": 2,
+      "explanation": "Google recommends <b>MVVM</b> with <b>Unidirectional Data Flow (UDF)</b>. State flows down (ViewModel → UI), events flow up (UI → ViewModel). This is the natural fit for Jetpack Compose.",
+      "hints": [
+        "Check the official Android architecture guide"
+      ]
+    },
+    {
+      "id": "ar-2",
+      "type": "fix-bug",
+      "title": "ViewModel Context Leak",
+      "difficulty": "intermediate",
+      "description": "This ViewModel crashes on configuration change. Find and fix the memory leak.",
+      "starterCode": "class UserViewModel(\n    private val context: Activity\n) : ViewModel() {\n    private val _users = MutableStateFlow<List<User>>(emptyList())\n    val users: StateFlow<List<User>> = _users.asStateFlow()\n\n    fun loadUsers() {\n        viewModelScope.launch {\n            val db = Room.databaseBuilder(\n                context, AppDatabase::class.java, \"app-db\"\n            ).build()\n            _users.value = db.userDao().getAll()\n        }\n    }\n}",
+      "checks": [
+        {
+          "pattern": "Application|application|applicationContext|getApplication",
+          "message": "Use Application context instead of Activity context",
+          "required": true
+        },
+        {
+          "pattern": "AndroidViewModel|Application",
+          "message": "Use AndroidViewModel or inject Application context",
+          "required": true
+        }
+      ],
+      "solution": "class UserViewModel(\n    application: Application\n) : AndroidViewModel(application) {\n    private val _users = MutableStateFlow<List<User>>(emptyList())\n    val users: StateFlow<List<User>> = _users.asStateFlow()\n\n    fun loadUsers() {\n        viewModelScope.launch {\n            val db = Room.databaseBuilder(\n                getApplication(), AppDatabase::class.java, \"app-db\"\n            ).build()\n            _users.value = db.userDao().getAll()\n        }\n    }\n}",
+      "explanation": "ViewModels survive configuration changes, but Activities are destroyed and recreated. Holding an Activity reference causes a memory leak. Use <code>AndroidViewModel</code> with Application context instead.",
+      "hints": [
+        "ViewModels outlive Activities across configuration changes",
+        "What type of Context lives as long as the app process?"
+      ]
+    },
+    {
+      "id": "ar-3",
+      "type": "fill-blank",
+      "title": "UiState Sealed Class",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to create a sealed class representing three data-loading states.",
+      "code": "___1___ class UiState<out T> {\n    ___2___ object Loading : UiState<Nothing>()\n    data class Success<T>(val data: T) : UiState<T>()\n    data class Error(val ___3___: String) : UiState<Nothing>()\n}",
+      "blanks": [
+        {
+          "answer": [
+            "sealed"
+          ],
+          "hint": "Restricts subclass hierarchy"
+        },
+        {
+          "answer": [
+            "data"
+          ],
+          "hint": "Keyword before object for proper equals/hashCode"
+        },
+        {
+          "answer": [
+            "message"
+          ],
+          "hint": "Error information"
+        }
+      ],
+      "explanation": "A <code>sealed class</code> restricts subclasses to the same file, enabling exhaustive <code>when</code>. The three-state pattern (Loading, Success, Error) is standard for async data in Android.",
+      "hints": [
+        "This keyword ensures all subclasses are known at compile time"
+      ]
+    },
+    {
+      "id": "ar-4",
+      "type": "what-does-this-do",
+      "title": "Repository Pattern",
+      "difficulty": "intermediate",
+      "description": "Explain how this repository decides where to get data from.",
+      "code": "class UserRepository(\n    private val api: UserApi,\n    private val dao: UserDao,\n    private val dispatcher: CoroutineDispatcher = Dispatchers.IO\n) {\n    fun getUsers(): Flow<List<User>> = flow {\n        val cached = dao.getAll()\n        if (cached.isNotEmpty()) emit(cached)\n        try {\n            val fresh = api.fetchUsers()\n            dao.insertAll(fresh)\n            emit(fresh)\n        } catch (e: Exception) {\n            if (cached.isEmpty()) throw e\n        }\n    }.flowOn(dispatcher)\n}",
+      "options": [
+        "Always fetches from network first, falling back to cache on error",
+        "Emits cached data immediately, then fetches fresh data — offline-first strategy",
+        "Only uses cache, never makes network requests",
+        "Fetches from network and cache in parallel"
+      ],
+      "correctIndex": 1,
+      "explanation": "This implements <b>offline-first / cache-then-network</b>: 1) Emit cached data for fast UI. 2) Fetch fresh data from API. 3) Save to Room and emit again. 4) If network fails and cache exists, silently handle it.",
+      "hints": [
+        "Follow the order of operations: what gets emitted first?"
+      ]
+    },
+    {
+      "id": "ar-5",
+      "type": "multiple-choice",
+      "title": "Dependency Injection",
+      "difficulty": "intermediate",
+      "description": "Why is dependency injection (DI) important in Android development?",
+      "options": [
+        "It makes apps run faster by pre-loading all classes",
+        "It decouples components, making code testable and swappable (e.g., fake repository in tests)",
+        "It automatically handles memory management",
+        "It's required by the Android framework"
+      ],
+      "correctIndex": 1,
+      "explanation": "DI means a class receives its dependencies from outside rather than creating them internally. This makes classes <b>testable</b> (inject fakes in tests), <b>swappable</b> (different implementations for debug/release), and <b>loosely coupled</b>. Hilt is Android's recommended DI framework, built on Dagger.",
+      "hints": [
+        "How do you test a ViewModel that creates its own Repository internally?",
+        "Think about swapping real implementations for test fakes"
+      ]
+    },
+    {
+      "id": "ar-6",
+      "type": "fill-blank",
+      "title": "Collecting StateFlow in Compose",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to safely collect a ViewModel's StateFlow in a Composable.",
+      "code": "@Composable\nfun UserScreen(viewModel: UserViewModel) {\n    val uiState by viewModel.uiState.___1___()\n\n    ___2___(uiState) {\n        is UiState.Loading -> CircularProgressIndicator()\n        is UiState.Success -> UserList(uiState.data)\n        is UiState.Error -> ErrorMessage(uiState.message)\n    }\n}",
+      "blanks": [
+        {
+          "answer": [
+            "collectAsState",
+            "collectAsStateWithLifecycle"
+          ],
+          "hint": "Converts Flow to Compose State"
+        },
+        {
+          "answer": [
+            "when"
+          ],
+          "hint": "Exhaustive branching on sealed class"
+        }
+      ],
+      "explanation": "<code>collectAsState()</code> converts a StateFlow into Compose State, triggering recomposition on changes. <code>collectAsStateWithLifecycle()</code> is even better — it stops collecting when the UI is not visible, saving resources. <code>when</code> on a sealed class handles all cases exhaustively.",
+      "hints": [
+        "There is a Compose extension to convert Flows to State",
+        "Sealed classes enable exhaustive branching without else"
+      ]
+    },
+    {
+      "id": "ar-7",
+      "type": "fix-bug",
+      "title": "Flow Collection Without Lifecycle",
+      "difficulty": "advanced",
+      "description": "This code wastes resources by continuing to collect the flow even when the app is in the background. Fix it.",
+      "starterCode": "@Composable\nfun LocationScreen(viewModel: LocationViewModel) {\n    val location by viewModel.locationFlow.collectAsState(\n        initial = LatLng(0.0, 0.0)\n    )\n\n    MapView(location = location)\n}",
+      "checks": [
+        {
+          "pattern": "collectAsStateWithLifecycle|Lifecycle|repeatOnLifecycle",
+          "message": "Use lifecycle-aware collection",
+          "required": true
+        }
+      ],
+      "solution": "@Composable\nfun LocationScreen(viewModel: LocationViewModel) {\n    val location by viewModel.locationFlow.collectAsStateWithLifecycle(\n        initialValue = LatLng(0.0, 0.0)\n    )\n\n    MapView(location = location)\n}",
+      "explanation": "<code>collectAsState()</code> collects continuously, even when the app is backgrounded. For resource-intensive flows (location, sensor data), use <code>collectAsStateWithLifecycle()</code> which automatically stops collection when the lifecycle drops below STARTED. This saves battery and CPU. Requires <code>androidx.lifecycle:lifecycle-runtime-compose</code>.",
+      "hints": [
+        "What happens to GPS collection when the user switches to another app?",
+        "There is a lifecycle-aware version of collectAsState"
+      ]
+    },
+    {
+      "id": "ar-8",
+      "type": "write-code",
+      "title": "Hilt Module",
+      "difficulty": "advanced",
+      "description": "Write a Hilt module that provides a Retrofit instance and a UserRepository. The Retrofit base URL should be \"https://api.example.com/\" and the repository needs both the API service and a DAO.",
+      "starterCode": "// Write your Hilt module:\n@Module\n@InstallIn(SingletonComponent::class)\nobject AppModule {\n    // TODO: Provide Retrofit instance\n    // TODO: Provide UserApi from Retrofit\n    // TODO: Provide UserRepository\n}",
+      "checks": [
+        {
+          "pattern": "@Provides",
+          "message": "Use @Provides to define provider functions",
+          "required": true
+        },
+        {
+          "pattern": "Retrofit",
+          "message": "Create a Retrofit instance",
+          "required": true
+        },
+        {
+          "pattern": "@Singleton|SingletonComponent",
+          "message": "Scope appropriately (Singleton for app-wide)",
+          "required": true
+        }
+      ],
+      "solution": "@Module\n@InstallIn(SingletonComponent::class)\nobject AppModule {\n    @Provides\n    @Singleton\n    fun provideRetrofit(): Retrofit {\n        return Retrofit.Builder()\n            .baseUrl(\"https://api.example.com/\")\n            .addConverterFactory(GsonConverterFactory.create())\n            .build()\n    }\n\n    @Provides\n    @Singleton\n    fun provideUserApi(retrofit: Retrofit): UserApi {\n        return retrofit.create(UserApi::class.java)\n    }\n\n    @Provides\n    @Singleton\n    fun provideUserRepository(\n        api: UserApi,\n        dao: UserDao\n    ): UserRepository {\n        return UserRepository(api, dao)\n    }\n}",
+      "explanation": "Hilt modules tell the DI framework how to create instances. <code>@Module</code> marks the class, <code>@InstallIn(SingletonComponent)</code> scopes it to the app. <code>@Provides</code> functions return instances. <code>@Singleton</code> ensures one instance app-wide. Hilt automatically passes dependencies between providers.",
+      "hints": [
+        "Each @Provides function returns one dependency",
+        "Hilt automatically resolves the parameter chain: Retrofit → UserApi → UserRepository"
+      ]
+    },
+    {
+      "id": "ar-9",
+      "type": "what-does-this-do",
+      "title": "MVI Reducer Pattern",
+      "difficulty": "advanced",
+      "description": "Trace what happens when a user dispatches <code>ProfileIntent.ToggleNotifications</code>. What is the resulting state?",
+      "code": "data class ProfileState(\n    val name: String = \"\",\n    val notificationsEnabled: Boolean = false,\n    val isLoading: Boolean = false\n)\n\nsealed class ProfileIntent {\n    data class UpdateName(val name: String) : ProfileIntent()\n    object ToggleNotifications : ProfileIntent()\n    object Save : ProfileIntent()\n}\n\nfun reduce(state: ProfileState, intent: ProfileIntent): ProfileState =\n    when (intent) {\n        is ProfileIntent.UpdateName -> state.copy(name = intent.name)\n        is ProfileIntent.ToggleNotifications -> state.copy(\n            notificationsEnabled = !state.notificationsEnabled\n        )\n        is ProfileIntent.Save -> state.copy(isLoading = true)\n    }\n\n// Current state: ProfileState(name = \"Alice\", notificationsEnabled = true, isLoading = false)\n// Dispatch: ProfileIntent.ToggleNotifications",
+      "options": [
+        "ProfileState(name = \"Alice\", notificationsEnabled = true, isLoading = false)",
+        "ProfileState(name = \"Alice\", notificationsEnabled = false, isLoading = false)",
+        "ProfileState(name = \"\", notificationsEnabled = false, isLoading = false)",
+        "ProfileState(name = \"Alice\", notificationsEnabled = false, isLoading = true)"
+      ],
+      "correctIndex": 1,
+      "explanation": "The reducer uses <code>state.copy(notificationsEnabled = !state.notificationsEnabled)</code>. Since <code>notificationsEnabled</code> was <code>true</code>, it flips to <code>false</code>. All other fields stay the same thanks to <code>copy()</code>. This is pure MVI: the reducer is a pure function that takes current state + intent and returns new state.",
+      "hints": [
+        "copy() keeps unchanged fields and only modifies the ones you specify",
+        "The ! operator flips a boolean"
+      ]
+    },
+    {
+      "id": "ar-10",
+      "type": "write-code",
+      "title": "UseCase with operator invoke",
+      "difficulty": "intermediate",
+      "description": "Write a <code>GetTopArticlesUseCase</code> that combines data from an <code>ArticlesRepository</code> and <code>UserRepository</code>. It should return the top 10 articles sorted by date, filtered to only include articles from authors the user follows.",
+      "starterCode": "class GetTopArticlesUseCase(\n    // TODO: Add dependencies\n) {\n    // TODO: Single operator fun invoke()\n    // returning Flow<List<Article>>\n}",
+      "checks": [
+        {
+          "pattern": "operator\\s+fun\\s+invoke",
+          "message": "UseCase should have operator fun invoke()",
+          "required": true
+        },
+        {
+          "pattern": "Flow|flow",
+          "message": "Should return a Flow",
+          "required": true
+        },
+        {
+          "pattern": "combine|flatMap|zip",
+          "message": "Should combine data from both repositories",
+          "required": true
+        },
+        {
+          "pattern": "filter|sortedBy|take",
+          "message": "Should filter and sort the articles",
+          "required": false
+        }
+      ],
+      "solution": "class GetTopArticlesUseCase(\n    private val articlesRepo: ArticlesRepository,\n    private val userRepo: UserRepository\n) {\n    operator fun invoke(): Flow<List<Article>> {\n        return combine(\n            articlesRepo.getArticles(),\n            userRepo.getFollowedAuthors()\n        ) { articles, followedAuthors ->\n            articles\n                .filter { it.authorId in followedAuthors }\n                .sortedByDescending { it.date }\n                .take(10)\n        }\n    }\n}",
+      "explanation": "A UseCase encapsulates reusable business logic. The <code>operator fun invoke()</code> convention lets callers use it like a function: <code>getTopArticlesUseCase()</code>. This UseCase combines data from two repositories — exactly when the domain layer adds value. Naming convention: <code>verb + noun + UseCase</code>.",
+      "hints": [
+        "Use combine() to merge two Flows",
+        "operator fun invoke() lets you call the class like a function"
+      ]
+    },
+    {
+      "id": "ar-11",
+      "type": "multiple-choice",
+      "title": "When to Add a Domain Layer",
+      "difficulty": "intermediate",
+      "description": "In Google's architecture guide, when should you add the optional Domain layer (UseCases)?",
+      "options": [
+        "Always — every ViewModel should go through a UseCase",
+        "When business logic is shared between multiple ViewModels, or when you want to simplify complex ViewModels",
+        "Only in Clean Architecture — MVVM doesn't use UseCases",
+        "When you need to cache data between the ViewModel and Repository"
+      ],
+      "correctIndex": 1,
+      "explanation": "The domain layer is <b>optional</b>. Add UseCases when: (1) Business logic is shared across multiple ViewModels, (2) A ViewModel is becoming too complex and you want to extract logic. <b>Don't add UseCases that simply delegate to a single repository method</b> — that's unnecessary boilerplate.",
+      "hints": [
+        "Think about when a UseCase adds value vs when it's just a pass-through"
+      ]
+    },
+    {
+      "id": "ar-12",
+      "type": "fill-blank",
+      "title": "MVI Intent-Reducer in ViewModel",
+      "difficulty": "advanced",
+      "description": "Fill in the blanks to complete an MVI-style ViewModel with a reducer.",
+      "code": "class CartViewModel : ViewModel() {\n    private val _state = MutableStateFlow(CartState())\n    val state: StateFlow<CartState> = _state.asStateFlow()\n\n    fun ___1___(intent: CartIntent) {\n        _state.update { currentState ->\n            ___2___(currentState, intent)\n        }\n    }\n\n    private fun reduce(state: CartState, intent: CartIntent): CartState =\n        ___3___(intent) {\n            is CartIntent.AddItem -> state.copy(\n                items = state.items + intent.item\n            )\n            is CartIntent.RemoveItem -> state.copy(\n                items = state.items.filter { it.id != intent.itemId }\n            )\n            is CartIntent.ClearCart -> state.copy(items = emptyList())\n        }\n}",
+      "blanks": [
+        {
+          "answer": ["onIntent", "handleIntent", "processIntent", "dispatch"],
+          "hint": "Function that receives user actions"
+        },
+        {
+          "answer": ["reduce"],
+          "hint": "Pure function that produces new state"
+        },
+        {
+          "answer": ["when"],
+          "hint": "Exhaustive branching on sealed class"
+        }
+      ],
+      "explanation": "MVI funnels all user actions through a single entry point (<code>onIntent</code>), which calls a pure <code>reduce</code> function. The reducer uses <code>when</code> on the sealed intent class to produce new state. <code>_state.update { }</code> ensures thread-safe state mutations. This pattern makes state transitions explicit and testable.",
+      "hints": [
+        "The entry point receives an Intent and delegates to the reducer",
+        "The reducer is a pure function: (state, intent) → newState"
+      ]
+    },
+    {
+      "id": "ar-13",
+      "type": "fix-bug",
+      "title": "Exposed MutableStateFlow",
+      "difficulty": "intermediate",
+      "description": "This ViewModel violates the UDF principle by exposing mutable state to the UI. Fix it so only immutable state is visible.",
+      "starterCode": "class SearchViewModel(\n    private val repository: SearchRepository\n) : ViewModel() {\n    val searchResults = MutableStateFlow<List<Result>>(emptyList())\n    val isLoading = MutableStateFlow(false)\n    val error = MutableStateFlow<String?>(null)\n\n    fun search(query: String) {\n        viewModelScope.launch {\n            isLoading.value = true\n            error.value = null\n            try {\n                searchResults.value = repository.search(query)\n            } catch (e: Exception) {\n                error.value = e.message\n            } finally {\n                isLoading.value = false\n            }\n        }\n    }\n}",
+      "checks": [
+        {
+          "pattern": "private.*MutableStateFlow|_\\w+.*MutableStateFlow",
+          "message": "MutableStateFlow should be private (backing property)",
+          "required": true
+        },
+        {
+          "pattern": "StateFlow<|asStateFlow",
+          "message": "Expose immutable StateFlow to UI",
+          "required": true
+        }
+      ],
+      "solution": "class SearchViewModel(\n    private val repository: SearchRepository\n) : ViewModel() {\n    private val _searchResults = MutableStateFlow<List<Result>>(emptyList())\n    val searchResults: StateFlow<List<Result>> = _searchResults.asStateFlow()\n\n    private val _isLoading = MutableStateFlow(false)\n    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()\n\n    private val _error = MutableStateFlow<String?>(null)\n    val error: StateFlow<String?> = _error.asStateFlow()\n\n    fun search(query: String) {\n        viewModelScope.launch {\n            _isLoading.value = true\n            _error.value = null\n            try {\n                _searchResults.value = repository.search(query)\n            } catch (e: Exception) {\n                _error.value = e.message\n            } finally {\n                _isLoading.value = false\n            }\n        }\n    }\n}",
+      "explanation": "In UDF, the ViewModel is the single source of truth for UI state. Exposing <code>MutableStateFlow</code> lets the UI mutate state directly, breaking unidirectional flow. Use the <b>backing property pattern</b>: <code>private val _state = MutableStateFlow(...)</code> + <code>val state = _state.asStateFlow()</code>. This ensures only the ViewModel can write state.",
+      "hints": [
+        "The naming convention is _privateFlow (mutable) + publicFlow (immutable)",
+        "asStateFlow() wraps MutableStateFlow as read-only StateFlow"
+      ]
+    }
+  ]
+}

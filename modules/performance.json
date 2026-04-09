@@ -1,0 +1,266 @@
+{
+  "id": "performance",
+  "title": "Performance",
+  "icon": "⚡",
+  "description": "Recomposition optimization, memory leaks, profiling, Macrobenchmark, Compose compiler metrics, and APK size",
+  "references": [
+    {"title": "Android Developers — Compose Performance", "url": "https://developer.android.com/develop/ui/compose/performance", "type": "docs"},
+    {"title": "Android Developers — Macrobenchmark", "url": "https://developer.android.com/topic/performance/benchmarking/macrobenchmark-overview", "type": "docs"},
+    {"title": "Android Developers — Baseline Profiles", "url": "https://developer.android.com/topic/performance/baselineprofiles/overview", "type": "docs"},
+    {"title": "Android Developers — R8 Shrinking", "url": "https://developer.android.com/build/shrink-code", "type": "docs"},
+    {"title": "Android Developers — Inspect App Performance (Perfetto)", "url": "https://developer.android.com/topic/performance/tracing", "type": "docs"},
+    {"title": "Compose Compiler Metrics Guide", "url": "https://github.com/androidx/androidx/blob/androidx-main/compose/compiler/design/compiler-metrics.md", "type": "github"}
+  ],
+  "lesson": "<h3>Compose Performance</h3>\n<p>Compose is fast by default, but you can make it faster — or accidentally make it slow.</p>\n<h3>Recomposition Rules</h3>\n<ul>\n<li>Compose skips recomposition when all parameters are <b>stable</b> and unchanged</li>\n<li>Stable types: primitives, String, data classes, @Immutable/@Stable annotated classes</li>\n<li>Unstable: regular classes, List (not SnapshotStateList), lambdas capturing mutable values</li>\n</ul>\n<h3>Common Pitfalls</h3>\n<ul>\n<li>Singleton objects holding Activity references → memory leaks</li>\n<li>Inline lambdas creating new instances every recomposition</li>\n<li>Reading state at too broad a scope</li>\n</ul>\n<h3>Tools</h3>\n<p><b>Layout Inspector</b> shows recomposition counts. <b>Baseline Profiles</b> pre-compile hot paths for faster cold starts. <b>LeakCanary</b> detects memory leaks automatically.</p>\n<hr class=\"section-divider\">\n<h3>Macrobenchmark</h3>\n<p>Measures real-world performance on a real device:</p>\n<div class=\"lesson-code\">@RunWith(AndroidJUnit4::class)\nclass StartupBenchmark {\n    @get:Rule\n    val benchmarkRule = MacrobenchmarkRule()\n\n    @Test\n    fun startupCompilationFull() = benchmarkRule.measureRepeated(\n        packageName = \"com.example.app\",\n        metrics = listOf(StartupTimingMetric()),\n        iterations = 5,\n        startupMode = StartupMode.COLD\n    ) {\n        pressHome()\n        startActivityAndWait()\n    }\n}</div>\n<div class=\"info-box\"><b>Metrics available:</b> <code>StartupTimingMetric</code> (TTID/TTFD), <code>FrameTimingMetric</code> (jank), <code>TraceSectionMetric</code> (custom trace points), <code>PowerMetric</code> (battery). Macrobenchmark also auto-generates Baseline Profiles.</div>\n<hr class=\"section-divider\">\n<h3>Compose Compiler Reports</h3>\n<p>The Compose compiler can report which classes are stable/unstable and which composables skip recomposition:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Enable in build.gradle.kts</span>\nkotlinOptions {\n    freeCompilerArgs += listOf(\n        \"-P\", \"plugin:androidx.compose.compiler.plugins.kotlin:reportsDestination=\" +\n            project.buildDir.absolutePath + \"/compose_metrics\"\n    )\n}\n\n<span class=\"cmt\">// Output: app_release-composables.txt</span>\nrestartable skippable scheme(\"[...]\") fun UserCard(\n  stable user: User\n  stable onSelect: Function1&lt;String, Unit&gt;\n)\n<span class=\"cmt\">// \"skippable\" = good! Compose can skip recomposition</span>\n<span class=\"cmt\">// If you see \"restartable\" without \"skippable\" = problem</span></div>\n<hr class=\"section-divider\">\n<h3>APK Size Reduction</h3>\n<ul>\n<li><b>R8 shrinking</b> — Removes unused code: <code>minifyEnabled = true</code></li>\n<li><b>Resource shrinking</b> — Removes unused resources: <code>shrinkResources = true</code></li>\n<li><b>WebP</b> — Convert PNGs to WebP (25-35% smaller)</li>\n<li><b>App Bundle</b> — Upload AAB, Google Play generates optimized APKs per device (saves ~15%)</li>\n<li><b>Dynamic feature modules</b> — Download features on demand</li>\n</ul>",
+  "questions": [
+    {
+      "id": "pf-1",
+      "type": "multiple-choice",
+      "title": "Causes of Recomposition",
+      "difficulty": "intermediate",
+      "description": "Which causes unnecessary recompositions in Compose?",
+      "options": [
+        "Reading a State value inside a composable",
+        "Passing an unstable type (class without equals/hashCode) as a parameter",
+        "Using remember{} to cache computations",
+        "Using LazyColumn with a key parameter"
+      ],
+      "correctIndex": 1,
+      "explanation": "Compose skips recomposition when parameters are <b>stable</b> and unchanged. Unstable types (without proper equals/hashCode) force recomposition every time because Compose can't tell if they changed. Use <code>data class</code> or annotate with <code>@Stable</code>/@Immutable</code>.",
+      "hints": [
+        "How does Compose decide whether to skip recomposition?"
+      ]
+    },
+    {
+      "id": "pf-2",
+      "type": "optimize",
+      "title": "Unstable Lambda Capture",
+      "difficulty": "advanced",
+      "description": "This recomposes ItemRow every time the parent recomposes. Optimize it.",
+      "starterCode": "@Composable\nfun ItemList(items: List<Item>, viewModel: ItemViewModel) {\n    LazyColumn {\n        items(items, key = { it.id }) { item ->\n            ItemRow(\n                item = item,\n                onFavorite = { viewModel.toggleFavorite(item.id) },\n                onDelete = { viewModel.deleteItem(item.id) }\n            )\n        }\n    }\n}",
+      "checks": [
+        {
+          "pattern": "remember|val\\s+on",
+          "message": "Stabilize the lambda references",
+          "required": true
+        }
+      ],
+      "solution": "@Composable\nfun ItemList(items: List<Item>, viewModel: ItemViewModel) {\n    LazyColumn {\n        items(items, key = { it.id }) { item ->\n            val onFavorite = remember(item.id) { { viewModel.toggleFavorite(item.id) } }\n            val onDelete = remember(item.id) { { viewModel.deleteItem(item.id) } }\n            ItemRow(item = item, onFavorite = onFavorite, onDelete = onDelete)\n        }\n    }\n}",
+      "explanation": "Inline lambdas create new instances every recomposition, making them \"unstable\" parameters. <code>remember(item.id) { { ... } }</code> caches the lambda and only recreates it when item.id changes.",
+      "hints": [
+        "Every recomposition creates new lambda objects"
+      ]
+    },
+    {
+      "id": "pf-3",
+      "type": "fix-bug",
+      "title": "Memory Leak",
+      "difficulty": "intermediate",
+      "description": "This code leaks memory. The Activity is never garbage collected after rotation. Fix it.",
+      "starterCode": "object AnalyticsTracker {\n    private var listener: OnEventListener? = null\n    fun setListener(l: OnEventListener) { listener = l }\n    fun trackEvent(event: String) { listener?.onEvent(event) }\n}\n\nclass MainActivity : AppCompatActivity() {\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        AnalyticsTracker.setListener(object : OnEventListener {\n            override fun onEvent(event: String) { updateUI(event) }\n        })\n    }\n    private fun updateUI(event: String) { /* Update UI */ }\n}",
+      "checks": [
+        {
+          "pattern": "onDestroy|removeListener|null|WeakReference|setListener\\(null\\)|clearListener",
+          "message": "Clean up the listener in onDestroy",
+          "required": true
+        }
+      ],
+      "solution": "class MainActivity : AppCompatActivity() {\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        AnalyticsTracker.setListener(object : OnEventListener {\n            override fun onEvent(event: String) { updateUI(event) }\n        })\n    }\n    override fun onDestroy() {\n        super.onDestroy()\n        AnalyticsTracker.setListener(null)\n    }\n    private fun updateUI(event: String) { /* Update UI */ }\n}",
+      "explanation": "The anonymous inner class holds a reference to MainActivity. Since the singleton lives forever, the old Activity can't be garbage collected after rotation. Fix: clear the listener in onDestroy().",
+      "hints": [
+        "Singleton objects live for the entire app process"
+      ]
+    },
+    {
+      "id": "pf-4",
+      "type": "trivia",
+      "title": "Baseline Profiles",
+      "difficulty": "advanced",
+      "description": "What are Baseline Profiles and how do they improve performance?",
+      "keywords": [
+        "AOT",
+        "ahead",
+        "compile",
+        "startup",
+        "profile",
+        "method",
+        "art",
+        "runtime",
+        "precompile",
+        "cold"
+      ],
+      "answer": "Baseline Profiles are lists of critical classes and methods that should be AOT-compiled during installation. They improve cold startup time (up to 30%) by ensuring hot code paths are native code when the app launches.",
+      "explanation": "Without Baseline Profiles, ART uses interpretation and JIT compilation. Cold starts are slow. Baseline Profiles tell the system which methods to AOT-compile at install time. The Macrobenchmark library generates them automatically.",
+      "hints": [
+        "What if the system knew which methods were important before the first launch?"
+      ]
+    },
+    {
+      "id": "pf-5",
+      "type": "fix-bug",
+      "title": "Bitmap Memory Leak",
+      "difficulty": "advanced",
+      "description": "This image loading code causes OutOfMemoryError with large images. Fix it to load images efficiently.",
+      "starterCode": "fun loadBitmap(context: Context, uri: Uri): Bitmap {\n    val inputStream = context.contentResolver.openInputStream(uri)\n    return BitmapFactory.decodeStream(inputStream)\n}",
+      "checks": [
+        {
+          "pattern": "inSampleSize|BitmapFactory\\.Options|reqWidth|resize|Glide|Coil",
+          "message": "Downsample the bitmap or use an image loading library",
+          "required": true
+        }
+      ],
+      "solution": "fun loadBitmap(context: Context, uri: Uri, reqWidth: Int, reqHeight: Int): Bitmap? {\n    // First pass: get dimensions without loading pixels\n    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }\n    context.contentResolver.openInputStream(uri)?.use {\n        BitmapFactory.decodeStream(it, null, options)\n    }\n\n    // Calculate sample size\n    options.inSampleSize = calculateInSampleSize(options, reqWidth, reqHeight)\n    options.inJustDecodeBounds = false\n\n    // Second pass: load downsampled bitmap\n    return context.contentResolver.openInputStream(uri)?.use {\n        BitmapFactory.decodeStream(it, null, options)\n    }\n}",
+      "explanation": "A 12MP photo is ~48MB in memory as a Bitmap. <code>inJustDecodeBounds = true</code> reads dimensions without loading pixels. <code>inSampleSize</code> downsamples (2 = half size = 1/4 memory). In practice, use <b>Coil</b> or <b>Glide</b> which handle this automatically with caching, lifecycle awareness, and Compose integration.",
+      "hints": [
+        "A 4000x3000 photo is ~48MB in memory",
+        "You can read dimensions without loading the full bitmap"
+      ]
+    },
+    {
+      "id": "pf-6",
+      "type": "multiple-choice",
+      "title": "R8 vs ProGuard",
+      "difficulty": "intermediate",
+      "description": "What is the relationship between R8 and ProGuard in modern Android development?",
+      "options": [
+        "They are the same tool with different names",
+        "R8 replaced ProGuard as the default — it does the same things (shrink, optimize, obfuscate) but faster, and uses ProGuard rule syntax",
+        "ProGuard handles code, R8 handles resources",
+        "R8 is only for Kotlin, ProGuard is for Java"
+      ],
+      "correctIndex": 1,
+      "explanation": "R8 is Google's replacement for ProGuard. It performs the same functions (code shrinking, optimization, obfuscation) but is faster and produces smaller output. It uses the same rule syntax as ProGuard (<code>proguard-rules.pro</code>), making migration seamless. R8 has been the default since AGP 3.4.",
+      "hints": [
+        "R8 is backward-compatible with ProGuard rules"
+      ]
+    },
+    {
+      "id": "pf-7",
+      "type": "multiple-choice",
+      "title": "Macrobenchmark Startup Modes",
+      "difficulty": "advanced",
+      "description": "What is the difference between COLD, WARM, and HOT startup in Macrobenchmark?",
+      "options": [
+        "COLD = first install, WARM = update, HOT = cached",
+        "COLD = process killed, app started fresh; WARM = process alive, activity destroyed; HOT = activity paused and resumed",
+        "COLD = no network, WARM = Wi-Fi, HOT = 5G",
+        "They all measure the same thing with different iteration counts"
+      ],
+      "correctIndex": 1,
+      "explanation": "<b>COLD</b>: Process is dead — full startup from scratch (Zygote fork → Application → Activity). Most expensive, most realistic for first launch. <b>WARM</b>: Process is alive but Activity was destroyed — no Application.onCreate(). <b>HOT</b>: Activity exists, just brought back to foreground — cheapest. COLD start is the most important to optimize (Baseline Profiles, reducing ContentProvider inits).",
+      "hints": [
+        "Think about what Android recreates at each level"
+      ]
+    },
+    {
+      "id": "pf-8",
+      "type": "what-does-this-do",
+      "title": "Compose Compiler Report",
+      "difficulty": "advanced",
+      "description": "What does this Compose compiler report tell you about the composable?",
+      "code": "restartable scheme(\"[...]\") fun ItemCard(\n  unstable items: List<Item>\n  stable title: String\n  stable onSelect: Function1<String, Unit>\n)",
+      "options": [
+        "ItemCard is fully optimized and will skip recomposition when inputs haven't changed",
+        "ItemCard is restartable but NOT skippable because 'items' is unstable (List is not stable by default) — it recomposes every time the parent recomposes even if data hasn't changed",
+        "ItemCard will crash at runtime due to the unstable parameter",
+        "The report shows that ItemCard uses too much memory"
+      ],
+      "correctIndex": 1,
+      "explanation": "The report shows <code>restartable</code> but <b>NOT</b> <code>skippable</code> — this is a performance problem. The culprit is <code>unstable items: List&lt;Item&gt;</code>. Kotlin's <code>List</code> is an interface that <i>could</i> be a MutableList at runtime, so Compose can't guarantee it hasn't changed. Fix options: (1) Use <code>@Immutable</code> or <code>@Stable</code> on Item, (2) Use <code>kotlinx.collections.immutable.ImmutableList</code>, (3) Use <code>SnapshotStateList</code>.",
+      "hints": [
+        "A composable needs ALL stable parameters to be 'skippable'",
+        "List is unstable because it's an interface — it could be mutable"
+      ]
+    },
+    {
+      "id": "pf-9",
+      "type": "multiple-choice",
+      "title": "APK Size Reduction",
+      "difficulty": "intermediate",
+      "description": "Which combination of settings enables both code and resource shrinking for a release build?",
+      "options": [
+        "proguardFiles only",
+        "minifyEnabled = true and shrinkResources = true",
+        "shrinkResources = true alone (it implies minifyEnabled)",
+        "debuggable = false enables all optimizations automatically"
+      ],
+      "correctIndex": 1,
+      "explanation": "Both must be set explicitly. <code>minifyEnabled = true</code> enables R8 code shrinking (removes unused classes/methods). <code>shrinkResources = true</code> removes unused resources (images, layouts). <b>Important:</b> shrinkResources requires minifyEnabled — it can't work alone because it needs R8 to determine which resources are referenced in code. Together they can reduce APK size by 20-50%.",
+      "hints": [
+        "shrinkResources depends on minifyEnabled — order matters"
+      ]
+    },
+    {
+      "id": "pf-10",
+      "type": "multiple-choice",
+      "title": "Doze Mode & Battery",
+      "difficulty": "intermediate",
+      "description": "What happens to your app's background work when the device enters Doze mode?",
+      "options": [
+        "All background work is permanently killed",
+        "Network access, jobs, syncs, and alarms are deferred to periodic maintenance windows",
+        "Only GPS is disabled, everything else continues",
+        "Doze mode only affects apps targeting API 23+"
+      ],
+      "correctIndex": 1,
+      "explanation": "Doze mode restricts: network access, JobScheduler/WorkManager jobs, syncs, standard alarms, and wake locks. Work is deferred to periodic <b>maintenance windows</b> where the system briefly exits Doze. <code>setExactAndAllowWhileIdle()</code> alarms still fire but are rate-limited. Firebase Cloud Messaging high-priority messages can wake the device. Doze deepens over time — longer idle = longer between maintenance windows.",
+      "hints": [
+        "Doze doesn't kill work — it defers it to save battery"
+      ]
+    },
+    {
+      "id": "pf-11",
+      "type": "fix-bug",
+      "title": "Non-Skippable Composable",
+      "difficulty": "advanced",
+      "description": "The Compose compiler report shows this composable is NOT skippable. Fix it so Compose can skip recomposition when data hasn't changed.",
+      "starterCode": "data class UiState(\n    val items: List<Item>,\n    val isLoading: Boolean,\n    val error: String?\n)\n\n@Composable\nfun ItemList(state: UiState, onRefresh: () -> Unit) {\n    if (state.isLoading) {\n        CircularProgressIndicator()\n    } else {\n        LazyColumn {\n            items(state.items) { item -> ItemCard(item) }\n        }\n    }\n}",
+      "checks": [
+        {
+          "pattern": "@Immutable|@Stable|ImmutableList|persistentListOf|kotlinx\\.collections\\.immutable",
+          "message": "Make the data class stable for Compose",
+          "required": true
+        }
+      ],
+      "solution": "@Immutable\ndata class UiState(\n    val items: ImmutableList<Item>,\n    val isLoading: Boolean,\n    val error: String?\n)\n\n@Composable\nfun ItemList(state: UiState, onRefresh: () -> Unit) {\n    if (state.isLoading) {\n        CircularProgressIndicator()\n    } else {\n        LazyColumn {\n            items(state.items) { item -> ItemCard(item) }\n        }\n    }\n}",
+      "explanation": "Two changes make this skippable: (1) <code>@Immutable</code> on UiState tells Compose the class won't change after construction. (2) <code>ImmutableList</code> (from kotlinx-collections-immutable) replaces <code>List</code> — Compose knows it's truly immutable. Regular <code>List</code> is unstable because the interface could be backed by a MutableList. With both changes, the Compose compiler marks <code>ItemList</code> as <code>skippable</code>.",
+      "hints": [
+        "The issue is List<Item> — Compose can't trust it won't mutate",
+        "kotlinx.collections.immutable provides truly immutable collections"
+      ]
+    },
+    {
+      "id": "pf-12",
+      "type": "trivia",
+      "title": "16ms Frame Budget",
+      "difficulty": "intermediate",
+      "description": "Explain the 16ms frame budget. What happens when a frame takes 20ms? How would you use systrace/Perfetto to identify whether the bottleneck is in measure, layout, draw, or the render thread?",
+      "keywords": [
+        "16ms",
+        "60fps",
+        "vsync",
+        "jank",
+        "dropped",
+        "frame",
+        "choreographer",
+        "perfetto",
+        "systrace",
+        "measure",
+        "layout",
+        "draw",
+        "render",
+        "thread"
+      ],
+      "answer": "At 60fps, each frame has 16.67ms to complete. If a frame takes 20ms, it misses the VSYNC deadline — the previous frame is displayed for an extra cycle (33ms), causing visible jank. In Perfetto/systrace, look at the 'Choreographer#doFrame' trace section: it shows INPUT, ANIMATION, and TRAVERSAL phases. Within TRAVERSAL, you'll see measure, layout, and draw timing. If 'draw' is fine but the frame is still late, check the RenderThread track — GPU work may be the bottleneck. Common causes: nested layout weight (double measure), heavy onDraw(), or overdraw.",
+      "explanation": "The VSYNC signal drives frame rendering. At 60fps each frame has ~16ms. The Choreographer schedules work in phases: input handling, animations, then view traversals (measure/layout/draw). Perfetto shows each phase's duration, making it easy to pinpoint the bottleneck. The RenderThread track reveals GPU-side issues. Look for frames where the Choreographer#doFrame slice exceeds 16ms.",
+      "hints": [
+        "1000ms / 60fps = 16.67ms per frame",
+        "Perfetto has separate tracks for the UI thread and RenderThread"
+      ],
+      "learnMore": [
+        {"title": "Android Developers — Inspect Performance with Perfetto", "url": "https://developer.android.com/topic/performance/tracing/navigate-report"},
+        {"title": "Android Developers — Slow Rendering (Jank)", "url": "https://developer.android.com/topic/performance/vitals/render"}
+      ]
+    }
+  ]
+}
