@@ -47,7 +47,7 @@ header{background:var(--sidebar);padding:10px 20px;display:flex;justify-content:
 .review-btn.visible{display:block}
 #overall-progress{padding:16px;border-top:1px solid var(--border)}
 .overall-progress span{font-size:12px;color:var(--text-dim);display:block;margin-bottom:6px}
-#main-content{flex:1;overflow-y:auto;padding:24px 32px}
+#main-content{flex:1;overflow-y:auto;padding:24px 32px 24px 32px}
 .welcome{max-width:700px;margin:60px auto;text-align:center}
 .welcome h2{font-size:28px;color:var(--text);margin-bottom:12px}
 .welcome>p{color:var(--text-dim);margin-bottom:32px;line-height:1.6}
@@ -63,15 +63,15 @@ header{background:var(--sidebar);padding:10px 20px;display:flex;justify-content:
 .welcome-cta{color:var(--text-dim);font-size:14px}
 .streak-badge{display:inline-flex;align-items:center;gap:4px;background:var(--card);border:1px solid var(--border);padding:4px 12px;border-radius:12px;font-size:12px;color:var(--warning);margin-bottom:24px}
 /* Lesson View */
-.lesson-view{max-width:960px;margin:0 auto;position:relative}
-.lesson-body{display:flex;gap:24px}
+.lesson-view{max-width:1100px;margin:0 auto;position:relative}
+.lesson-body{display:flex;gap:24px;align-items:flex-start}
 .lesson-main{flex:1;min-width:0}
-.lesson-toc{width:200px;flex-shrink:0;position:sticky;top:24px;align-self:flex-start;max-height:calc(100vh - 120px);overflow-y:auto}
+.lesson-toc{width:180px;flex-shrink:0;position:sticky;top:0;max-height:calc(100vh - 120px);overflow-y:auto;padding:12px;background:var(--sidebar);border:1px solid var(--border);border-radius:8px}
 .lesson-toc-title{font-size:10px;text-transform:uppercase;letter-spacing:.8px;font-weight:700;color:var(--text-dim);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)}
-.lesson-toc a{display:block;font-size:12px;color:var(--text-dim);text-decoration:none;padding:4px 0 4px 10px;border-left:2px solid transparent;transition:all .15s;line-height:1.4}
+.lesson-toc a{display:block;font-size:11px;color:var(--text-dim);text-decoration:none;padding:3px 0 3px 10px;border-left:2px solid transparent;transition:all .15s;line-height:1.4}
 .lesson-toc a:hover{color:var(--text);border-left-color:var(--text-dim)}
 .lesson-toc a.active{color:var(--accent);border-left-color:var(--accent)}
-@media(max-width:900px){.lesson-toc{display:none}.lesson-body{flex-direction:column}}
+@media(max-width:1000px){.lesson-toc{display:none}}
 .lesson-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
 .lesson-header h2{font-size:24px}
 .lesson-content{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:24px;line-height:1.8;font-size:14px;margin-bottom:20px}
