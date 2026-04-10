@@ -539,6 +539,28 @@ function nextReview(){
 // ================================================================
 // THEME
 // ================================================================
+function increaseFontSize(){
+  const current = parseInt(localStorage.getItem('android-study-fontsize') || '14');
+  const next = Math.min(current + 2, 24);
+  applyFontSize(next);
+}
+function decreaseFontSize(){
+  const current = parseInt(localStorage.getItem('android-study-fontsize') || '14');
+  const next = Math.max(current - 2, 10);
+  applyFontSize(next);
+}
+function applyFontSize(size){
+  localStorage.setItem('android-study-fontsize', size);
+  const mc = document.getElementById('main-content');
+  mc.style.fontSize = size + 'px';
+  // Scale code blocks proportionally
+  document.documentElement.style.setProperty('--user-font-size', size + 'px');
+}
+function loadFontSize(){
+  const size = localStorage.getItem('android-study-fontsize');
+  if (size) applyFontSize(parseInt(size));
+}
+
 function toggleTheme(){
   state.theme=state.theme==='dark'?'light':'dark';
   document.body.classList.toggle('light-theme',state.theme==='light');
@@ -673,6 +695,7 @@ document.querySelectorAll('.modal').forEach(m=>{m.addEventListener('click',funct
 // ================================================================
 async function init() {
   loadState();
+  loadFontSize();
   const ok = await loadModules();
   if (ok) {
     renderSidebar();
