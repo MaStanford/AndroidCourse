@@ -310,5 +310,13 @@
     "description": "Capstone: build an AI chat app with the Gemini API",
     "file": "gemini-app.json",
     "category": "Capstone Projects"
+  },
+  {
+    "id": "capstone-projects",
+    "title": "Capstone Projects",
+    "icon": "🏆",
+    "description": "Four practical full-stack projects: Weather Dashboard, Offline-First Notes, Real-Time Chat, and Multi-Module Task Manager",
+    "file": "capstone-projects.json",
+    "category": "Capstone Projects"
   }
 ]
