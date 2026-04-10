@@ -273,6 +273,7 @@ function renderLesson() {
 
   // Set up scroll spy for TOC highlighting
   if (tocEntries.length > 0) setupScrollSpy();
+  reapplyFontSize();
 }
 
 function startQuestions() {
@@ -322,6 +323,7 @@ function renderQuestion() {
   </div><h2 class="q-title">${q.title}</h2><p class="q-description">${q.description}</p>`;
 
   renderQuestionBody(q); renderActionBar(q);
+  reapplyFontSize();
 }
 
 function renderQuestionBody(q) {
@@ -551,12 +553,24 @@ function decreaseFontSize(){
 }
 function applyFontSize(size){
   localStorage.setItem('android-study-fontsize', size);
-  const mc = document.getElementById('main-content');
-  mc.style.fontSize = size + 'px';
-  // Scale code blocks proportionally
-  document.documentElement.style.setProperty('--user-font-size', size + 'px');
+  // Apply to the entire app
+  document.getElementById('app').style.fontSize = size + 'px';
+  // Scale key elements that use fixed px sizes
+  document.querySelectorAll('.lesson-content, .q-description, .mc-option, .feedback-body, .trivia-input').forEach(el => {
+    el.style.fontSize = size + 'px';
+  });
+  document.querySelectorAll('.lesson-content .lesson-code, .code-display pre').forEach(el => {
+    el.style.fontSize = Math.max(size - 2, 10) + 'px';
+  });
+  document.querySelectorAll('.module-title').forEach(el => {
+    el.style.fontSize = Math.max(size - 2, 11) + 'px';
+  });
 }
 function loadFontSize(){
+  const size = localStorage.getItem('android-study-fontsize');
+  if (size) applyFontSize(parseInt(size));
+}
+function reapplyFontSize(){
   const size = localStorage.getItem('android-study-fontsize');
   if (size) applyFontSize(parseInt(size));
 }
