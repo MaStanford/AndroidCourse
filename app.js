@@ -21,7 +21,9 @@ async function loadModules() {
     const index = await indexResp.json();
     const modulePromises = index.map(async (entry) => {
       const resp = await fetch('modules/' + entry.file);
-      return resp.json();
+      const mod = await resp.json();
+      if (entry.category) mod.category = entry.category;
+      return mod;
     });
     MODULES = await Promise.all(modulePromises);
     loader.remove();
