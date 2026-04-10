@@ -2,23 +2,26 @@
 
 An interactive, web-based study guide for mastering Android development — built for senior/staff engineer interviews at top tech companies.
 
-**27 modules, 253 questions** covering everything from Compose basics to Binder IPC internals, with AI-powered feedback via the Claude API.
+**40 modules, 373 questions, 725K+ characters of lesson content** covering everything from Compose basics to Binder IPC internals, with AI-powered feedback via the Claude API.
 
-![Screenshot](https://img.shields.io/badge/modules-27-blue) ![Screenshot](https://img.shields.io/badge/questions-253-green) ![Screenshot](https://img.shields.io/badge/references-124-orange)
+![modules](https://img.shields.io/badge/modules-40-blue) ![questions](https://img.shields.io/badge/questions-373-green) ![content](https://img.shields.io/badge/lesson%20content-725K%20chars-orange)
 
 ## What's Covered
 
 | Category | Modules |
 |----------|---------|
-| **Kotlin** | Kotlin Essentials, Advanced Kotlin, DSA in Kotlin |
-| **Compose** | Compose Basics, Compose Advanced, Compose State Mastery |
-| **Architecture** | Architecture Patterns, Navigation, Dependency Injection, Modularization & Build |
-| **Data** | Networking, Auth & Security, Data & Storage |
-| **Quality** | Testing, Performance, Accessibility & Quality |
-| **Concurrency** | Coroutines Deep Dive, Flow & StateFlow, Background Processing |
-| **Framework Internals** | Android Internals & Process Model, Binder/Services/IPC, Tasks/Intents/Windows, Rendering Pipeline (Views & Compose) |
-| **System Design** | Mobile System Design, View-Compose Interop & Adaptive Layouts |
-| **Capstone** | Build a Gemini App |
+| **Foundations** | Android Fundamentals, Kotlin Essentials, Advanced Kotlin, Android Internals & Process Model |
+| **Threading & Concurrency** | Handler/Looper/MessageQueue, The Async Evolution, Coroutines Deep Dive, Background Processing & WorkManager |
+| **Reactive Data & State** | Flow & StateFlow, LiveData & RxJava, Message Bus Evolution, Hot vs Cold Streams & Threading |
+| **Lifecycle & Architecture** | Lifecycle-Aware Components, Architecture Patterns, Dependency Injection, Offline-First Architecture |
+| **Jetpack Compose** | Compose Basics, Compose Advanced, Compose State Mastery, View-Compose Interop & Adaptive Layouts |
+| **Theming & Resources** | Themes/Styles/Dark Mode, Configuration Changes & RROs |
+| **App Plumbing** | Navigation, Networking, Data & Storage, Auth & Security |
+| **Android Internals** | Binder/Services/IPC, Tasks/Intents/Window Management |
+| **Performance & Debugging** | UI Responsiveness & RecyclerView vs Compose, Rendering Pipeline, Performance, Debugging & Profiling Tools, Battery & Power Management |
+| **Quality & Shipping** | Testing, Accessibility & Quality, App Modularization & Build System |
+| **Interview Prep** | Mobile System Design, DSA in Kotlin |
+| **Capstone Projects** | Build a Gemini App, 4 Full Jetpack Compose Projects (Weather Dashboard, Offline Notes, Real-Time Chat, Multi-Module Task Manager) |
 
 ## Features
 
@@ -27,7 +30,10 @@ An interactive, web-based study guide for mastering Android development — buil
 - **AI feedback** via Claude API (optional — bring your own API key)
 - **Spaced repetition** with review queue for questions you got wrong
 - **Progress tracking** with per-module completion, streak counter, and weak area detection
-- **References & Learn More** links to official Android docs, AOSP source code, GitHub repos, and videos
+- **Sidebar category grouping** — 10 collapsible categories with aggregate progress
+- **Lesson table of contents** — sticky right-side "On This Page" nav with scroll spy
+- **Font size controls** — A-/A+ buttons for comfortable reading
+- **References & Learn More** links to official Android docs, AOSP source, and articles
 - **Dark/light theme** toggle
 - **Export/import** progress as JSON
 - **Mobile responsive** with collapsible sidebar
@@ -79,6 +85,7 @@ ruby -run -e httpd . -p 8000
 5. **Use hints** if you're stuck (costs nothing, just learning)
 6. **Ask Claude** for AI-powered tutoring feedback (requires API key in Settings)
 7. **Review due questions** appear in the review queue based on spaced repetition
+8. **Adjust font size** with A-/A+ buttons in the top-right toolbar
 
 ### Claude API Setup (Optional)
 
@@ -95,20 +102,21 @@ To enable AI feedback:
 ├── index.html          # Single-page app shell + CSS
 ├── app.js              # Application logic (state, rendering, grading, API)
 ├── modules/
-│   ├── index.json      # Module registry (27 entries)
+│   ├── index.json      # Module registry (40 entries with categories)
 │   ├── android-fundamentals.json
 │   ├── kotlin-essentials.json
 │   ├── compose-basics.json
-│   ├── ...             # 24 more module files
-│   └── rendering-pipeline.json
+│   ├── capstone-projects.json
+│   ├── ...             # 36 more module files
+│   └── themes-styles.json
 └── README.md
 ```
 
 Each module JSON file contains:
-- `lesson` — HTML content with diagrams, code examples, and tables
-- `questions` — Array of interactive exercises with grading logic
-- `references` — Links to official docs, AOSP source, videos
-- Questions may include `learnMore` links for deeper exploration
+- `lesson` — Rich HTML content with ASCII diagrams, code examples, comparison tables, info/warn boxes
+- `questions` — Array of interactive exercises (6 types) with grading logic, hints, and explanations
+- `references` — Links to official docs, AOSP source, videos, and articles
+- `category` — Grouping for sidebar organization (defined in index.json)
 
 ## License
 
