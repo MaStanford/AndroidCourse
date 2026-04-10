@@ -553,26 +553,15 @@ function decreaseFontSize(){
 }
 function applyFontSize(size){
   localStorage.setItem('android-study-fontsize', size);
-  // Apply to the entire app
-  document.getElementById('app').style.fontSize = size + 'px';
-  // Scale key elements that use fixed px sizes
-  document.querySelectorAll('.lesson-content, .q-description, .mc-option, .feedback-body, .trivia-input').forEach(el => {
-    el.style.fontSize = size + 'px';
-  });
-  document.querySelectorAll('.lesson-content .lesson-code, .code-display pre').forEach(el => {
-    el.style.fontSize = Math.max(size - 2, 10) + 'px';
-  });
-  document.querySelectorAll('.module-title').forEach(el => {
-    el.style.fontSize = Math.max(size - 2, 11) + 'px';
-  });
+  // Set CSS custom property — all calc(Xpx * var(--font-scale)) rules react instantly
+  document.body.style.setProperty('--font-scale', size / 14);
 }
 function loadFontSize(){
   const size = localStorage.getItem('android-study-fontsize');
   if (size) applyFontSize(parseInt(size));
 }
 function reapplyFontSize(){
-  const size = localStorage.getItem('android-study-fontsize');
-  if (size) applyFontSize(parseInt(size));
+  // No-op: CSS custom property --font-scale applies automatically to all elements
 }
 
 function toggleTheme(){
