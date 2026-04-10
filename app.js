@@ -159,13 +159,36 @@ function escapeHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').repla
 // ================================================================
 function renderSidebar() {
   const list = document.getElementById('module-list');
-  list.innerHTML = MODULES.map((mod,i)=>{
-    const pct=getModuleProgress(mod.id); const active=i===state.currentModuleIndex;
-    return `<div class="module-item${active?' active':''}" onclick="selectModule(${i})" data-module="${mod.id}">
-      <span class="module-icon">${mod.icon}</span>
-      <div class="module-info"><span class="module-title">${mod.title}</span>
-        <div class="module-progress-bar"><div class="module-progress-fill" style="width:${pct}%"></div></div></div>
-      <span class="module-pct">${pct}%</span></div>`;
+  // Group modules by category
+  const categories = [];
+  const catMap = {};
+  MODULES.forEach((mod,i) => {
+    const cat = mod.category || 'Uncategorized';
+    if (!catMap[cat]) { catMap[cat] = { name: cat, modules: [] }; categories.push(catMap[cat]); }
+    catMap[cat].modules.push({ mod, index: i });
+  });
+  // Determine which categories should be open (active module's category, or all by default)
+  const activeCat = state.currentModuleIndex >= 0 ? (MODULES[state.currentModuleIndex].category || '') : '';
+  const openCats = JSON.parse(localStorage.getItem('android-study-opencats') || 'null');
+
+  list.innerHTML = categories.map(cat => {
+    const catModules = cat.modules;
+    const catSolved = catModules.reduce((s, {mod}) => s + mod.questions.filter(q => state.progress[q.id]?.solved).length, 0);
+    const catTotal = catModules.reduce((s, {mod}) => s + mod.questions.length, 0);
+    const catPct = catTotal > 0 ? Math.round((catSolved / catTotal) * 100) : 0;
+    const isOpen = openCats ? openCats.includes(cat.name) : true;
+    const items = catModules.map(({mod, index}) => {
+      const pct = getModuleProgress(mod.id);
+      const active = index === state.currentModuleIndex;
+      return `<div class="module-item${active?' active':''}" onclick="selectModule(${index})" data-module="${mod.id}">
+        <span class="module-icon">${mod.icon}</span>
+        <div class="module-info"><span class="module-title">${mod.title}</span>
+          <div class="module-progress-bar"><div class="module-progress-fill" style="width:${pct}%"></div></div></div>
+        <span class="module-pct">${pct}%</span></div>`;
+    }).join('');
+    return `<div class="category-header${isOpen?' open':''}" onclick="toggleCategory(this)">
+      <span class="category-arrow">&#9654;</span>${cat.name}<span class="category-pct">${catPct}%</span></div>
+      <div class="category-children">${items}</div>`;
   }).join('');
   const o=getOverallProgress();
   document.getElementById('overall-progress').innerHTML=`<div class="overall-progress"><span>Overall: ${o}%</span><div class="module-progress-bar"><div class="module-progress-fill" style="width:${o}%"></div></div></div>`;
@@ -174,6 +197,14 @@ function renderSidebar() {
   const rb = document.getElementById('review-btn');
   document.getElementById('review-count').textContent = due.length;
   rb.className = 'review-btn' + (due.length > 0 ? ' visible' : '');
+}
+
+function toggleCategory(el) {
+  el.classList.toggle('open');
+  // Persist open state
+  const openHeaders = document.querySelectorAll('.category-header.open');
+  const openNames = Array.from(openHeaders).map(h => h.textContent.replace(/[▶\d%]/g, '').trim());
+  localStorage.setItem('android-study-opencats', JSON.stringify(openNames));
 }
 
 function renderWelcome() {
@@ -206,6 +237,22 @@ function renderLesson() {
   document.getElementById('question-view').style.display='none';
   document.getElementById('lesson-view').style.display='block';
   const pct=getModuleProgress(mod.id);
+
+  // Parse h3 tags from lesson content to build TOC
+  const lessonHtml = mod.lesson || '<p>Lesson content coming soon.</p>';
+  const tocEntries = [];
+  let sectionIndex = 0;
+  const processedLesson = lessonHtml.replace(/<h3>(.*?)<\/h3>/g, (match, title) => {
+    const id = 'section-' + sectionIndex++;
+    tocEntries.push({ id, title: title.replace(/<[^>]*>/g, '') });
+    return `<h3 id="${id}">${title}</h3>`;
+  });
+
+  const tocHtml = tocEntries.length > 0 ? `<nav class="lesson-toc">
+    <div class="lesson-toc-title">On This Page</div>
+    ${tocEntries.map(e => `<a href="#${e.id}" onclick="smoothScrollTo('${e.id}');return false;">${e.title}</a>`).join('')}
+  </nav>` : '';
+
   document.getElementById('lesson-view').innerHTML=`<div class="lesson-view">
     <div class="lesson-tabs">
       <div class="lesson-tab active" onclick="renderLesson()">\u{1F4D6} Lesson</div>
@@ -213,9 +260,17 @@ function renderLesson() {
     </div>
     <div class="lesson-header"><h2>${mod.icon} ${mod.title}</h2>
       <span class="module-pct" style="font-size:14px">${pct}% complete</span></div>
-    <div class="lesson-content">${mod.lesson||'<p>Lesson content coming soon.</p>'}</div>
-    ${mod.references?`<div class="lesson-references"><h3>\u{1F4DA} References & Resources</h3><div class="ref-links">${mod.references.map(r=>`<a href="${r.url}" target="_blank" rel="noopener" class="ref-link"><span class="ref-type ${r.type||'docs'}">${r.type||'docs'}</span><span class="ref-link-title">${escapeHtml(r.title)}</span></a>`).join('')}</div></div>`:''}
-    <button class="btn btn-primary" onclick="startQuestions()" style="margin-top:8px">Start Questions \u2192</button></div>`;
+    <div class="lesson-body">
+      <div class="lesson-main">
+        <div class="lesson-content">${processedLesson}</div>
+        ${mod.references?`<div class="lesson-references"><h3>\u{1F4DA} References & Resources</h3><div class="ref-links">${mod.references.map(r=>`<a href="${r.url}" target="_blank" rel="noopener" class="ref-link"><span class="ref-type ${r.type||'docs'}">${r.type||'docs'}</span><span class="ref-link-title">${escapeHtml(r.title)}</span></a>`).join('')}</div></div>`:''}
+        <button class="btn btn-primary" onclick="startQuestions()" style="margin-top:8px">Start Questions \u2192</button>
+      </div>
+      ${tocHtml}
+    </div></div>`;
+
+  // Set up scroll spy for TOC highlighting
+  if (tocEntries.length > 0) setupScrollSpy();
 }
 
 function startQuestions() {
@@ -579,6 +634,28 @@ function toggleSidebar(){
 // UTILITIES & KEYBOARD
 // ================================================================
 function formatType(t){return{'multiple-choice':'Multiple Choice','fill-blank':'Fill Blank','fix-bug':'Fix the Bug','what-does-this-do':'What Does This Do?','optimize':'Optimize','write-code':'Write Code','trivia':'Concept'}[t]||t;}
+
+function smoothScrollTo(id) {
+  const el = document.getElementById(id);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function setupScrollSpy() {
+  const mainContent = document.getElementById('main-content');
+  const tocLinks = document.querySelectorAll('.lesson-toc a');
+  if (!tocLinks.length) return;
+  const sections = Array.from(tocLinks).map(a => document.getElementById(a.getAttribute('href').slice(1))).filter(Boolean);
+  mainContent.addEventListener('scroll', function() {
+    let current = '';
+    sections.forEach(s => {
+      const rect = s.getBoundingClientRect();
+      if (rect.top <= 150) current = s.id;
+    });
+    tocLinks.forEach(a => {
+      a.classList.toggle('active', a.getAttribute('href') === '#' + current);
+    });
+  });
+}
 document.addEventListener('keydown',function(e){
   if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;
   if(state.currentModuleIndex<0||state.showingLesson)return;

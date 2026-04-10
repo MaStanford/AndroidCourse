@@ -25,17 +25,24 @@ header{background:var(--sidebar);padding:10px 20px;display:flex;justify-content:
 .sidebar-search input:focus{border-color:var(--accent)}
 .sidebar-filters{padding:6px 12px;display:flex;gap:6px;border-bottom:1px solid var(--border)}
 .sidebar-filters select{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:3px;font-size:11px;outline:none;flex:1}
-#module-list{flex:1;padding:8px 0;overflow-y:auto}
-.module-item{display:flex;align-items:center;padding:10px 16px;cursor:pointer;gap:10px;border-left:3px solid transparent;transition:all .15s}
+#module-list{flex:1;padding:4px 0;overflow-y:auto}
+.category-header{display:flex;align-items:center;padding:8px 14px;cursor:pointer;gap:6px;user-select:none;font-size:11px;text-transform:uppercase;letter-spacing:.8px;font-weight:700;color:var(--text-dim);transition:color .15s}
+.category-header:hover{color:var(--text)}
+.category-arrow{font-size:9px;transition:transform .2s;width:12px;color:var(--text-dim)}
+.category-header.open .category-arrow{transform:rotate(90deg)}
+.category-pct{margin-left:auto;font-size:10px;font-weight:400;color:var(--text-dim)}
+.category-children{max-height:0;overflow:hidden;transition:max-height .25s ease}
+.category-header.open+.category-children{max-height:2000px}
+.module-item{display:flex;align-items:center;padding:8px 14px 8px 32px;cursor:pointer;gap:8px;border-left:3px solid transparent;transition:all .15s}
 .module-item:hover{background:var(--card)}
 .module-item.active{background:rgba(79,195,247,.1);border-left-color:var(--accent)}
 .module-item.hidden{display:none}
-.module-icon{font-size:20px;width:28px;text-align:center}
+.module-icon{font-size:16px;width:22px;text-align:center}
 .module-info{flex:1;min-width:0}
-.module-title{font-size:13px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.module-progress-bar{height:3px;background:var(--border);border-radius:2px;margin-top:4px;overflow:hidden}
+.module-title{font-size:12px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.module-progress-bar{height:2px;background:var(--border);border-radius:2px;margin-top:3px;overflow:hidden}
 .module-progress-fill{height:100%;background:var(--accent);border-radius:2px;transition:width .3s}
-.module-pct{font-size:11px;color:var(--text-dim);min-width:30px;text-align:right}
+.module-pct{font-size:10px;color:var(--text-dim);min-width:28px;text-align:right}
 .review-btn{margin:8px 12px;padding:8px;background:var(--warning);color:#000;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;text-align:center;display:none}
 .review-btn.visible{display:block}
 #overall-progress{padding:16px;border-top:1px solid var(--border)}
@@ -56,7 +63,15 @@ header{background:var(--sidebar);padding:10px 20px;display:flex;justify-content:
 .welcome-cta{color:var(--text-dim);font-size:14px}
 .streak-badge{display:inline-flex;align-items:center;gap:4px;background:var(--card);border:1px solid var(--border);padding:4px 12px;border-radius:12px;font-size:12px;color:var(--warning);margin-bottom:24px}
 /* Lesson View */
-.lesson-view{max-width:760px;margin:0 auto}
+.lesson-view{max-width:960px;margin:0 auto;position:relative}
+.lesson-body{display:flex;gap:24px}
+.lesson-main{flex:1;min-width:0}
+.lesson-toc{width:200px;flex-shrink:0;position:sticky;top:24px;align-self:flex-start;max-height:calc(100vh - 120px);overflow-y:auto}
+.lesson-toc-title{font-size:10px;text-transform:uppercase;letter-spacing:.8px;font-weight:700;color:var(--text-dim);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.lesson-toc a{display:block;font-size:12px;color:var(--text-dim);text-decoration:none;padding:4px 0 4px 10px;border-left:2px solid transparent;transition:all .15s;line-height:1.4}
+.lesson-toc a:hover{color:var(--text);border-left-color:var(--text-dim)}
+.lesson-toc a.active{color:var(--accent);border-left-color:var(--accent)}
+@media(max-width:900px){.lesson-toc{display:none}.lesson-body{flex-direction:column}}
 .lesson-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
 .lesson-header h2{font-size:24px}
 .lesson-content{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:24px;line-height:1.8;font-size:14px;margin-bottom:20px}

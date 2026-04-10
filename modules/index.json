@@ -4,272 +4,311 @@
     "title": "Android Fundamentals",
     "icon": "📱",
     "description": "Core building blocks of Android applications",
-    "file": "android-fundamentals.json"
+    "file": "android-fundamentals.json",
+    "category": "Foundations"
   },
   {
     "id": "kotlin-essentials",
     "title": "Kotlin Essentials",
     "icon": "🎯",
     "description": "Kotlin language features essential for Android development",
-    "file": "kotlin-essentials.json"
-  },
-  {
-    "id": "compose-basics",
-    "title": "Compose Basics",
-    "icon": "🎨",
-    "description": "Jetpack Compose fundamentals and state management",
-    "file": "compose-basics.json"
-  },
-  {
-    "id": "compose-advanced",
-    "title": "Compose Advanced",
-    "icon": "🚀",
-    "description": "LazyColumn, side effects, animations, and performance",
-    "file": "compose-advanced.json"
-  },
-  {
-    "id": "architecture",
-    "title": "Architecture Patterns",
-    "icon": "🏗️",
-    "description": "MVVM, Repository pattern, UiState, and dependency injection",
-    "file": "architecture.json"
-  },
-  {
-    "id": "navigation",
-    "title": "Navigation",
-    "icon": "🧭",
-    "description": "Jetpack Navigation Compose, routes, and arguments",
-    "file": "navigation.json"
-  },
-  {
-    "id": "networking",
-    "title": "Networking",
-    "icon": "🌐",
-    "description": "Retrofit, OkHttp, serialization, and API patterns",
-    "file": "networking.json"
-  },
-  {
-    "id": "auth-security",
-    "title": "Auth & Security",
-    "icon": "🔐",
-    "description": "Authentication, token storage, and security best practices",
-    "file": "auth-security.json"
-  },
-  {
-    "id": "data-storage",
-    "title": "Data & Storage",
-    "icon": "💾",
-    "description": "Room database, DataStore, and local persistence",
-    "file": "data-storage.json"
-  },
-  {
-    "id": "testing",
-    "title": "Testing",
-    "icon": "🧪",
-    "description": "Unit tests, UI tests, and testing coroutines",
-    "file": "testing.json"
-  },
-  {
-    "id": "performance",
-    "title": "Performance",
-    "icon": "⚡",
-    "description": "Recomposition optimization, memory leaks, and profiling",
-    "file": "performance.json"
-  },
-  {
-    "id": "gemini-app",
-    "title": "Build a Gemini App",
-    "icon": "✨",
-    "description": "Capstone: build an AI chat app with the Gemini API",
-    "file": "gemini-app.json"
-  },
-  {
-    "id": "coroutines-deep-dive",
-    "title": "Coroutines Deep Dive",
-    "icon": "🔄",
-    "description": "Scopes, structured concurrency, exception handling, and advanced patterns",
-    "file": "coroutines-deep-dive.json"
-  },
-  {
-    "id": "flow-stateflow",
-    "title": "Flow & StateFlow",
-    "icon": "🌊",
-    "description": "Cold flows, hot flows, StateFlow, SharedFlow, operators, and testing",
-    "file": "flow-stateflow.json"
-  },
-  {
-    "id": "compose-state-mastery",
-    "title": "Compose State Mastery",
-    "icon": "🎛️",
-    "description": "All state patterns: @Stable, @Immutable, SnapshotStateList, state hoisting, and when to use what",
-    "file": "compose-state-mastery.json"
-  },
-  {
-    "id": "mobile-system-design",
-    "title": "Mobile System Design",
-    "icon": "📐",
-    "description": "Design patterns for real-world mobile architecture: offline-first, image loading, feeds, and more",
-    "file": "mobile-system-design.json"
-  },
-  {
-    "id": "dsa-kotlin",
-    "title": "DSA in Kotlin",
-    "icon": "🧮",
-    "description": "Algorithm problems in Kotlin — the patterns that come up in Android interviews at top firms",
-    "file": "dsa-kotlin.json"
-  },
-  {
-    "id": "dependency-injection",
-    "title": "Dependency Injection Deep Dive",
-    "icon": "💉",
-    "description": "Hilt component hierarchy, scoping, assisted inject, multi-module DI, and testing",
-    "file": "dependency-injection.json"
-  },
-  {
-    "id": "modularization-build",
-    "title": "App Modularization & Build System",
-    "icon": "📦",
-    "description": "Module types, dependency graphs, version catalogs, convention plugins, KSP, and build optimization",
-    "file": "modularization-build.json"
-  },
-  {
-    "id": "android-internals",
-    "title": "Android Internals & Process Model",
-    "icon": "🔬",
-    "description": "Zygote, process death, SavedStateHandle, memory management, threading models, and app startup",
-    "file": "android-internals.json"
+    "file": "kotlin-essentials.json",
+    "category": "Foundations"
   },
   {
     "id": "kotlin-advanced",
     "title": "Advanced Kotlin",
     "icon": "🧬",
     "description": "Generics variance, reified types, value classes, DSLs, contracts, and delegation",
-    "file": "kotlin-advanced.json"
+    "file": "kotlin-advanced.json",
+    "category": "Foundations"
   },
   {
-    "id": "background-processing",
-    "title": "Background Processing & WorkManager",
-    "icon": "⚙️",
-    "description": "WorkManager, foreground services, background execution limits, and choosing the right API",
-    "file": "background-processing.json"
-  },
-  {
-    "id": "interop-adaptive",
-    "title": "View-Compose Interop & Adaptive Layouts",
-    "icon": "🔄",
-    "description": "ComposeView, AndroidView, ViewCompositionStrategy, WindowSizeClass, foldables, and predictive back",
-    "file": "interop-adaptive.json"
-  },
-  {
-    "id": "accessibility-quality",
-    "title": "Accessibility & Quality",
-    "icon": "♿",
-    "description": "TalkBack, Compose semantics, touch targets, Android Vitals, staged rollouts, and release management",
-    "file": "accessibility-quality.json"
-  },
-  {
-    "id": "binder-ipc",
-    "title": "Binder, Services & IPC",
-    "icon": "🔗",
-    "description": "Binder driver architecture, AIDL, Parcel serialization, service binding, and PendingIntent security",
-    "file": "binder-ipc.json"
-  },
-  {
-    "id": "tasks-intents-windows",
-    "title": "Tasks, Intents & Window Management",
-    "icon": "🪟",
-    "description": "Task affinity, Intent flags, IntentFilter matching, ViewRootImpl, window insets, and edge-to-edge",
-    "file": "tasks-intents-windows.json"
-  },
-  {
-    "id": "rendering-pipeline",
-    "title": "Rendering Pipeline: Views & Compose",
-    "icon": "🖌️",
-    "description": "Measure/layout/draw, Choreographer, hardware acceleration, LayoutNode, Compose three phases, and Skia",
-    "file": "rendering-pipeline.json"
+    "id": "android-internals",
+    "title": "Android Internals & Process Model",
+    "icon": "🔬",
+    "description": "Zygote, process death, SavedStateHandle, memory management, threading models, and app startup",
+    "file": "android-internals.json",
+    "category": "Foundations"
   },
   {
     "id": "handler-looper",
     "title": "Handler, Looper & MessageQueue",
     "icon": "📨",
     "description": "The threading backbone of Android: Looper event loops, MessageQueue scheduling, Handler dispatch, and sync barriers",
-    "file": "handler-looper.json"
-  },
-  {
-    "id": "message-bus-evolution",
-    "title": "Message Bus Evolution",
-    "icon": "📨",
-    "description": "The evolution of component communication in Android: from callbacks to SharedFlow",
-    "file": "message-bus-evolution.json"
-  },
-  {
-    "id": "hot-cold-threading",
-    "title": "Hot vs Cold Streams & Threading",
-    "icon": "🌡️",
-    "description": "Cold streams, hot streams, cold-to-hot conversion, threading models across RxJava/Flow/LiveData, backpressure, and Channel vs SharedFlow",
-    "file": "hot-cold-threading.json"
-  },
-  {
-    "id": "lifecycle-components",
-    "title": "Lifecycle-Aware Components",
-    "icon": "🔁",
-    "description": "Activity/Fragment lifecycle, LifecycleObserver, lifecycleScope, repeatOnLifecycle, and lifecycle-aware collection",
-    "file": "lifecycle-components.json"
-  },
-  {
-    "id": "offline-first",
-    "title": "Offline-First Architecture",
-    "icon": "📴",
-    "description": "Room as single source of truth, sync with WorkManager, conflict resolution, and cache invalidation",
-    "file": "offline-first.json"
-  },
-  {
-    "id": "debugging-profiling",
-    "title": "Debugging & Profiling Tools",
-    "icon": "🔍",
-    "description": "Perfetto, LeakCanary, Android Studio Profiler, StrictMode, Layout Inspector, and systematic debugging",
-    "file": "debugging-profiling.json"
-  },
-  {
-    "id": "livedata-rxjava",
-    "title": "LiveData & RxJava Deep Comparison",
-    "icon": "📡",
-    "description": "RxJava types and patterns, LiveData lifecycle magic, full comparison, and migration to Flow/StateFlow",
-    "file": "livedata-rxjava.json"
+    "file": "handler-looper.json",
+    "category": "Threading & Concurrency"
   },
   {
     "id": "async-evolution",
     "title": "The Async Evolution in Android",
     "icon": "⏳",
     "description": "Complete timeline of async mechanisms from Thread to Coroutines — why each existed, why it was replaced, and what to use today",
-    "file": "async-evolution.json"
+    "file": "async-evolution.json",
+    "category": "Threading & Concurrency"
   },
   {
-    "id": "ui-responsiveness",
-    "title": "UI Responsiveness & RecyclerView vs Compose",
-    "icon": "🏎️",
-    "description": "Frame budgets, jank sources, layout performance, and RecyclerView pool-and-rebind vs LazyColumn compose-on-demand",
-    "file": "ui-responsiveness.json"
+    "id": "coroutines-deep-dive",
+    "title": "Coroutines Deep Dive",
+    "icon": "🔄",
+    "description": "Scopes, structured concurrency, exception handling, and advanced patterns",
+    "file": "coroutines-deep-dive.json",
+    "category": "Threading & Concurrency"
   },
   {
-    "id": "battery-power",
-    "title": "Battery & Power Management",
-    "icon": "🔋",
-    "description": "Doze mode, App Standby Buckets, background execution limits, foreground service types, and battery-efficient patterns",
-    "file": "battery-power.json"
+    "id": "background-processing",
+    "title": "Background Processing & WorkManager",
+    "icon": "⚙️",
+    "description": "WorkManager, foreground services, background execution limits, and choosing the right API",
+    "file": "background-processing.json",
+    "category": "Threading & Concurrency"
+  },
+  {
+    "id": "flow-stateflow",
+    "title": "Flow & StateFlow",
+    "icon": "🌊",
+    "description": "Cold flows, hot flows, StateFlow, SharedFlow, operators, and testing",
+    "file": "flow-stateflow.json",
+    "category": "Reactive Data & State"
+  },
+  {
+    "id": "livedata-rxjava",
+    "title": "LiveData & RxJava Deep Comparison",
+    "icon": "📡",
+    "description": "RxJava types and patterns, LiveData lifecycle magic, full comparison, and migration to Flow/StateFlow",
+    "file": "livedata-rxjava.json",
+    "category": "Reactive Data & State"
+  },
+  {
+    "id": "message-bus-evolution",
+    "title": "Message Bus Evolution",
+    "icon": "📨",
+    "description": "The evolution of component communication in Android: from callbacks to SharedFlow",
+    "file": "message-bus-evolution.json",
+    "category": "Reactive Data & State"
+  },
+  {
+    "id": "hot-cold-threading",
+    "title": "Hot vs Cold Streams & Threading",
+    "icon": "🌡️",
+    "description": "Cold streams, hot streams, cold-to-hot conversion, threading models across RxJava/Flow/LiveData, backpressure, and Channel vs SharedFlow",
+    "file": "hot-cold-threading.json",
+    "category": "Reactive Data & State"
+  },
+  {
+    "id": "lifecycle-components",
+    "title": "Lifecycle-Aware Components",
+    "icon": "🔁",
+    "description": "Activity/Fragment lifecycle, LifecycleObserver, lifecycleScope, repeatOnLifecycle, and lifecycle-aware collection",
+    "file": "lifecycle-components.json",
+    "category": "Lifecycle & Architecture"
+  },
+  {
+    "id": "architecture",
+    "title": "Architecture Patterns",
+    "icon": "🏗️",
+    "description": "MVVM, Repository pattern, UiState, and dependency injection",
+    "file": "architecture.json",
+    "category": "Lifecycle & Architecture"
+  },
+  {
+    "id": "dependency-injection",
+    "title": "Dependency Injection Deep Dive",
+    "icon": "💉",
+    "description": "Hilt component hierarchy, scoping, assisted inject, multi-module DI, and testing",
+    "file": "dependency-injection.json",
+    "category": "Lifecycle & Architecture"
+  },
+  {
+    "id": "offline-first",
+    "title": "Offline-First Architecture",
+    "icon": "📴",
+    "description": "Room as single source of truth, sync with WorkManager, conflict resolution, and cache invalidation",
+    "file": "offline-first.json",
+    "category": "Lifecycle & Architecture"
+  },
+  {
+    "id": "compose-basics",
+    "title": "Compose Basics",
+    "icon": "🎨",
+    "description": "Jetpack Compose fundamentals and state management",
+    "file": "compose-basics.json",
+    "category": "Jetpack Compose"
+  },
+  {
+    "id": "compose-advanced",
+    "title": "Compose Advanced",
+    "icon": "🚀",
+    "description": "LazyColumn, side effects, animations, and performance",
+    "file": "compose-advanced.json",
+    "category": "Jetpack Compose"
+  },
+  {
+    "id": "compose-state-mastery",
+    "title": "Compose State Mastery",
+    "icon": "🎛️",
+    "description": "All state patterns: @Stable, @Immutable, SnapshotStateList, state hoisting, and when to use what",
+    "file": "compose-state-mastery.json",
+    "category": "Jetpack Compose"
+  },
+  {
+    "id": "interop-adaptive",
+    "title": "View-Compose Interop & Adaptive Layouts",
+    "icon": "🔄",
+    "description": "ComposeView, AndroidView, ViewCompositionStrategy, WindowSizeClass, foldables, and predictive back",
+    "file": "interop-adaptive.json",
+    "category": "Jetpack Compose"
   },
   {
     "id": "themes-styles",
     "title": "Themes, Styles & Dark Mode",
     "icon": "🎨",
     "description": "View system theming, Compose MaterialTheme, custom design systems, dark mode, and Material You dynamic colors",
-    "file": "themes-styles.json"
+    "file": "themes-styles.json",
+    "category": "Theming & Resources"
   },
   {
     "id": "config-rro",
     "title": "Configuration Changes & RROs",
     "icon": "🔧",
     "description": "Config change triggers, state preservation strategies, resource qualifiers, and Runtime Resource Overlays",
-    "file": "config-rro.json"
+    "file": "config-rro.json",
+    "category": "Theming & Resources"
+  },
+  {
+    "id": "navigation",
+    "title": "Navigation",
+    "icon": "🧭",
+    "description": "Jetpack Navigation Compose, routes, and arguments",
+    "file": "navigation.json",
+    "category": "App Plumbing"
+  },
+  {
+    "id": "networking",
+    "title": "Networking",
+    "icon": "🌐",
+    "description": "Retrofit, OkHttp, serialization, and API patterns",
+    "file": "networking.json",
+    "category": "App Plumbing"
+  },
+  {
+    "id": "data-storage",
+    "title": "Data & Storage",
+    "icon": "💾",
+    "description": "Room database, DataStore, and local persistence",
+    "file": "data-storage.json",
+    "category": "App Plumbing"
+  },
+  {
+    "id": "auth-security",
+    "title": "Auth & Security",
+    "icon": "🔐",
+    "description": "Authentication, token storage, and security best practices",
+    "file": "auth-security.json",
+    "category": "App Plumbing"
+  },
+  {
+    "id": "binder-ipc",
+    "title": "Binder, Services & IPC",
+    "icon": "🔗",
+    "description": "Binder driver architecture, AIDL, Parcel serialization, service binding, and PendingIntent security",
+    "file": "binder-ipc.json",
+    "category": "Android Internals"
+  },
+  {
+    "id": "tasks-intents-windows",
+    "title": "Tasks, Intents & Window Management",
+    "icon": "🪟",
+    "description": "Task affinity, Intent flags, IntentFilter matching, ViewRootImpl, window insets, and edge-to-edge",
+    "file": "tasks-intents-windows.json",
+    "category": "Android Internals"
+  },
+  {
+    "id": "ui-responsiveness",
+    "title": "UI Responsiveness & RecyclerView vs Compose",
+    "icon": "🏎️",
+    "description": "Frame budgets, jank sources, layout performance, and RecyclerView pool-and-rebind vs LazyColumn compose-on-demand",
+    "file": "ui-responsiveness.json",
+    "category": "Performance & Debugging"
+  },
+  {
+    "id": "rendering-pipeline",
+    "title": "Rendering Pipeline: Views & Compose",
+    "icon": "🖌️",
+    "description": "Measure/layout/draw, Choreographer, hardware acceleration, LayoutNode, Compose three phases, and Skia",
+    "file": "rendering-pipeline.json",
+    "category": "Performance & Debugging"
+  },
+  {
+    "id": "performance",
+    "title": "Performance",
+    "icon": "⚡",
+    "description": "Recomposition optimization, memory leaks, and profiling",
+    "file": "performance.json",
+    "category": "Performance & Debugging"
+  },
+  {
+    "id": "debugging-profiling",
+    "title": "Debugging & Profiling Tools",
+    "icon": "🔍",
+    "description": "Perfetto, LeakCanary, Android Studio Profiler, StrictMode, Layout Inspector, and systematic debugging",
+    "file": "debugging-profiling.json",
+    "category": "Performance & Debugging"
+  },
+  {
+    "id": "battery-power",
+    "title": "Battery & Power Management",
+    "icon": "🔋",
+    "description": "Doze mode, App Standby Buckets, background execution limits, foreground service types, and battery-efficient patterns",
+    "file": "battery-power.json",
+    "category": "Performance & Debugging"
+  },
+  {
+    "id": "testing",
+    "title": "Testing",
+    "icon": "🧪",
+    "description": "Unit tests, UI tests, and testing coroutines",
+    "file": "testing.json",
+    "category": "Quality & Shipping"
+  },
+  {
+    "id": "accessibility-quality",
+    "title": "Accessibility & Quality",
+    "icon": "♿",
+    "description": "TalkBack, Compose semantics, touch targets, Android Vitals, staged rollouts, and release management",
+    "file": "accessibility-quality.json",
+    "category": "Quality & Shipping"
+  },
+  {
+    "id": "modularization-build",
+    "title": "App Modularization & Build System",
+    "icon": "📦",
+    "description": "Module types, dependency graphs, version catalogs, convention plugins, KSP, and build optimization",
+    "file": "modularization-build.json",
+    "category": "Quality & Shipping"
+  },
+  {
+    "id": "mobile-system-design",
+    "title": "Mobile System Design",
+    "icon": "📐",
+    "description": "Design patterns for real-world mobile architecture: offline-first, image loading, feeds, and more",
+    "file": "mobile-system-design.json",
+    "category": "Interview Prep"
+  },
+  {
+    "id": "dsa-kotlin",
+    "title": "DSA in Kotlin",
+    "icon": "🧮",
+    "description": "Algorithm problems in Kotlin — the patterns that come up in Android interviews at top firms",
+    "file": "dsa-kotlin.json",
+    "category": "Interview Prep"
+  },
+  {
+    "id": "gemini-app",
+    "title": "Build a Gemini App",
+    "icon": "✨",
+    "description": "Capstone: build an AI chat app with the Gemini API",
+    "file": "gemini-app.json",
+    "category": "Capstone Projects"
   }
 ]
