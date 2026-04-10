@@ -1,0 +1,204 @@
+{
+  "id": "livedata-rxjava",
+  "title": "LiveData & RxJava Deep Comparison",
+  "icon": "📡",
+  "description": "RxJava types and patterns, LiveData lifecycle magic, full comparison, and migration to Flow/StateFlow",
+  "references": [
+    {"title": "Android Developers — LiveData Overview", "url": "https://developer.android.com/topic/libraries/architecture/livedata", "type": "docs"},
+    {"title": "Android Developers — Migrate from LiveData to Flow", "url": "https://developer.android.com/topic/libraries/architecture/livedata#migrate", "type": "docs"},
+    {"title": "ReactiveX — Observable Types", "url": "https://reactivex.io/documentation/observable.html", "type": "docs"},
+    {"title": "Android Developers — Kotlin Flows on Android", "url": "https://developer.android.com/kotlin/flow", "type": "docs"},
+    {"title": "Jake Wharton — Why I stopped using RxJava", "url": "https://jakewharton.com/", "type": "article"}
+  ],
+  "lesson": "<h3>RxJava in Depth — The Five Observable Types</h3>\n<p>RxJava provides <b>five specialized types</b> for different emission patterns. Understanding which one to use is half the battle:</p>\n<table>\n<tr><th>Type</th><th>Emits</th><th>Use When</th><th>Example</th></tr>\n<tr><td><code>Observable&lt;T&gt;</code></td><td>0..N items, then completes or errors</td><td>Multiple results over time</td><td>Search suggestions, WebSocket messages</td></tr>\n<tr><td><code>Single&lt;T&gt;</code></td><td>Exactly 1 item or error</td><td>One-shot API call</td><td><code>api.getUser(id)</code></td></tr>\n<tr><td><code>Maybe&lt;T&gt;</code></td><td>0 or 1 item, then completes</td><td>Cache lookup (might miss)</td><td><code>cache.findUser(id)</code></td></tr>\n<tr><td><code>Completable</code></td><td>No items — just completes or errors</td><td>Side effect with no result</td><td><code>db.deleteUser(id)</code></td></tr>\n<tr><td><code>Flowable&lt;T&gt;</code></td><td>0..N items with <b>backpressure</b></td><td>High-throughput streams where consumer is slower than producer</td><td>Sensor data, file streaming</td></tr>\n</table>\n<div class=\"info-box\"><b>Observable vs Flowable:</b> Use <code>Observable</code> for UI events and low-volume streams. Use <code>Flowable</code> only when the producer can outpace the consumer (e.g., sensor data at 100Hz). Flowable adds overhead for backpressure strategies (BUFFER, DROP, LATEST, ERROR).</div>\n\n<hr class=\"section-divider\">\n<h3>The RxJava Pattern: The Four-Stage Pipeline</h3>\n<p>Every RxJava chain follows the same pattern. Think of it as a factory assembly line:</p>\n<div class=\"diagram\">subscribeOn(Schedulers.io())     ← Which thread PRODUCES data\n        │\n    operators                     ← Transform data (map, filter, flatMap...)\n        │\nobserveOn(AndroidSchedulers.mainThread())  ← Which thread RECEIVES data\n        │\n    subscribe { result → }        ← Consume the final result</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// Classic RxJava API call pattern</span>\napi.searchUsers(query)                         <span class=\"cmt\">// Returns Observable&lt;List&lt;User&gt;&gt;</span>\n    .subscribeOn(Schedulers.io())              <span class=\"cmt\">// Run network call on IO thread</span>\n    .map { users -> users.filter { it.active } } <span class=\"cmt\">// Transform</span>\n    .debounce(300, TimeUnit.MILLISECONDS)      <span class=\"cmt\">// Wait for typing pause</span>\n    .distinctUntilChanged()                    <span class=\"cmt\">// Skip duplicate queries</span>\n    .observeOn(AndroidSchedulers.mainThread()) <span class=\"cmt\">// Switch to main for UI</span>\n    .subscribe(\n        { users -> showResults(users) },       <span class=\"cmt\">// onNext</span>\n        { error -> showError(error) }          <span class=\"cmt\">// onError</span>\n    )</div>\n<div class=\"warn-box\"><b>subscribeOn vs observeOn confusion:</b> <code>subscribeOn</code> affects the <b>source</b> (upstream) — where data is produced. It only matters once, no matter where you place it. <code>observeOn</code> affects everything <b>downstream</b> — where data is consumed. Multiple <code>observeOn</code> calls switch threads at different points in the chain.</div>\n\n<h4>RxJava Error Handling</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// Error recovery operators</span>\napi.getUser(id)\n    .onErrorReturn { defaultUser }          <span class=\"cmt\">// Replace error with default</span>\n    .onErrorResumeNext { fallbackApi.get() } <span class=\"cmt\">// Switch to backup source</span>\n    .retry(3)                                <span class=\"cmt\">// Retry up to 3 times</span>\n    .retryWhen { errors ->\n        errors.zipWith(Observable.range(1, 3)) { _, i -> i }\n              .flatMap { Observable.timer(it.toLong(), TimeUnit.SECONDS) }\n    }                                        <span class=\"cmt\">// Exponential backoff (verbose!)</span>\n    .subscribe({ ... }, { ... })</div>\n\n<hr class=\"section-divider\">\n<h3>Why RxJava Fell Out of Favor</h3>\n<p>RxJava was revolutionary (2015-2019), but it came with serious costs that ultimately drove the ecosystem toward coroutines:</p>\n<div class=\"warn-box\"><b>The Five Pain Points:</b><br>\n<b>1. Memory leaks via CompositeDisposable:</b> Every subscription returns a <code>Disposable</code> you MUST manually manage. Forget to dispose in <code>onDestroy()</code>? Memory leak. This was the #1 source of bugs.<br><br>\n<b>2. Brutal learning curve:</b> RxJava has <b>400+ operators</b>. flatMap vs switchMap vs concatMap vs exhaustMap? mergeWith vs ambWith vs zipWith? New developers were paralyzed by choice.<br><br>\n<b>3. Binary size:</b> RxJava 2 adds ~2.4 MB to your APK. RxAndroid adds more. For many apps, this was significant.<br><br>\n<b>4. Unreadable stack traces:</b> An exception inside a flatMap produces a 30+ line stack trace through internal RxJava machinery. Finding your actual code is like finding a needle in a haystack.<br><br>\n<b>5. subscribeOn/observeOn confusion:</b> Placing them wrong produces subtle threading bugs that pass all tests but crash in production.</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// The CompositeDisposable boilerplate every Activity/Fragment needed</span>\nclass UserActivity : AppCompatActivity() {\n    private val disposables = CompositeDisposable()\n\n    override fun onCreate(savedInstanceState: Bundle?) {\n        disposables.add(\n            api.getUser(id)\n                .subscribeOn(Schedulers.io())\n                .observeOn(AndroidSchedulers.mainThread())\n                .subscribe({ updateUi(it) }, { showError(it) })\n        )\n    }\n\n    override fun onDestroy() {\n        super.onDestroy()\n        disposables.clear()  <span class=\"cmt\">// FORGET THIS → MEMORY LEAK</span>\n    }\n}</div>\n\n<hr class=\"section-divider\">\n<h3>LiveData in Depth</h3>\n<p><code>LiveData</code> is a lifecycle-aware observable data holder. It was Google's answer to RxJava's lifecycle problems:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// ViewModel exposes LiveData</span>\nclass UserViewModel : ViewModel() {\n    private val _user = MutableLiveData&lt;User&gt;()     <span class=\"cmt\">// Private mutable</span>\n    val user: LiveData&lt;User&gt; = _user                <span class=\"cmt\">// Public read-only</span>\n\n    fun loadUser(id: String) {\n        viewModelScope.launch {\n            val result = repository.getUser(id)\n            _user.value = result      <span class=\"cmt\">// setValue: MUST be on main thread</span>\n            _user.postValue(result)   <span class=\"cmt\">// postValue: works from ANY thread</span>\n        }\n    }\n}\n\n<span class=\"cmt\">// Fragment observes with lifecycle owner</span>\nclass UserFragment : Fragment() {\n    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n        viewModel.user.observe(viewLifecycleOwner) { user ->\n            <span class=\"cmt\">// Only called when Fragment is STARTED or RESUMED</span>\n            binding.nameText.text = user.name\n        }\n    }\n}</div>\n<div class=\"info-box\"><b>setValue vs postValue:</b><br>\n<code>setValue()</code> — synchronous, must be called from main thread. If you call it twice, observers see BOTH values.<br>\n<code>postValue()</code> — posts to main thread handler. If you call it twice quickly, observers may only see the LAST value (the first is overwritten before dispatch).</div>\n\n<hr class=\"section-divider\">\n<h3>LiveData Transformations</h3>\n<p>LiveData has a limited but useful set of transformation operators:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// map — transform the value (synchronous)</span>\nval userName: LiveData&lt;String&gt; = user.map { it.name }\n\n<span class=\"cmt\">// switchMap — transform to another LiveData (async)</span>\nval userPosts: LiveData&lt;List&lt;Post&gt;&gt; = userId.switchMap { id ->\n    repository.getPostsLiveData(id)   <span class=\"cmt\">// Returns LiveData&lt;List&lt;Post&gt;&gt;</span>\n}\n\n<span class=\"cmt\">// MediatorLiveData — combine multiple sources (verbose!)</span>\nval profileState = MediatorLiveData&lt;ProfileState&gt;()\ninit {\n    profileState.addSource(user) { u ->\n        profileState.value = ProfileState(\n            user = u,\n            posts = posts.value ?: emptyList()\n        )\n    }\n    profileState.addSource(posts) { p ->\n        profileState.value = ProfileState(\n            user = user.value ?: return@addSource,\n            posts = p\n        )\n    }\n}</div>\n<div class=\"warn-box\"><b>MediatorLiveData is painfully verbose.</b> Combining two LiveData sources is ~15 lines. Combining three or four becomes unmanageable. This was one of the strongest arguments for migrating to Flow, where <code>combine(flow1, flow2) { a, b -> }</code> does the same thing in one line.</div>\n\n<hr class=\"section-divider\">\n<h3>LiveData's Lifecycle Magic</h3>\n<p>The killer feature of LiveData is <b>automatic lifecycle awareness</b>:</p>\n<div class=\"diagram\">Fragment State:     CREATED → STARTED → RESUMED → STARTED → CREATED → DESTROYED\nLiveData dispatches:   ✗        ✓         ✓         ✓         ✗          ✗\n                                ↑                                        ↑\n                          Starts observing                     Auto-unsubscribes\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nKey behaviors:\n\n1. Only dispatches in STARTED or RESUMED state\n   → No crashes from updating a dead Fragment's views\n\n2. Replays the LATEST value to new observers\n   → Screen rotation: new Fragment immediately gets current data\n\n3. Auto-removes observer at DESTROYED\n   → No memory leaks, no CompositeDisposable needed</div>\n<div class=\"info-box\"><b>viewLifecycleOwner vs this:</b> In Fragments, ALWAYS use <code>viewLifecycleOwner</code>, not <code>this</code>. The Fragment can outlive its View (e.g., on the back stack). Using <code>this</code> means the old observer is never removed, and you get duplicate observers after each navigation return.</div>\n\n<hr class=\"section-divider\">\n<h3>Full Comparison: LiveData vs RxJava vs Flow</h3>\n<table>\n<tr><th>Feature</th><th>RxJava</th><th>LiveData</th><th>Flow / StateFlow</th></tr>\n<tr><td><b>Lifecycle-aware</b></td><td>No — manual dispose</td><td>Yes — built-in</td><td>Yes — via <code>repeatOnLifecycle</code></td></tr>\n<tr><td><b>Threading</b></td><td>subscribeOn / observeOn</td><td>Main thread only (postValue for bg)</td><td>flowOn (upstream only)</td></tr>\n<tr><td><b>Operators</b></td><td>400+ operators</td><td>map, switchMap, MediatorLiveData</td><td>~50 operators (map, filter, combine, flatMapLatest...)</td></tr>\n<tr><td><b>Backpressure</b></td><td>Flowable with strategies</td><td>No (always latest value)</td><td>Built into Flow (suspends producer)</td></tr>\n<tr><td><b>Testing</b></td><td>TestObserver, TestScheduler</td><td>InstantTaskExecutorRule</td><td>Turbine library, runTest</td></tr>\n<tr><td><b>Null safety</b></td><td>No (RxJava 2+ bans null)</td><td>Yes — allows null values</td><td>Yes — nullable generics</td></tr>\n<tr><td><b>Compose support</b></td><td><code>subscribeAsState()</code> (adapter)</td><td><code>observeAsState()</code></td><td><code>collectAsStateWithLifecycle()</code> (best)</td></tr>\n<tr><td><b>Error handling</b></td><td>onError callback, operators</td><td>No built-in error channel</td><td>catch { }, onCompletion { }</td></tr>\n<tr><td><b>Cold/Hot</b></td><td>Both (Observable=cold, Subject=hot)</td><td>Hot only</td><td>Both (Flow=cold, StateFlow=hot)</td></tr>\n<tr><td><b>Binary size</b></td><td>~2.4 MB</td><td>~100 KB (part of lifecycle)</td><td>~200 KB (part of coroutines)</td></tr>\n<tr><td><b>Stack traces</b></td><td>30+ lines, unreadable</td><td>Simple</td><td>Simple (sequential code)</td></tr>\n</table>\n\n<hr class=\"section-divider\">\n<h3>RxJava → Flow Migration Cheat Sheet</h3>\n<p>If your codebase uses RxJava, here's how each concept maps to Kotlin Flow:</p>\n<table>\n<tr><th>RxJava</th><th>Kotlin Flow Equivalent</th></tr>\n<tr><td><code>Observable.create { emitter -> }</code></td><td><code>flow { emit(value) }</code></td></tr>\n<tr><td><code>Single.just(value)</code></td><td><code>flowOf(value)</code> or <code>suspend fun</code></td></tr>\n<tr><td><code>subscribeOn(Schedulers.io())</code></td><td><code>flowOn(Dispatchers.IO)</code></td></tr>\n<tr><td><code>observeOn(mainThread())</code></td><td>Not needed — collect on Main via scope</td></tr>\n<tr><td><code>flatMap { }</code></td><td><code>flatMapConcat { }</code></td></tr>\n<tr><td><code>switchMap { }</code></td><td><code>flatMapLatest { }</code></td></tr>\n<tr><td><code>CompositeDisposable</code></td><td>Structured concurrency (scope cancellation)</td></tr>\n<tr><td><code>BehaviorSubject</code></td><td><code>MutableStateFlow</code></td></tr>\n<tr><td><code>PublishSubject</code></td><td><code>MutableSharedFlow</code></td></tr>\n<tr><td><code>ReplaySubject(1)</code></td><td><code>MutableSharedFlow(replay = 1)</code></td></tr>\n<tr><td><code>Flowable</code> (backpressure)</td><td><code>Flow</code> with <code>buffer()</code> / <code>conflate()</code></td></tr>\n<tr><td><code>.dispose()</code></td><td>Cancel the coroutine scope</td></tr>\n<tr><td><code>TestObserver</code></td><td>Turbine: <code>flow.test { }</code></td></tr>\n</table>\n<div class=\"lesson-code\"><span class=\"cmt\">// RxJava (before)</span>\nfun searchUsers(query: String): Observable&lt;List&lt;User&gt;&gt; =\n    Observable.create { emitter ->\n        val result = api.search(query)\n        emitter.onNext(result)\n        emitter.onComplete()\n    }\n\n<span class=\"cmt\">// Kotlin Flow (after)</span>\nfun searchUsers(query: String): Flow&lt;List&lt;User&gt;&gt; = flow {\n    val result = api.search(query)\n    emit(result)\n}</div>\n\n<hr class=\"section-divider\">\n<h3>LiveData → StateFlow Migration Pattern</h3>\n<p>Google now recommends <code>StateFlow</code> over <code>LiveData</code> for new code. Here's the migration pattern:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// ═══════ BEFORE: LiveData ═══════</span>\nclass UserViewModel : ViewModel() {\n    private val _uiState = MutableLiveData(UiState.Loading)\n    val uiState: LiveData&lt;UiState&gt; = _uiState\n\n    fun loadUser(id: String) {\n        viewModelScope.launch {\n            _uiState.value = UiState.Loading\n            try {\n                val user = repository.getUser(id)\n                _uiState.value = UiState.Success(user)\n            } catch (e: Exception) {\n                _uiState.value = UiState.Error(e.message)\n            }\n        }\n    }\n}\n\n<span class=\"cmt\">// Fragment (LiveData)</span>\nviewModel.uiState.observe(viewLifecycleOwner) { state ->\n    when (state) {\n        is UiState.Loading -> showLoading()\n        is UiState.Success -> showUser(state.user)\n        is UiState.Error -> showError(state.message)\n    }\n}\n\n<span class=\"cmt\">// ═══════ AFTER: StateFlow ═══════</span>\nclass UserViewModel : ViewModel() {\n    private val _uiState = MutableStateFlow&lt;UiState&gt;(UiState.Loading)\n    val uiState: StateFlow&lt;UiState&gt; = _uiState.asStateFlow()\n\n    fun loadUser(id: String) {\n        viewModelScope.launch {\n            _uiState.value = UiState.Loading\n            try {\n                val user = repository.getUser(id)\n                _uiState.value = UiState.Success(user)\n            } catch (e: Exception) {\n                _uiState.value = UiState.Error(e.message)\n            }\n        }\n    }\n}\n\n<span class=\"cmt\">// Fragment (StateFlow — lifecycle-safe collection)</span>\nviewLifecycleOwner.lifecycleScope.launch {\n    viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {\n        viewModel.uiState.collect { state ->\n            when (state) {\n                is UiState.Loading -> showLoading()\n                is UiState.Success -> showUser(state.user)\n                is UiState.Error -> showError(state.message)\n            }\n        }\n    }\n}\n\n<span class=\"cmt\">// Compose (StateFlow — simplest of all)</span>\n@Composable\nfun UserScreen(viewModel: UserViewModel) {\n    val state by viewModel.uiState.collectAsStateWithLifecycle()\n    when (state) {\n        is UiState.Loading -> LoadingIndicator()\n        is UiState.Success -> UserContent((state as UiState.Success).user)\n        is UiState.Error -> ErrorMessage((state as UiState.Error).message)\n    }\n}</div>\n<div class=\"info-box\"><b>Key differences after migration:</b><br>\n1. <code>StateFlow</code> requires an <b>initial value</b> (no null initial state ambiguity)<br>\n2. <code>StateFlow</code> uses <code>distinctUntilChanged</code> by default — won't re-emit the same value<br>\n3. <code>repeatOnLifecycle</code> replaces <code>observe(viewLifecycleOwner)</code> for lifecycle safety<br>\n4. In Compose, <code>collectAsStateWithLifecycle()</code> is the gold standard — it stops collection when the app is backgrounded</div>\n\n<h4>Combining Multiple Sources — LiveData vs Flow</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// LiveData: MediatorLiveData (verbose)</span>\nval profile = MediatorLiveData&lt;ProfileState&gt;()\nprofile.addSource(userLiveData) { user ->\n    profile.value = ProfileState(user, postsLiveData.value)\n}\nprofile.addSource(postsLiveData) { posts ->\n    profile.value = ProfileState(userLiveData.value, posts)\n}\n\n<span class=\"cmt\">// Flow: combine (clean)</span>\nval profile: StateFlow&lt;ProfileState&gt; = combine(\n    userFlow,\n    postsFlow\n) { user, posts ->\n    ProfileState(user, posts)\n}.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), initialState)</div>",
+  "questions": [
+    {
+      "id": "lr-1",
+      "type": "multiple-choice",
+      "title": "RxJava Observable Types",
+      "difficulty": "intermediate",
+      "description": "You need to call an API endpoint that returns a single user object. Which RxJava type is most appropriate?",
+      "options": [
+        "Observable<User> — it's the most common type",
+        "Single<User> — exactly one result or an error, perfect for API calls",
+        "Maybe<User> — in case the API returns null",
+        "Flowable<User> — for backpressure on network requests"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>Single&lt;User&gt;</code> explicitly models the contract: exactly one emission (the user) or an error. <code>Observable</code> would work but is semantically weaker — it implies there could be multiple emissions. <code>Maybe</code> is for when a result is genuinely optional (like a cache lookup). <code>Flowable</code>'s backpressure is irrelevant for a single API call.",
+      "hints": [
+        "Think about the emission contract — how many items will this endpoint return?",
+        "Each RxJava type encodes the cardinality in its type signature"
+      ]
+    },
+    {
+      "id": "lr-2",
+      "type": "what-does-this-do",
+      "title": "subscribeOn vs observeOn",
+      "difficulty": "intermediate",
+      "description": "What threads does each part of this chain run on?",
+      "code": "api.getUsers()                              // Line 1\n    .subscribeOn(Schedulers.io())            // Line 2\n    .map { users -> users.sortedBy { it.name } }  // Line 3\n    .observeOn(AndroidSchedulers.mainThread()) // Line 4\n    .filter { it.isNotEmpty() }              // Line 5\n    .subscribe { users -> showList(users) }  // Line 6",
+      "options": [
+        "Everything runs on IO thread",
+        "Lines 1-3 on IO thread, Lines 5-6 on main thread. subscribeOn sets the source thread, observeOn switches downstream.",
+        "Lines 1-2 on IO, Lines 3-6 on main thread",
+        "Each line runs on its own thread"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>subscribeOn</code> determines where the <b>source</b> (upstream) executes — it affects everything above it (Line 1: the API call) and everything before the first <code>observeOn</code> (Line 3: the map). <code>observeOn</code> switches the thread for everything <b>downstream</b> — Lines 5 and 6 run on the main thread. A common mistake is thinking <code>subscribeOn</code> only affects the line it's on.",
+      "hints": [
+        "subscribeOn affects the source and everything upstream",
+        "observeOn switches threads for everything downstream of it"
+      ]
+    },
+    {
+      "id": "lr-3",
+      "type": "fix-bug",
+      "title": "LiveData Memory Leak",
+      "difficulty": "intermediate",
+      "description": "This Fragment leaks its observer after configuration changes. Users report duplicate toasts appearing — one more toast per screen rotation. Fix the bug.",
+      "starterCode": "class NotificationFragment : Fragment() {\n\n    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n        super.onViewCreated(view, savedInstanceState)\n        \n        // BUG: Duplicate observers accumulate on rotation!\n        viewModel.notification.observe(this) { message ->\n            Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()\n        }\n    }\n}",
+      "checks": [
+        {
+          "pattern": "viewLifecycleOwner",
+          "message": "Use viewLifecycleOwner instead of 'this' in onViewCreated",
+          "required": true
+        }
+      ],
+      "solution": "class NotificationFragment : Fragment() {\n\n    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n        super.onViewCreated(view, savedInstanceState)\n        \n        viewModel.notification.observe(viewLifecycleOwner) { message ->\n            Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()\n        }\n    }\n}",
+      "explanation": "Using <code>this</code> (the Fragment) as the lifecycle owner means the observer is tied to the Fragment's lifecycle, not the View's lifecycle. When the Fragment is on the back stack, its View is destroyed but the Fragment survives. On return, <code>onViewCreated</code> is called again, adding a SECOND observer — the old one was never removed because the Fragment is still alive. Using <code>viewLifecycleOwner</code> ties the observer to the View's lifecycle, so it's automatically removed when the View is destroyed.",
+      "hints": [
+        "What lifecycle owner should you use inside onViewCreated?",
+        "Fragment lifecycle and View lifecycle are NOT the same — the Fragment outlives its View when on the back stack"
+      ]
+    },
+    {
+      "id": "lr-4",
+      "type": "multiple-choice",
+      "title": "setValue vs postValue",
+      "difficulty": "intermediate",
+      "description": "What is the output when this code runs?",
+      "code": "// Called from a background thread:\nfun updateFromBackground() {\n    _count.postValue(1)\n    _count.postValue(2)\n    _count.postValue(3)\n}",
+      "options": [
+        "Observer receives 1, 2, 3 in order",
+        "Observer receives only 3 — postValue overwrites pending values before they're dispatched",
+        "Observer receives 1 and 3",
+        "Crash: postValue cannot be called from a background thread"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>postValue()</code> posts a task to the main thread's message queue. If you call it multiple times before the main thread processes the first one, each call <b>overwrites</b> the pending value. Only the last value (3) is actually dispatched to observers. This is different from <code>setValue()</code>, which is synchronous and would dispatch each value immediately (but must be called on the main thread). If you need every value delivered, use <code>setValue()</code> on the main thread or switch to a <code>Channel</code>/<code>SharedFlow</code>.",
+      "hints": [
+        "postValue queues a task on the main thread handler",
+        "What happens when multiple values are posted before the main thread processes them?"
+      ]
+    },
+    {
+      "id": "lr-5",
+      "type": "fill-blank",
+      "title": "RxJava to Flow Migration",
+      "difficulty": "advanced",
+      "description": "Migrate this RxJava search stream to Kotlin Flow. Fill in the Flow equivalents.",
+      "code": "// RxJava (before):\n// searchSubject\n//     .debounce(300, TimeUnit.MILLISECONDS)\n//     .switchMap { query -> api.search(query) }\n//     .subscribeOn(Schedulers.io())\n//     .subscribe { results -> _results.value = results }\n\n// Kotlin Flow (after):\n___1___\n    .debounce(300)\n    .___2___ { query -> api.search(query) }\n    .___3___(Dispatchers.IO)\n    .collect { results -> _results.value = results }",
+      "blanks": [
+        {
+          "answer": [
+            "searchFlow",
+            "MutableSharedFlow",
+            "MutableStateFlow"
+          ],
+          "hint": "PublishSubject maps to MutableSharedFlow, BehaviorSubject maps to MutableStateFlow"
+        },
+        {
+          "answer": [
+            "flatMapLatest"
+          ],
+          "hint": "RxJava switchMap cancels the previous inner stream — which Flow operator does the same?"
+        },
+        {
+          "answer": [
+            "flowOn"
+          ],
+          "hint": "The Flow equivalent of subscribeOn — affects upstream execution context"
+        }
+      ],
+      "explanation": "RxJava's <code>switchMap</code> (cancels previous inner observable when a new one arrives) maps to Flow's <code>flatMapLatest</code>. <code>subscribeOn</code> maps to <code>flowOn</code>, which changes the upstream dispatcher. The Subject maps to <code>MutableSharedFlow</code> (for events) or <code>MutableStateFlow</code> (for state). Note that <code>flowOn</code> only affects operators above it (upstream), just like <code>subscribeOn</code>.",
+      "hints": [
+        "switchMap = cancel previous, use latest. What's the Flow operator with 'Latest' in its name?",
+        "flowOn changes the context for upstream operators"
+      ]
+    },
+    {
+      "id": "lr-6",
+      "type": "what-does-this-do",
+      "title": "LiveData Lifecycle Behavior",
+      "difficulty": "advanced",
+      "description": "A ViewModel sets a LiveData value while the Fragment is in the CREATED state (on the back stack). What happens when the user navigates back to this Fragment?",
+      "code": "// In ViewModel (called while Fragment is on back stack):\n_message.value = \"Hello from background!\"\n\n// In Fragment:\noverride fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n    viewModel.message.observe(viewLifecycleOwner) { msg ->\n        binding.textView.text = msg\n    }\n}",
+      "options": [
+        "The value is lost — LiveData only dispatches to active observers",
+        "The Fragment receives \"Hello from background!\" immediately upon returning to STARTED state — LiveData replays the latest value to new observers",
+        "The Fragment crashes because its View was destroyed",
+        "The value is queued and delivered in onResume()"
+      ],
+      "correctIndex": 1,
+      "explanation": "LiveData <b>always holds and replays the latest value</b>. When the Fragment returns from the back stack, a new View is created, <code>onViewCreated</code> runs again, and the observer is registered anew. Since the LiveData already has a value (\"Hello from background!\"), it immediately dispatches it to the new observer once the lifecycle reaches STARTED. This is the \"sticky\" behavior of LiveData — it's a feature for state (you always want the latest data), but a problem for one-shot events (toasts, navigation) which led to the infamous \"SingleLiveEvent\" hack.",
+      "hints": [
+        "LiveData stores the latest value — does it care when it was set?",
+        "What happens when a new observer is added to a LiveData that already has a value?"
+      ]
+    },
+    {
+      "id": "lr-7",
+      "type": "fix-bug",
+      "title": "LiveData to StateFlow Migration",
+      "difficulty": "advanced",
+      "description": "This LiveData-to-StateFlow migration compiles but has a subtle lifecycle bug. The UI keeps updating even when the app is in the background, wasting battery. Fix it.",
+      "starterCode": "class UserFragment : Fragment() {\n    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n        super.onViewCreated(view, savedInstanceState)\n        \n        // BUG: Keeps collecting even when app is backgrounded!\n        viewLifecycleOwner.lifecycleScope.launch {\n            viewModel.uiState.collect { state ->\n                updateUi(state)\n            }\n        }\n    }\n}",
+      "checks": [
+        {
+          "pattern": "repeatOnLifecycle",
+          "message": "Wrap collection in repeatOnLifecycle to respect lifecycle state",
+          "required": true
+        },
+        {
+          "pattern": "STARTED|RESUMED",
+          "message": "Specify the minimum lifecycle state for collection",
+          "required": true
+        }
+      ],
+      "solution": "class UserFragment : Fragment() {\n    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n        super.onViewCreated(view, savedInstanceState)\n        \n        viewLifecycleOwner.lifecycleScope.launch {\n            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {\n                viewModel.uiState.collect { state ->\n                    updateUi(state)\n                }\n            }\n        }\n    }\n}",
+      "explanation": "Without <code>repeatOnLifecycle</code>, the <code>collect</code> call runs continuously even when the app is in the background. Unlike LiveData (which automatically pauses dispatch when the observer is not at least STARTED), Flow's <code>collect</code> is not lifecycle-aware by itself. <code>repeatOnLifecycle(Lifecycle.State.STARTED)</code> starts collection when the lifecycle reaches STARTED and cancels it when it drops below STARTED — restarting on return. This mirrors LiveData's built-in behavior.",
+      "hints": [
+        "LiveData automatically stops dispatching in CREATED state. Flow's collect does not — what API adds this behavior?",
+        "The collection should start at STARTED and stop below STARTED"
+      ]
+    },
+    {
+      "id": "lr-8",
+      "type": "trivia",
+      "title": "Why Google Recommends StateFlow Over LiveData",
+      "difficulty": "advanced",
+      "description": "Name at least three reasons why Google now recommends StateFlow/Flow over LiveData for new Android projects.",
+      "keywords": [
+        "combine",
+        "operator",
+        "transform",
+        "compose",
+        "lifecycle",
+        "thread",
+        "null",
+        "initial",
+        "testing",
+        "multiplatform",
+        "KMP",
+        "coroutine"
+      ],
+      "answer": "Google recommends StateFlow over LiveData because: (1) Flow has rich operators (combine, flatMapLatest, debounce, distinctUntilChanged) while LiveData has only map, switchMap, and verbose MediatorLiveData. (2) StateFlow requires an initial value, eliminating the nullable-initial-state problem in LiveData. (3) StateFlow integrates natively with coroutines and is Kotlin Multiplatform compatible. (4) collectAsStateWithLifecycle() is the recommended Compose integration, whereas observeAsState() is considered legacy. (5) Flow supports cold streams for one-shot operations, while LiveData is always hot. (6) Testing Flows with Turbine is more expressive than testing LiveData.",
+      "explanation": "LiveData was designed in the Java era (2017) as a simpler alternative to RxJava. Now that Kotlin coroutines and Flow are mature, LiveData's limited operator set and Java-era design show their age. Flow and StateFlow cover LiveData's lifecycle awareness (via repeatOnLifecycle / collectAsStateWithLifecycle) while offering a far richer API. LiveData remains in maintenance mode — functional but not evolving.",
+      "hints": [
+        "Think about: operators, Compose support, KMP, initial value, testing",
+        "What can Flow do that LiveData cannot?"
+      ]
+    }
+  ]
+}

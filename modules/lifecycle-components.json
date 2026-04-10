@@ -1,0 +1,189 @@
+{
+  "id": "lifecycle-components",
+  "title": "Lifecycle-Aware Components",
+  "icon": "🔁",
+  "description": "Activity/Fragment lifecycle, LifecycleObserver, lifecycleScope, repeatOnLifecycle, and lifecycle-aware collection",
+  "references": [
+    {"title": "Android Developers — Lifecycle-Aware Components", "url": "https://developer.android.com/topic/libraries/architecture/lifecycle", "type": "docs"},
+    {"title": "Android Developers — Collect Flows Safely", "url": "https://developer.android.com/kotlin/flow/stateflow-and-sharedflow#lifecycle", "type": "docs"},
+    {"title": "Manuel Vivo — repeatOnLifecycle API Design Story", "url": "https://medium.com/androiddevelopers/repeatonlifecycle-api-design-story-8670d76a09e4", "type": "article"},
+    {"title": "Android Developers — ProcessLifecycleOwner", "url": "https://developer.android.com/reference/androidx/lifecycle/ProcessLifecycleOwner", "type": "docs"}
+  ],
+  "lesson": "<h3>Activity & Fragment Lifecycle States</h3>\n<p>Every Activity and Fragment passes through a finite set of <b>lifecycle states</b>. The Lifecycle library models these as an enum with transitions triggered by <b>events</b>:</p>\n<div class=\"diagram\">                    INITIALIZED\n                         │\n                    ON_CREATE\n                         │\n                         ▼\n                      CREATED\n                         │\n                    ON_START\n                         │\n                         ▼\n                      STARTED\n                         │\n                    ON_RESUME\n                         │\n                         ▼\n                      RESUMED  ◄── fully visible, interactive\n                         │\n                    ON_PAUSE\n                         │\n                         ▼\n                      STARTED  ◄── visible but not focused\n                         │\n                    ON_STOP\n                         │\n                         ▼\n                      CREATED  ◄── not visible\n                         │\n                    ON_DESTROY\n                         │\n                         ▼\n                     DESTROYED</div>\n<div class=\"info-box\"><b>States vs Events:</b> States are nodes (CREATED, STARTED, RESUMED). Events are edges (ON_CREATE, ON_START, ON_RESUME). An observer reacts to <b>events</b>, and you check <b>states</b> to know where you are.</div>\n\n<hr class=\"section-divider\">\n<h3>The Old Way: Imperative onResume/onPause</h3>\n<p>Before lifecycle-aware components, every resource that needed start/stop was manually wired in the Activity:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// The OLD imperative way — boilerplate and leak-prone</span>\nclass OldActivity : AppCompatActivity() {\n    private lateinit var locationClient: FusedLocationClient\n    private lateinit var sensorManager: SensorManager\n    private lateinit var analyticsTracker: AnalyticsTracker\n    private var mediaPlayer: MediaPlayer? = null\n\n    override fun onResume() {\n        super.onResume()\n        locationClient.startUpdates()      <span class=\"cmt\">// register</span>\n        sensorManager.registerListener(this, accel, NORMAL)\n        analyticsTracker.onScreenVisible()\n        mediaPlayer?.start()\n    }\n\n    override fun onPause() {\n        super.onPause()\n        locationClient.stopUpdates()       <span class=\"cmt\">// unregister</span>\n        sensorManager.unregisterListener(this)\n        analyticsTracker.onScreenHidden()\n        mediaPlayer?.pause()\n    }\n    <span class=\"cmt\">// Problems:\n    // 1. Activity knows about EVERY component\n    // 2. Easy to forget one unregister → MEMORY LEAK\n    // 3. Order-dependent bugs (unregister before register completes)\n    // 4. Adding a new component means editing Activity</span>\n}</div>\n<div class=\"warn-box\"><b>Real-world consequence:</b> Forgetting to unregister a LocationListener in onPause means the GPS stays active after the user leaves — draining battery and leaking the Activity reference.</div>\n\n<hr class=\"section-divider\">\n<h3>LifecycleObserver — The Declarative Pattern</h3>\n<p>With <code>DefaultLifecycleObserver</code>, each component manages its own lifecycle. The Activity just adds observers — it doesn't know the details:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Self-contained component — manages its own start/stop</span>\nclass LocationObserver(\n    private val context: Context,\n    private val onLocation: (Location) -> Unit\n) : DefaultLifecycleObserver {\n\n    private val client = LocationServices.getFusedLocationProviderClient(context)\n\n    override fun onStart(owner: LifecycleOwner) {\n        client.requestLocationUpdates(request, callback, Looper.getMainLooper())\n    }\n\n    override fun onStop(owner: LifecycleOwner) {\n        client.removeLocationUpdates(callback)\n    }\n}\n\n<span class=\"cmt\">// Activity is now CLEAN — just adds observers</span>\nclass CleanActivity : AppCompatActivity() {\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        lifecycle.addObserver(LocationObserver(this) { loc -> updateMap(loc) })\n        lifecycle.addObserver(AnalyticsObserver(screenName = \"home\"))\n        lifecycle.addObserver(SensorObserver(sensorManager))\n        <span class=\"cmt\">// Each observer manages itself. Nothing to forget.</span>\n    }\n}</div>\n<div class=\"info-box\"><b>DefaultLifecycleObserver</b> replaced the annotation-based <code>@OnLifecycleEvent</code> (deprecated). It provides typed methods: <code>onCreate</code>, <code>onStart</code>, <code>onResume</code>, <code>onPause</code>, <code>onStop</code>, <code>onDestroy</code>.</div>\n\n<hr class=\"section-divider\">\n<h3>lifecycleScope — Auto-Cancelled Coroutines</h3>\n<p><code>lifecycleScope</code> is a <code>CoroutineScope</code> tied to the Lifecycle. It uses <code>SupervisorJob() + Dispatchers.Main.immediate</code> and is automatically <b>cancelled</b> when the Lifecycle reaches DESTROYED:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// lifecycleScope — safe coroutine launching in Activities/Fragments</span>\nclass MyFragment : Fragment() {\n    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n        super.onViewCreated(view, savedInstanceState)\n\n        viewLifecycleOwner.lifecycleScope.launch {\n            val data = repository.fetchData()\n            binding.textView.text = data.toString()\n            <span class=\"cmt\">// If Fragment is destroyed while fetching,\n            // the coroutine is CANCELLED — no crash, no leak</span>\n        }\n    }\n}</div>\n<div class=\"warn-box\"><b>Fragment gotcha:</b> Use <code>viewLifecycleOwner.lifecycleScope</code>, NOT <code>lifecycleScope</code> (which is the Fragment's own lifecycle). The view can be destroyed and recreated while the Fragment lives — using the wrong scope causes crashes when accessing destroyed views.</div>\n\n<hr class=\"section-divider\">\n<h3>repeatOnLifecycle — The Right Way to Collect Flows</h3>\n<p>This is the most important API in this module. <code>repeatOnLifecycle</code> launches a block when the lifecycle reaches a target state, <b>cancels it</b> when it drops below, and <b>relaunches</b> when it reaches the state again:</p>\n<div class=\"diagram\">repeatOnLifecycle(Lifecycle.State.STARTED)\n\nActivity lifecycle:    CREATED ──► STARTED ──► RESUMED ──► STARTED ──► CREATED ──► STARTED ──► RESUMED\n                                   │                                    │            │\n                              Block LAUNCHED                      Block CANCELLED   Block RELAUNCHED\n                              (flow collecting)                  (flow cancelled!)  (new collection)\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nTimeline:\n  User opens app    │ ▓▓▓▓▓▓▓▓▓ collecting ▓▓▓▓▓▓▓▓▓ │\n  User goes home    │                                  │ ░░ CANCELLED ░░ │\n  User returns      │                                                     │ ▓▓▓▓ collecting ▓▓▓▓ │\n\n  ▓ = block is running (collecting flow)\n  ░ = block is CANCELLED (not just suspended — fully stopped)</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// The standard pattern for collecting flows in UI</span>\nclass MyFragment : Fragment() {\n    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n        super.onViewCreated(view, savedInstanceState)\n\n        viewLifecycleOwner.lifecycleScope.launch {\n            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {\n                <span class=\"cmt\">// This block runs when STARTED, cancelled when below STARTED</span>\n                launch {\n                    viewModel.uiState.collect { state ->\n                        updateUi(state)\n                    }\n                }\n                launch {\n                    viewModel.events.collect { event ->\n                        handleEvent(event)\n                    }\n                }\n            }\n        }\n    }\n}</div>\n<div class=\"info-box\"><b>Key insight:</b> <code>repeatOnLifecycle</code> is a <b>suspend function</b> that suspends the calling coroutine, then manages inner coroutines by launching/cancelling them as the lifecycle moves. It never returns until the lifecycle is DESTROYED.</div>\n\n<hr class=\"section-divider\">\n<h3>Why launchWhenStarted Is Deprecated</h3>\n<p>The older <code>launchWhenStarted</code> / <code>launchWhenResumed</code> APIs <b>suspend</b> the coroutine when the lifecycle drops below the target state — but they do NOT cancel it. This is a critical difference:</p>\n<div class=\"diagram\">launchWhenStarted { flow.collect { } }         vs        repeatOnLifecycle(STARTED) { flow.collect { } }\n──────────────────────────────────────                    ─────────────────────────────────────────────\n\nApp goes to background:\n  ├─ launchWhenStarted: coroutine SUSPENDED               ├─ repeatOnLifecycle: coroutine CANCELLED\n  │  └─ Flow producer still ACTIVE in memory               │  └─ Flow producer STOPPED, resources freed\n  │  └─ Upstream keeps emitting (wasted CPU/memory)         │  └─ No emissions, no wasted work\n  │  └─ Buffered emissions pile up                          │  └─ Clean restart when foregrounded\n  │                                                         │\n  ├─ Result: memory pressure, wasted work                   ├─ Result: efficient, no waste\n\nApp returns to foreground:\n  ├─ launchWhenStarted: resumes, processes buffered items   ├─ repeatOnLifecycle: fresh restart\n  └─ Stale data may flash on screen                         └─ Always shows current data</div>\n<div class=\"warn-box\"><b>Deprecation reason:</b> <code>launchWhenStarted</code> keeps upstream Flow producers alive while suspended. A LocationFlow or SensorFlow would keep producing values in the background — wasting battery and memory. <code>repeatOnLifecycle</code> cancels the entire collection, stopping upstream producers.</div>\n\n<hr class=\"section-divider\">\n<h3>STARTED vs RESUMED — When to Use Which</h3>\n<p>Both are valid target states for <code>repeatOnLifecycle</code>. The choice depends on what you're observing:</p>\n<table>\n<tr><th></th><th>STARTED</th><th>RESUMED</th></tr>\n<tr><td><b>Active when</b></td><td>Visible (including partially obscured)</td><td>Fully visible AND focused</td></tr>\n<tr><td><b>Inactive when</b></td><td>Not visible at all</td><td>Dialog overlay, multi-window unfocused, notification shade pulled</td></tr>\n<tr><td><b>Use for</b></td><td>UI updates, StateFlow collection, data loading</td><td>Camera preview, sensor reads, video playback</td></tr>\n<tr><td><b>Why</b></td><td>User can still see the UI behind a dialog — keep it updated</td><td>Camera/sensors should stop when Activity loses focus (save battery, avoid conflicts)</td></tr>\n</table>\n<div class=\"info-box\"><b>Rule of thumb:</b> Use <code>STARTED</code> for <b>most</b> UI data collection. Use <code>RESUMED</code> only for resources that should stop when the Activity is not the focused foreground window (camera, microphone, accelerometer).</div>\n\n<hr class=\"section-divider\">\n<h3>flowWithLifecycle Extension</h3>\n<p>If you only have a single Flow to collect, <code>flowWithLifecycle</code> is a convenient operator that wraps <code>repeatOnLifecycle</code> internally:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Single flow — flowWithLifecycle is simpler syntax</span>\nviewLifecycleOwner.lifecycleScope.launch {\n    viewModel.uiState\n        .flowWithLifecycle(viewLifecycleOwner.lifecycle, Lifecycle.State.STARTED)\n        .collect { state ->\n            updateUi(state)\n        }\n}\n\n<span class=\"cmt\">// Under the hood, flowWithLifecycle does this:</span>\nfun &lt;T&gt; Flow&lt;T&gt;.flowWithLifecycle(\n    lifecycle: Lifecycle,\n    minActiveState: Lifecycle.State = Lifecycle.State.STARTED\n): Flow&lt;T&gt; = callbackFlow {\n    lifecycle.repeatOnLifecycle(minActiveState) {\n        this@flowWithLifecycle.collect { send(it) }\n    }\n    close()\n}</div>\n<div class=\"warn-box\"><b>Pitfall:</b> Do NOT chain multiple <code>flowWithLifecycle</code> calls — each one creates its own <code>repeatOnLifecycle</code> block. For multiple flows, use a single <code>repeatOnLifecycle</code> with multiple <code>launch</code> blocks inside.</div>\n\n<hr class=\"section-divider\">\n<h3>ProcessLifecycleOwner — App-Level Foreground/Background</h3>\n<p><code>ProcessLifecycleOwner</code> provides a single Lifecycle for the entire application process. It reaches STARTED when <b>any</b> Activity is started, and drops to CREATED when <b>no</b> Activity is visible (app in background):</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Detect app foreground/background globally</span>\nclass MyApp : Application() {\n    override fun onCreate() {\n        super.onCreate()\n        ProcessLifecycleOwner.get().lifecycle.addObserver(\n            object : DefaultLifecycleObserver {\n                override fun onStart(owner: LifecycleOwner) {\n                    Log.d(\"App\", \"App is in FOREGROUND\")\n                    analytics.trackAppForeground()\n                }\n                override fun onStop(owner: LifecycleOwner) {\n                    Log.d(\"App\", \"App is in BACKGROUND\")\n                    analytics.trackAppBackground()\n                    syncPendingData()\n                }\n            }\n        )\n    }\n}</div>\n<div class=\"info-box\"><b>Note:</b> <code>ProcessLifecycleOwner</code> never dispatches <code>ON_DESTROY</code>. The process Lifecycle only goes between CREATED (background) and RESUMED (foreground). Use it for analytics, socket connect/disconnect, or pausing background sync.</div>\n\n<hr class=\"section-divider\">\n<h3>Side-by-Side: Old Imperative vs New Declarative</h3>\n<div class=\"diagram\">OLD: Imperative (Activity owns everything)       NEW: Declarative (components own themselves)\n────────────────────────────────────────          ──────────────────────────────────────────\n\nclass MyActivity {                                class MyActivity {\n  val loc = LocationClient()                        override fun onCreate() {\n  val sensor = SensorManager()                          lifecycle.addObserver(LocationObserver())\n  val analytics = Analytics()                           lifecycle.addObserver(SensorObserver())\n                                                        lifecycle.addObserver(AnalyticsObserver())\n  onResume() {                                      }\n    loc.start()                                   }  // Activity doesn't know start/stop details\n    sensor.register()\n    analytics.trackVisible()                      class LocationObserver : DefaultLifecycleObserver {\n  }                                                   onStart()  { client.requestUpdates() }\n                                                      onStop()   { client.removeUpdates() }\n  onPause() {                                     }  // Self-contained. Testable. Reusable.\n    loc.stop()\n    sensor.unregister()                           // Flow collection:\n    analytics.trackHidden()                       lifecycleScope.launch {\n  }                                                   repeatOnLifecycle(STARTED) {\n}                                                         viewModel.uiState.collect { updateUi(it) }\n                                                      }\n// Problems: coupling, forgetting                 }\n// unregister, Activity bloat                     // Problems: none. Automatic. Clean.</div>",
+  "questions": [
+    {
+      "id": "lc-1",
+      "type": "multiple-choice",
+      "title": "repeatOnLifecycle Behavior",
+      "difficulty": "intermediate",
+      "description": "What happens to the block inside <code>repeatOnLifecycle(STARTED)</code> when the user presses the Home button (Activity goes to background)?",
+      "options": [
+        "The block is suspended and resumes when the user returns",
+        "The block is cancelled entirely — all child coroutines and upstream Flow producers stop. When the user returns, the block is relaunched from scratch",
+        "The block keeps running in the background",
+        "The block is cancelled and never relaunched"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>repeatOnLifecycle</code> <b>cancels</b> the block when the lifecycle drops below the target state. This is not a suspend — it's a full cancellation. Upstream Flow producers (location, sensors, network) are stopped, freeing resources. When the lifecycle re-enters STARTED, the block is launched fresh. This is the key advantage over the deprecated <code>launchWhenStarted</code>.",
+      "hints": [
+        "Think about the difference between suspending and cancelling",
+        "What happens to a Flow producer when its collector is cancelled?"
+      ]
+    },
+    {
+      "id": "lc-2",
+      "type": "multiple-choice",
+      "title": "launchWhenStarted vs repeatOnLifecycle",
+      "difficulty": "advanced",
+      "description": "Why was <code>launchWhenStarted</code> deprecated in favor of <code>repeatOnLifecycle</code>?",
+      "options": [
+        "launchWhenStarted crashed on configuration changes",
+        "launchWhenStarted only suspends the coroutine when below STARTED — upstream Flow producers keep running, wasting CPU, memory, and battery. repeatOnLifecycle cancels entirely, stopping producers",
+        "launchWhenStarted does not work with StateFlow",
+        "launchWhenStarted is slower due to thread switching overhead"
+      ],
+      "correctIndex": 1,
+      "explanation": "When <code>launchWhenStarted</code> suspends, the collector pauses but the <b>upstream producer</b> (e.g., a LocationFlow) keeps emitting values. Those emissions are buffered in memory, wasting CPU cycles and battery. When the user returns, stale buffered data may flash on screen. <code>repeatOnLifecycle</code> solves this by cancelling the entire collection chain — stopping upstream producers and freeing all resources.",
+      "hints": [
+        "Think about what happens to a Flow producer when the collector is suspended vs cancelled",
+        "Where do emitted values go if nobody is collecting?"
+      ]
+    },
+    {
+      "id": "lc-3",
+      "type": "what-does-this-do",
+      "title": "DefaultLifecycleObserver in Action",
+      "difficulty": "intermediate",
+      "description": "What is the output sequence when this Activity is opened, partially obscured by a dialog, the dialog is dismissed, then the user presses Back to finish the Activity?",
+      "code": "class LogObserver : DefaultLifecycleObserver {\n    override fun onCreate(owner: LifecycleOwner)  { Log.d(\"LC\", \"CREATE\") }\n    override fun onStart(owner: LifecycleOwner)   { Log.d(\"LC\", \"START\") }\n    override fun onResume(owner: LifecycleOwner)  { Log.d(\"LC\", \"RESUME\") }\n    override fun onPause(owner: LifecycleOwner)   { Log.d(\"LC\", \"PAUSE\") }\n    override fun onStop(owner: LifecycleOwner)    { Log.d(\"LC\", \"STOP\") }\n    override fun onDestroy(owner: LifecycleOwner) { Log.d(\"LC\", \"DESTROY\") }\n}\n\nclass MyActivity : AppCompatActivity() {\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        lifecycle.addObserver(LogObserver())\n    }\n}",
+      "options": [
+        "CREATE → START → RESUME → PAUSE → RESUME → PAUSE → STOP → DESTROY",
+        "CREATE → START → RESUME → STOP → START → RESUME → PAUSE → STOP → DESTROY",
+        "CREATE → START → RESUME → PAUSE → STOP → DESTROY",
+        "CREATE → RESUME → PAUSE → RESUME → PAUSE → DESTROY"
+      ],
+      "correctIndex": 0,
+      "explanation": "When the Activity opens: CREATE → START → RESUME. When a dialog partially obscures it, the Activity is <b>paused</b> but still <b>started</b> (visible), so only PAUSE fires. When the dialog is dismissed: RESUME. When the user presses Back: PAUSE → STOP → DESTROY. A dialog does NOT trigger onStop because the Activity is still visible behind it.",
+      "hints": [
+        "A dialog overlay causes onPause but NOT onStop — the Activity is still visible",
+        "STARTED means visible, RESUMED means visible AND focused"
+      ]
+    },
+    {
+      "id": "lc-4",
+      "type": "fix-bug",
+      "title": "Unsafe Flow Collection",
+      "difficulty": "intermediate",
+      "description": "This Fragment collects a Flow without lifecycle awareness. When the app goes to the background, the Flow keeps emitting and updating views — wasting resources and potentially crashing. Fix it to use the recommended pattern.",
+      "starterCode": "class UserFragment : Fragment() {\n    private val viewModel: UserViewModel by viewModels()\n\n    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n        super.onViewCreated(view, savedInstanceState)\n\n        // BUG: This keeps collecting even when the app is in background!\n        lifecycleScope.launch {\n            viewModel.userState.collect { state ->\n                binding.userName.text = state.name\n                binding.userAvatar.load(state.avatarUrl)\n            }\n        }\n    }\n}",
+      "checks": [
+        {
+          "pattern": "repeatOnLifecycle",
+          "message": "Use repeatOnLifecycle to make collection lifecycle-aware",
+          "required": true
+        },
+        {
+          "pattern": "viewLifecycleOwner",
+          "message": "Use viewLifecycleOwner (not this or lifecycleScope directly) in Fragments",
+          "required": true
+        },
+        {
+          "pattern": "STARTED",
+          "message": "Use Lifecycle.State.STARTED for UI data collection",
+          "required": true
+        }
+      ],
+      "solution": "class UserFragment : Fragment() {\n    private val viewModel: UserViewModel by viewModels()\n\n    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n        super.onViewCreated(view, savedInstanceState)\n\n        viewLifecycleOwner.lifecycleScope.launch {\n            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {\n                viewModel.userState.collect { state ->\n                    binding.userName.text = state.name\n                    binding.userAvatar.load(state.avatarUrl)\n                }\n            }\n        }\n    }\n}",
+      "explanation": "The fix wraps the collection in <code>repeatOnLifecycle(STARTED)</code>, which cancels the collection when the Fragment goes below STARTED (not visible). This stops the upstream Flow producer, saving battery and memory. Using <code>viewLifecycleOwner</code> ensures the scope is tied to the view lifecycle, not the Fragment lifecycle — preventing crashes from accessing destroyed views.",
+      "hints": [
+        "You need two things: a lifecycle-aware collection API, and the correct lifecycle owner for Fragments",
+        "In Fragments, the view can be destroyed while the Fragment itself lives on"
+      ]
+    },
+    {
+      "id": "lc-5",
+      "type": "multiple-choice",
+      "title": "STARTED vs RESUMED Target State",
+      "difficulty": "intermediate",
+      "description": "You are building a video calling app. The camera preview should stop when the user pulls down the notification shade or a dialog appears. Which target state should you use?",
+      "code": "viewLifecycleOwner.lifecycleScope.launch {\n    viewLifecycleOwner.repeatOnLifecycle(/* ??? */) {\n        cameraManager.startPreview(surfaceView)\n    }\n}",
+      "options": [
+        "Lifecycle.State.CREATED — to keep the camera running as long as possible",
+        "Lifecycle.State.STARTED — camera should run whenever the Activity is visible",
+        "Lifecycle.State.RESUMED — camera should stop when the Activity loses focus (dialog, notification shade)",
+        "Lifecycle.State.INITIALIZED — to start camera as early as possible"
+      ],
+      "correctIndex": 2,
+      "explanation": "Camera resources should be tied to <code>RESUMED</code>, not <code>STARTED</code>. When the user pulls down the notification shade, the Activity moves from RESUMED to STARTED (paused but visible). Using RESUMED as the target means the camera preview stops immediately — freeing the camera for other apps and saving battery. Regular UI data (text, lists) should use STARTED, but exclusive hardware resources (camera, microphone, sensors) should use RESUMED.",
+      "hints": [
+        "Think about what STARTED vs RESUMED means for the Activity's focus",
+        "The camera is an exclusive resource — what happens if another app needs it?"
+      ]
+    },
+    {
+      "id": "lc-6",
+      "type": "fix-bug",
+      "title": "Multiple flowWithLifecycle Anti-Pattern",
+      "difficulty": "advanced",
+      "description": "This code collects two Flows using <code>flowWithLifecycle</code>, but the second Flow never collects. Find and fix the bug.",
+      "starterCode": "viewLifecycleOwner.lifecycleScope.launch {\n    // BUG: Only the first flow ever collects!\n    viewModel.userState\n        .flowWithLifecycle(viewLifecycleOwner.lifecycle, Lifecycle.State.STARTED)\n        .collect { state -> updateUserUi(state) }\n\n    // This never executes because collect above never completes\n    viewModel.notifications\n        .flowWithLifecycle(viewLifecycleOwner.lifecycle, Lifecycle.State.STARTED)\n        .collect { notif -> showNotification(notif) }\n}",
+      "checks": [
+        {
+          "pattern": "repeatOnLifecycle",
+          "message": "Use repeatOnLifecycle with multiple launch blocks for multiple flows",
+          "required": true
+        },
+        {
+          "pattern": "launch",
+          "message": "Each flow collection needs its own launch block",
+          "required": true
+        }
+      ],
+      "solution": "viewLifecycleOwner.lifecycleScope.launch {\n    viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {\n        launch {\n            viewModel.userState.collect { state -> updateUserUi(state) }\n        }\n        launch {\n            viewModel.notifications.collect { notif -> showNotification(notif) }\n        }\n    }\n}",
+      "explanation": "<code>.collect { }</code> is a terminal operator that <b>suspends forever</b> (it never returns as long as the Flow is active). So the first <code>collect</code> blocks the coroutine, and the second one never executes. The fix uses <code>repeatOnLifecycle</code> with separate <code>launch</code> blocks so both collections run concurrently. Each gets its own coroutine inside the lifecycle-managed scope.",
+      "hints": [
+        "collect is a suspend function that never returns — what happens to the code below it?",
+        "How do you run two things concurrently in a coroutine?"
+      ]
+    },
+    {
+      "id": "lc-7",
+      "type": "multiple-choice",
+      "title": "ProcessLifecycleOwner",
+      "difficulty": "intermediate",
+      "description": "When does <code>ProcessLifecycleOwner</code> dispatch <code>ON_STOP</code>?",
+      "options": [
+        "When any Activity calls onStop()",
+        "When the last visible Activity in the app calls onStop() — meaning the entire app is now in the background",
+        "When the app process is killed by the system",
+        "Never — ProcessLifecycleOwner only dispatches ON_CREATE and ON_DESTROY"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>ProcessLifecycleOwner</code> tracks the <b>aggregate</b> lifecycle of all Activities. It dispatches ON_START when the <b>first</b> Activity becomes visible, and ON_STOP when the <b>last</b> Activity stops being visible (app goes to background). It never dispatches ON_DESTROY — the process lifecycle does not model process death. Use it for app-level foreground/background detection, not for individual Activity tracking.",
+      "hints": [
+        "Process lifecycle is about the whole app, not individual screens",
+        "When is an app considered 'in the background'?"
+      ]
+    },
+    {
+      "id": "lc-8",
+      "type": "what-does-this-do",
+      "title": "repeatOnLifecycle Restart Behavior",
+      "difficulty": "advanced",
+      "description": "The user opens the app, goes to home screen (background), then returns. How many times does the <code>Log.d</code> line execute?",
+      "code": "viewLifecycleOwner.lifecycleScope.launch {\n    viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {\n        Log.d(\"LIFECYCLE\", \"Block launched!\")\n        viewModel.dataFlow.collect { data ->\n            updateUi(data)\n        }\n    }\n}",
+      "options": [
+        "Once — the block only runs on first launch",
+        "Twice — the block is launched when STARTED, cancelled when backgrounded, then relaunched when the user returns",
+        "Three times — once for each lifecycle event (CREATE, START, RESUME)",
+        "Zero — repeatOnLifecycle suspends and the log never executes"
+      ],
+      "correctIndex": 1,
+      "explanation": "The block runs <b>twice</b>. First, when the Activity reaches STARTED (app opens). When the user goes to the home screen, the lifecycle drops below STARTED and the block is <b>cancelled</b>. When the user returns, the lifecycle re-enters STARTED and the block is <b>relaunched from the top</b> — meaning the Log.d executes again. This is the \"repeat\" in repeatOnLifecycle — it restarts on every re-entry to the target state.",
+      "hints": [
+        "What does 'repeat' in the name suggest?",
+        "After cancellation, the block starts fresh — from the very first line"
+      ]
+    }
+  ]
+}

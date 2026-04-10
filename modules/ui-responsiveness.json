@@ -1,0 +1,226 @@
+{
+  "id": "ui-responsiveness",
+  "title": "UI Responsiveness & RecyclerView vs Compose",
+  "icon": "🏎️",
+  "description": "Frame budgets, jank sources, layout performance, and RecyclerView pool-and-rebind vs LazyColumn compose-on-demand",
+  "references": [
+    {"title": "Android Developers — Slow rendering", "url": "https://developer.android.com/topic/performance/vitals/render", "type": "docs"},
+    {"title": "Android Developers — RecyclerView", "url": "https://developer.android.com/develop/ui/views/layout/recyclerview", "type": "docs"},
+    {"title": "Android Developers — Lazy lists in Compose", "url": "https://developer.android.com/develop/ui/compose/lists", "type": "docs"},
+    {"title": "Android Developers — Performance in Compose lists", "url": "https://developer.android.com/develop/ui/compose/performance/lists", "type": "docs"},
+    {"title": "DiffUtil — AndroidX Reference", "url": "https://developer.android.com/reference/androidx/recyclerview/widget/DiffUtil", "type": "docs"},
+    {"title": "Android GPU Rendering — Profiling", "url": "https://developer.android.com/topic/performance/rendering/inspect-gpu-rendering", "type": "docs"}
+  ],
+  "lesson": "<h3>Part 1 — Frame Budget & Jank</h3>\n\n<h4>The 16ms Frame Budget</h4>\n<p>At 60 fps the display refreshes every <b>16.67 ms</b>. Each frame must complete a fixed pipeline before the next VSYNC signal fires:</p>\n<div class=\"diagram\">VSYNC tick (every 16.67 ms)\n  │\n  ├─ 1. Input handling       (touch events, key events)\n  ├─ 2. Animation evaluation  (ObjectAnimator, ValueAnimator, Compose animate*)\n  ├─ 3. Measure               (View.onMeasure / LayoutNode.measure)\n  ├─ 4. Layout                (View.onLayout / LayoutNode.place)\n  ├─ 5. Draw                  (Canvas commands → display list / Compose draw phase)\n  └─ 6. GPU render + swap     (RenderThread sends display list to GPU → SurfaceFlinger)\n\nIf steps 1-6 exceed 16 ms → frame is DROPPED → user sees \"jank\"</div>\n<p>Choreographer schedules this pipeline. <code>doFrame()</code> fires once per VSYNC. If your work takes 25 ms, the next frame is skipped entirely — the user sees a stutter. Two missed frames (32 ms) is noticeable; three or more is clearly broken.</p>\n<div class=\"info-box\"><b>90/120 fps devices:</b> On a 90 Hz display the budget shrinks to <b>11.1 ms</b>. On 120 Hz it's <b>8.3 ms</b>. The same code that felt smooth at 60 fps may jank at 120 fps.</div>\n\n<hr class=\"section-divider\">\n<h4>What Steals Frame Time</h4>\n<table>\n<tr><th>Culprit</th><th>Cost</th><th>Why</th></tr>\n<tr><td><b>GC pauses</b></td><td>2-5 ms per minor GC</td><td>ART must stop-the-world briefly; allocating many short-lived objects in onDraw/onBind triggers this</td></tr>\n<tr><td><b>Layout inflation</b></td><td>1-10 ms per inflate</td><td>XML parsing, reflection to instantiate Views — never inflate inside onBindViewHolder</td></tr>\n<tr><td><b>Nested RelativeLayout</b></td><td>Exponential</td><td>RelativeLayout always double-measures children; nested 3 deep = 2^3 = 8 measure passes</td></tr>\n<tr><td><b>Main-thread I/O</b></td><td>Unbounded</td><td>SharedPreferences.getAll(), database queries, file reads — can block 50-500 ms</td></tr>\n<tr><td><b>Overdraw</b></td><td>GPU bound</td><td>Drawing the same pixel 3-4 times wastes fill rate; enable \"Show GPU Overdraw\" in Developer Options</td></tr>\n<tr><td><b>Large bitmap decode</b></td><td>5-50 ms</td><td>Decoding a 4000x3000 JPEG on the main thread; use BitmapFactory.Options.inSampleSize or Coil/Glide off-thread</td></tr>\n</table>\n\n<hr class=\"section-divider\">\n<h4>View System Layout Performance — Measure Passes</h4>\n<p>The number of <b>measure passes</b> a layout performs determines how expensive it is, especially when nested:</p>\n<table>\n<tr><th>Layout</th><th>Measure Passes</th><th>Notes</th></tr>\n<tr><td><code>LinearLayout</code></td><td><b>1 pass</b></td><td>Simple: measure each child once, stack them</td></tr>\n<tr><td><code>LinearLayout</code> <i>with weights</i></td><td><b>2 passes</b></td><td>First pass measures natural sizes, second pass distributes remaining space by weight</td></tr>\n<tr><td><code>RelativeLayout</code></td><td><b>Always 2 passes</b></td><td>Horizontal rules first, then vertical rules — must measure twice to resolve relative constraints</td></tr>\n<tr><td><code>ConstraintLayout</code></td><td><b>1 pass</b></td><td>Solves all constraints in a single pass using a linear constraint solver (Cassowary-like)</td></tr>\n</table>\n<div class=\"warn-box\"><b>Nesting multiplies exponentially:</b> If a 2-pass layout contains another 2-pass layout, the inner one is measured 2 times by its parent, each time doing 2 passes internally → <b>4 total</b>. Three levels deep: <b>2^3 = 8 passes</b>. This is why deeply nested RelativeLayouts cause severe jank.<br><br>\n<code>ConstraintLayout</code> was built to replace nested RelativeLayouts — it achieves complex layouts in a flat hierarchy with <b>one pass</b>.</div>\n\n<hr class=\"section-divider\">\n<h4>Compose Single-Pass Layout Enforcement</h4>\n<p>Compose enforces a strict rule: <b>each child can only be measured once</b>. If your custom layout calls <code>measurable.measure()</code> a second time on the same child, Compose throws an <code>IllegalStateException</code>:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// This CRASHES at runtime:</span>\nLayout(content = content) { measurables, constraints ->\n    val first = measurables[0].measure(constraints)   <span class=\"cmt\">// OK</span>\n    val second = measurables[0].measure(constraints)  <span class=\"cmt\">// IllegalStateException!</span>\n    layout(0, 0) {}\n}</div>\n<p>This is intentional. By making double-measurement impossible, Compose guarantees <b>O(n)</b> layout performance regardless of hierarchy depth. If you need to measure with different constraints, use <code>SubcomposeLayout</code> or <code>intrinsic measurements</code> (which add a pre-pass but don't break the single-measure rule).</p>\n\n<hr class=\"section-divider\">\n<h3>Part 2 — RecyclerView vs LazyColumn</h3>\n\n<h4>RecyclerView: Pool-and-Rebind Model</h4>\n<div class=\"diagram\">RecyclerView Lifecycle:\n\n1. CREATION  — onCreateViewHolder()  — inflate XML, find views\n   │           (expensive: ~5-10 ms per item type)\n   │\n   ▼\n2. POOL      — RecycledViewPool holds detached ViewHolders by viewType\n   │           (one pool per viewType, default max 5)\n   │\n   ▼\n3. BIND      — onBindViewHolder(holder, position)  — set data on existing views\n   │           (cheap: ~0.5-1 ms, no inflation)\n   │\n   ▼\n4. VISIBLE   — on screen, attached to RecyclerView\n   │\n   ▼\n5. DETACH    — scrolls off → goes BACK to pool (step 2)\n   └─ Pool full? → ViewHolder is DESTROYED (GC'd)</div>\n<p>The key insight: <b>creation is expensive, binding is cheap</b>. The pool ensures you pay the creation cost only a few times per view type. During a fast fling, RecyclerView just rebinds existing ViewHolders — no inflation, no GC pressure, steady frame rate.</p>\n\n<hr class=\"section-divider\">\n<h4>DiffUtil + Partial Payloads</h4>\n<p><code>DiffUtil</code> computes the minimal set of changes between two lists on a background thread. Combined with <b>partial payloads</b>, you can update only the specific views that changed within a ViewHolder — no full rebind needed.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// 1. Define the DiffUtil.ItemCallback</span>\nclass UserDiffCallback : DiffUtil.ItemCallback&lt;User&gt;() {\n    override fun areItemsTheSame(old: User, new: User): Boolean {\n        return old.id == new.id  <span class=\"cmt\">// same identity?</span>\n    }\n\n    override fun areContentsTheSame(old: User, new: User): Boolean {\n        return old == new  <span class=\"cmt\">// data class equals — all fields</span>\n    }\n\n    <span class=\"cmt\">// 2. Return WHICH fields changed (partial payload)</span>\n    override fun getChangePayload(old: User, new: User): Any? {\n        val changes = mutableSetOf&lt;String&gt;()\n        if (old.name != new.name) changes.add(\"name\")\n        if (old.avatar != new.avatar) changes.add(\"avatar\")\n        if (old.status != new.status) changes.add(\"status\")\n        return changes.ifEmpty { null }  <span class=\"cmt\">// null = full rebind</span>\n    }\n}\n\n<span class=\"cmt\">// 3. In the Adapter — handle partial payloads</span>\noverride fun onBindViewHolder(\n    holder: UserViewHolder,\n    position: Int,\n    payloads: MutableList&lt;Any&gt;  <span class=\"cmt\">// non-empty = partial update</span>\n) {\n    if (payloads.isEmpty()) {\n        <span class=\"cmt\">// Full bind — set all views</span>\n        onBindViewHolder(holder, position)\n        return\n    }\n\n    val changes = payloads[0] as Set&lt;*&gt;\n    val user = getItem(position)\n\n    <span class=\"cmt\">// Only update the views whose data actually changed</span>\n    if (\"name\" in changes) holder.nameView.text = user.name\n    if (\"avatar\" in changes) Glide.with(holder.avatar).load(user.avatar).into(holder.avatar)\n    if (\"status\" in changes) holder.statusBadge.setStatus(user.status)\n}</div>\n<div class=\"info-box\"><b>Why partial payloads matter:</b> Without payloads, changing a user's online status rebinds the entire ViewHolder — including reloading the avatar image. With payloads, you only toggle the status badge. On a chat list with 100 items changing status frequently, this eliminates dozens of unnecessary image loads per second.</div>\n\n<hr class=\"section-divider\">\n<h4>LazyColumn: Compose-on-Demand Model</h4>\n<div class=\"diagram\">LazyColumn Lifecycle:\n\n1. COMPOSE    — item enters viewport → composable function runs\n   │            (creates LayoutNodes, runs effects, allocates state)\n   │\n   ▼\n2. VISIBLE    — on screen, actively composed\n   │\n   ▼\n3. DISPOSE    — scrolls off → composable LEAVES composition entirely\n   │            (DisposableEffect onDispose runs, state lost unless remembered)\n   │\n   ▼\n4. RE-ENTRY   — scrolls back → composable runs FROM SCRATCH\n               (no pool, no rebind — full recomposition)\n\nThere is NO pool. There is NO ViewHolder cache.\nEvery appearance is a fresh composition.</div>\n\n<hr class=\"section-divider\">\n<h4>What <code>key</code> Does (and Doesn't Do)</h4>\n<p>A common misconception: <code>key</code> does NOT enable recycling. LazyColumn has no recycling. What <code>key</code> does:</p>\n<div class=\"lesson-code\">LazyColumn {\n    items(users, key = { it.id }) { user ->\n        UserCard(user)  <span class=\"cmt\">// state inside UserCard survives REORDERING</span>\n    }\n}\n\n<span class=\"cmt\">// Without key: items identified by INDEX</span>\n<span class=\"cmt\">// List [A, B, C] → delete A → [B, C]</span>\n<span class=\"cmt\">// Index 0 was A, now it's B → Compose thinks item 0 changed</span>\n<span class=\"cmt\">// → B gets A's remembered state (wrong!)</span>\n\n<span class=\"cmt\">// With key = { it.id }:</span>\n<span class=\"cmt\">// Compose knows B is still B regardless of position</span>\n<span class=\"cmt\">// → B keeps its own state, A's state is disposed</span></div>\n<div class=\"warn-box\"><b>key is for identity, not caching.</b> It tells Compose which item is which when the list is reordered, inserted into, or deleted from. It does NOT keep items alive off-screen. Items off-screen are still disposed and recomposed from scratch when they re-enter.</div>\n\n<hr class=\"section-divider\">\n<h4>Performance Comparison</h4>\n<table>\n<tr><th>Scenario</th><th>RecyclerView</th><th>LazyColumn</th></tr>\n<tr><td><b>First appearance</b></td><td>Inflate + bind (~5-10 ms first time, ~1 ms rebind)</td><td>Full composition (~2-5 ms, depends on composable complexity)</td></tr>\n<tr><td><b>Data change</b></td><td>DiffUtil + partial payload → update only changed views</td><td>Recomposition of affected items — skips unchanged composables if inputs are stable</td></tr>\n<tr><td><b>Fast fling</b></td><td>Pool provides pre-created ViewHolders → consistent bind-only cost</td><td>Must compose from scratch for each new item entering viewport → more GC, higher variance</td></tr>\n<tr><td><b>Memory</b></td><td>Pool holds ~5 ViewHolders per type (fixed ceiling)</td><td>Only visible items exist — lower baseline, but allocation spikes on fast scroll</td></tr>\n<tr><td><b>State preservation</b></td><td>Manual: save/restore in bind/recycle</td><td>Automatic with <code>rememberSaveable</code> + key</td></tr>\n</table>\n\n<hr class=\"section-divider\">\n<h4>When Each Wins</h4>\n<div class=\"diagram\">RecyclerView wins when:\n─────────────────────\n• Fast fling performance is critical (social feeds, messaging)\n• Partial payloads save significant work (chat status badges, like counts)\n• Constrained hardware (low-RAM devices, Wear OS with limited CPU)\n• Mixed view types with expensive creation (media players, maps)\n• You need prefetching control (LayoutManager.setItemPrefetchEnabled)\n\nLazyColumn wins when:\n─────────────────────\n• State management matters (expandable items, inline editing, selections)\n• Simpler code is more valuable than peak scroll perf\n• Items are lightweight composables (text-only lists, settings screens)\n• You're already fully in Compose (no interop overhead)\n• Animations and item transitions (animateItem modifier)</div>",
+  "questions": [
+    {
+      "id": "ur-1",
+      "type": "multiple-choice",
+      "title": "Frame Budget at 60 fps",
+      "difficulty": "intermediate",
+      "description": "At 60 fps, what is the approximate time budget for each frame, and what happens if you exceed it?",
+      "options": [
+        "33 ms per frame; exceeding it causes the frame to render at half quality",
+        "16.67 ms per frame; exceeding it causes the frame to be dropped (jank)",
+        "16.67 ms per frame; exceeding it causes the system to slow down the animation to compensate",
+        "8.3 ms per frame; exceeding it triggers a background thread to help render"
+      ],
+      "correctIndex": 1,
+      "explanation": "At 60 fps, the display refreshes every <b>1000 ms / 60 = 16.67 ms</b>. Choreographer fires <code>doFrame()</code> on each VSYNC. If your frame processing (input → animation → measure → layout → draw → GPU) takes longer than 16.67 ms, the frame is dropped entirely — the display shows the previous frame again. The user perceives this as a stutter or \"jank\". There is no graceful degradation; it's all-or-nothing per frame.",
+      "hints": [
+        "1000 ms / 60 frames = ?",
+        "The system doesn't slow down — it skips"
+      ]
+    },
+    {
+      "id": "ur-2",
+      "type": "multiple-choice",
+      "title": "Layout Measure Passes",
+      "difficulty": "intermediate",
+      "description": "You have a <code>RelativeLayout</code> containing a <code>LinearLayout</code> with <code>layout_weight</code>, which itself contains another <code>RelativeLayout</code>. How many measure passes does the innermost RelativeLayout undergo?",
+      "options": [
+        "2 passes — each layout measures independently",
+        "4 passes — RelativeLayout(2) x LinearLayout-weight(2), inner RelativeLayout measures itself 2 more times but that doesn't multiply",
+        "8 passes — outer RelativeLayout(2) x weighted LinearLayout(2) x inner RelativeLayout(2) = 2^3",
+        "6 passes — the passes add, not multiply: 2 + 2 + 2"
+      ],
+      "correctIndex": 2,
+      "explanation": "Measure passes <b>multiply</b> through nesting. The outer <code>RelativeLayout</code> measures its child (the LinearLayout) <b>2 times</b>. Each time, the weighted <code>LinearLayout</code> measures its child <b>2 times</b> (once for natural size, once for weight distribution). Each time, the inner <code>RelativeLayout</code> does <b>2 passes</b> internally. Total: 2 x 2 x 2 = <b>8 measure passes</b> for the innermost views. This exponential blowup is why <code>ConstraintLayout</code> (1 pass, flat hierarchy) was created.",
+      "hints": [
+        "Think about what happens when a parent measures a child — the child runs its FULL measure logic each time",
+        "RelativeLayout = 2, weighted LinearLayout = 2 — how does nesting combine these?"
+      ]
+    },
+    {
+      "id": "ur-3",
+      "type": "multiple-choice",
+      "title": "Compose Double Measure",
+      "difficulty": "intermediate",
+      "description": "In a Compose custom <code>Layout</code>, what happens if you call <code>measurable.measure(constraints)</code> twice on the same child?",
+      "options": [
+        "The second call returns a cached result from the first measurement",
+        "The second call re-measures with the new constraints, replacing the first result",
+        "Compose throws an IllegalStateException at runtime",
+        "The compiler prevents this — it won't compile"
+      ],
+      "correctIndex": 2,
+      "explanation": "Compose enforces a strict <b>single-measure rule</b>: each measurable can only be measured once per layout pass. Calling <code>measure()</code> a second time throws <code>IllegalStateException</code>. This is a deliberate design choice to guarantee O(n) layout performance. Unlike the View system where double-measuring is common (RelativeLayout, weighted LinearLayout), Compose makes it structurally impossible. If you need multiple measurement passes, use <code>SubcomposeLayout</code> or intrinsic measurements.",
+      "hints": [
+        "Compose's layout system was designed to prevent the exponential blowup that plagues the View system",
+        "This is a runtime check, not a compile-time one"
+      ]
+    },
+    {
+      "id": "ur-4",
+      "type": "what-does-this-do",
+      "title": "DiffUtil getChangePayload",
+      "difficulty": "advanced",
+      "description": "What does <code>getChangePayload</code> accomplish in this DiffUtil callback, and how does it affect the Adapter?",
+      "code": "class MessageDiff : DiffUtil.ItemCallback<Message>() {\n    override fun areItemsTheSame(old: Message, new: Message) = old.id == new.id\n    override fun areContentsTheSame(old: Message, new: Message) = old == new\n\n    override fun getChangePayload(old: Message, new: Message): Any? {\n        val changes = mutableSetOf<String>()\n        if (old.readCount != new.readCount) changes.add(\"readCount\")\n        if (old.reactions != new.reactions) changes.add(\"reactions\")\n        return changes.ifEmpty { null }\n    }\n}\n\n// In Adapter:\noverride fun onBindViewHolder(holder: VH, pos: Int, payloads: List<Any>) {\n    if (payloads.isEmpty()) { onBindViewHolder(holder, pos); return }\n    val changes = payloads[0] as Set<*>\n    val msg = getItem(pos)\n    if (\"readCount\" in changes) holder.readCount.text = \"${msg.readCount}\"\n    if (\"reactions\" in changes) holder.reactions.update(msg.reactions)\n}",
+      "options": [
+        "It has no effect — DiffUtil ignores getChangePayload and always does a full rebind",
+        "It identifies WHICH fields changed so the Adapter can update only those specific views instead of rebinding the entire ViewHolder",
+        "It caches the old data so the adapter can animate between old and new values",
+        "It tells DiffUtil to skip items where only minor fields changed"
+      ],
+      "correctIndex": 1,
+      "explanation": "When <code>areItemsTheSame</code> returns true (same item) but <code>areContentsTheSame</code> returns false (data changed), DiffUtil calls <code>getChangePayload</code>. The returned object (here, a set of field names) is passed to the 3-argument <code>onBindViewHolder</code> as a payload. The adapter checks which fields changed and updates <b>only those views</b>. Without payloads, changing a message's read count would rebind the entire row — reloading the avatar, re-rendering the message text, etc. With payloads, only the read count text view is updated.",
+      "hints": [
+        "Think about what happens to the payloads parameter in the 3-argument onBindViewHolder",
+        "Consider what work you SKIP by only updating changed fields"
+      ]
+    },
+    {
+      "id": "ur-5",
+      "type": "multiple-choice",
+      "title": "LazyColumn Disposal",
+      "difficulty": "intermediate",
+      "description": "In <code>LazyColumn</code>, what happens to an item's composable state when it scrolls off-screen and then scrolls back?",
+      "options": [
+        "The state is preserved in a pool like RecyclerView — the composable resumes where it left off",
+        "The composable is disposed when it leaves the viewport and recomposed from scratch when it re-enters — state is lost unless explicitly saved",
+        "The composable stays composed but becomes invisible — no disposal happens",
+        "Compose keeps the last 5 items cached, like RecyclerView's pool size"
+      ],
+      "correctIndex": 1,
+      "explanation": "LazyColumn has <b>no pool</b> and <b>no cache</b>. When an item scrolls off-screen, its composable <b>leaves composition entirely</b> — DisposableEffect cleanup runs, remembered state is discarded. When it scrolls back, the composable function runs <b>from scratch</b>: all <code>remember { }</code> blocks re-initialize, effects restart. To preserve state across disposal, use <code>rememberSaveable</code> combined with a stable <code>key</code>.",
+      "hints": [
+        "LazyColumn's model is fundamentally different from RecyclerView",
+        "Think about what 'leaving composition' means for remember { } blocks"
+      ]
+    },
+    {
+      "id": "ur-6",
+      "type": "multiple-choice",
+      "title": "What key Does in LazyColumn",
+      "difficulty": "advanced",
+      "description": "What does providing a <code>key</code> to <code>items()</code> in a LazyColumn accomplish?",
+      "options": [
+        "It enables ViewHolder-style recycling — items with the same key reuse each other's composition",
+        "It preserves item state across reordering by associating remembered state with the key instead of the positional index",
+        "It tells Compose to cache off-screen items with that key for faster re-entry",
+        "It groups items by key for section headers"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>key</code> provides a <b>stable identity</b> for items. Without it, Compose identifies items by index. If you delete item 0 from a list [A, B, C], item B moves to index 0 and inherits A's remembered state — clearly wrong. With <code>key = { it.id }</code>, Compose knows B is B regardless of its position. B keeps its own state, and A's state is properly disposed. <b>key does NOT enable recycling or caching.</b> Off-screen items are still disposed; key only ensures the correct state is associated with the correct item while it IS composed.",
+      "hints": [
+        "Think about what happens to state when a list item changes position",
+        "key is about identity, not performance"
+      ]
+    },
+    {
+      "id": "ur-7",
+      "type": "trivia",
+      "title": "Frame Budget Stealers",
+      "difficulty": "intermediate",
+      "description": "Name at least four things that commonly steal frame time on the main thread and explain why each is problematic for the 16 ms budget.",
+      "keywords": [
+        "GC",
+        "garbage collection",
+        "allocation",
+        "inflate",
+        "inflation",
+        "RelativeLayout",
+        "double measure",
+        "nested",
+        "main thread",
+        "I/O",
+        "SharedPreferences",
+        "overdraw",
+        "bitmap",
+        "decode"
+      ],
+      "answer": "Common frame-time stealers: (1) GC pauses — allocating many short-lived objects (e.g., in onDraw or onBind) triggers garbage collection, causing 2-5 ms stop-the-world pauses. (2) Layout inflation — inflating XML views involves parsing and reflection, costing 1-10 ms; inflating inside onBindViewHolder is especially bad. (3) Nested double-measure layouts — RelativeLayout always measures twice, and nesting multiplies exponentially (2^n), turning a simple layout into dozens of measure passes. (4) Main-thread I/O — SharedPreferences.getAll(), database queries, or file reads can block 50-500 ms, freezing the entire UI. (5) Overdraw — drawing the same pixel multiple times wastes GPU fill rate. (6) Large bitmap decoding — decoding a multi-megapixel image synchronously can take 5-50 ms.",
+      "explanation": "All six of these share one trait: they consume time on the main thread during the frame pipeline. Since Choreographer runs input, animation, measure, layout, and draw sequentially on the main thread, any one of these can push the total past 16 ms and drop a frame. The fix is different for each: object pooling or avoiding allocations for GC, ViewStub or AsyncLayoutInflater for inflation, ConstraintLayout for nesting, coroutines/IO dispatcher for blocking I/O, removing redundant backgrounds for overdraw, and Coil/Glide for bitmap loading.",
+      "hints": [
+        "Think about what happens during each phase: measure, layout, draw, and between frames",
+        "Some steal CPU time, some steal GPU time"
+      ]
+    },
+    {
+      "id": "ur-8",
+      "type": "fix-bug",
+      "title": "RecyclerView Partial Payload",
+      "difficulty": "advanced",
+      "description": "This adapter reloads the entire ViewHolder (including an expensive image) every time any field changes. Fix it using partial payloads so that changing only the like count does NOT reload the image.",
+      "starterCode": "class PostAdapter : ListAdapter<Post, PostVH>(PostDiff()) {\n    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): PostVH {\n        val view = LayoutInflater.from(parent.context)\n            .inflate(R.layout.item_post, parent, false)\n        return PostVH(view)\n    }\n\n    override fun onBindViewHolder(holder: PostVH, position: Int) {\n        val post = getItem(position)\n        holder.title.text = post.title\n        Glide.with(holder.image).load(post.imageUrl).into(holder.image) // Expensive!\n        holder.likeCount.text = \"${post.likes} likes\"\n    }\n}\n\nclass PostDiff : DiffUtil.ItemCallback<Post>() {\n    override fun areItemsTheSame(old: Post, new: Post) = old.id == new.id\n    override fun areContentsTheSame(old: Post, new: Post) = old == new\n    // BUG: No getChangePayload — every change does a full rebind\n}",
+      "checks": [
+        {
+          "pattern": "getChangePayload",
+          "message": "Override getChangePayload to identify which fields changed",
+          "required": true
+        },
+        {
+          "pattern": "payloads",
+          "message": "Handle the payloads parameter in onBindViewHolder",
+          "required": true
+        }
+      ],
+      "solution": "class PostAdapter : ListAdapter<Post, PostVH>(PostDiff()) {\n    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): PostVH {\n        val view = LayoutInflater.from(parent.context)\n            .inflate(R.layout.item_post, parent, false)\n        return PostVH(view)\n    }\n\n    override fun onBindViewHolder(holder: PostVH, position: Int) {\n        val post = getItem(position)\n        holder.title.text = post.title\n        Glide.with(holder.image).load(post.imageUrl).into(holder.image)\n        holder.likeCount.text = \"${post.likes} likes\"\n    }\n\n    override fun onBindViewHolder(holder: PostVH, position: Int, payloads: MutableList<Any>) {\n        if (payloads.isEmpty()) {\n            onBindViewHolder(holder, position)\n            return\n        }\n        val changes = payloads[0] as Set<*>\n        val post = getItem(position)\n        if (\"likes\" in changes) holder.likeCount.text = \"${post.likes} likes\"\n        if (\"title\" in changes) holder.title.text = post.title\n        if (\"image\" in changes) Glide.with(holder.image).load(post.imageUrl).into(holder.image)\n    }\n}\n\nclass PostDiff : DiffUtil.ItemCallback<Post>() {\n    override fun areItemsTheSame(old: Post, new: Post) = old.id == new.id\n    override fun areContentsTheSame(old: Post, new: Post) = old == new\n\n    override fun getChangePayload(old: Post, new: Post): Any? {\n        val changes = mutableSetOf<String>()\n        if (old.likes != new.likes) changes.add(\"likes\")\n        if (old.title != new.title) changes.add(\"title\")\n        if (old.imageUrl != new.imageUrl) changes.add(\"image\")\n        return changes.ifEmpty { null }\n    }\n}",
+      "explanation": "By overriding <code>getChangePayload</code>, DiffUtil tells the adapter <b>exactly which fields changed</b>. The 3-argument <code>onBindViewHolder</code> checks the payloads list: if non-empty, it only updates the specific views that correspond to changed fields. Now when a user taps \"like\" and only the like count changes, Glide does NOT reload the image — saving network, memory, and frame time.",
+      "hints": [
+        "DiffUtil has a third callback method that returns WHAT changed between two items",
+        "onBindViewHolder has a 3-argument overload that receives payloads"
+      ]
+    },
+    {
+      "id": "ur-9",
+      "type": "multiple-choice",
+      "title": "RecyclerView vs LazyColumn — Fast Fling",
+      "difficulty": "advanced",
+      "description": "During a fast fling on a list with complex items (images, styled text, multiple view types), which approach generally provides smoother scroll performance and why?",
+      "options": [
+        "LazyColumn — Compose's single-pass layout is always faster than the View system",
+        "RecyclerView — its ViewHolder pool provides pre-created views that only need cheap rebinding, avoiding the allocation spike of composing from scratch",
+        "They perform identically — both use the same underlying rendering pipeline",
+        "LazyColumn — it disposes off-screen items, freeing memory and reducing GC pressure"
+      ],
+      "correctIndex": 1,
+      "explanation": "During fast fling, new items enter the viewport rapidly. <b>RecyclerView</b> pulls pre-created ViewHolders from its pool and only runs <code>onBindViewHolder</code> (~0.5-1 ms). <b>LazyColumn</b> must compose each item from scratch — running the composable function, creating LayoutNodes, allocating state, running effects (~2-5 ms). This per-item cost adds up during fast scrolling. RecyclerView's pool acts as a buffer that amortizes creation cost, while LazyColumn pays it on every entry. For simple items the difference is negligible, but for complex items (images, nested layouts, multiple text styles), RecyclerView's pool-and-rebind model provides more consistent frame timing during aggressive scrolling.",
+      "hints": [
+        "Think about what work each system does when a NEW item enters the viewport",
+        "One reuses pre-created objects, the other creates from scratch"
+      ]
+    },
+    {
+      "id": "ur-10",
+      "type": "what-does-this-do",
+      "title": "ConstraintLayout vs Nested RelativeLayout",
+      "difficulty": "intermediate",
+      "description": "An engineer replaces this nested layout with a flat ConstraintLayout. What is the performance impact?",
+      "code": "<!-- BEFORE: Nested RelativeLayouts -->\n<RelativeLayout>              <!-- 2 passes -->\n    <RelativeLayout>          <!-- measured 2x by parent, 2 passes each = 4 -->\n        <RelativeLayout>      <!-- measured 4x by parent, 2 passes each = 8 -->\n            <TextView />\n            <ImageView />\n        </RelativeLayout>\n    </RelativeLayout>\n</RelativeLayout>\n\n<!-- AFTER: Flat ConstraintLayout -->\n<ConstraintLayout>            <!-- 1 pass -->\n    <TextView />\n    <ImageView />\n</ConstraintLayout>",
+      "options": [
+        "No meaningful difference — modern devices are fast enough that layout passes don't matter",
+        "Measure passes drop from 8 to 1 — an 8x reduction in layout work for the leaf views",
+        "ConstraintLayout is actually slower because its constraint solver is more complex",
+        "The improvement is only 2x because ConstraintLayout still needs 4 passes for complex constraints"
+      ],
+      "correctIndex": 1,
+      "explanation": "Three levels of nested <code>RelativeLayout</code> means the innermost views are measured <b>2^3 = 8 times</b>. A flat <code>ConstraintLayout</code> solves all constraints in a <b>single pass</b> using a linear constraint solver. That's an 8x reduction in measure work for the leaf views. In a RecyclerView where this layout is used for each item, this difference is multiplied by every visible item — potentially turning a janky scroll into a smooth one. This is exactly why <code>ConstraintLayout</code> was created: to achieve complex relative positioning without the exponential cost of nested RelativeLayouts.",
+      "hints": [
+        "Calculate 2^3 for the nested case",
+        "ConstraintLayout was specifically designed to solve this problem"
+      ]
+    }
+  ]
+}

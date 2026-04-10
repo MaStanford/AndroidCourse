@@ -1,0 +1,186 @@
+{
+  "id": "config-rro",
+  "title": "Configuration Changes & RROs",
+  "icon": "🔧",
+  "description": "Config change triggers, state preservation strategies, resource qualifiers, and Runtime Resource Overlays",
+  "references": [
+    {"title": "Android Developers — Handle configuration changes", "url": "https://developer.android.com/guide/topics/resources/runtime-changes", "type": "docs"},
+    {"title": "Android Developers — Save UI states", "url": "https://developer.android.com/topic/libraries/architecture/saving-states", "type": "docs"},
+    {"title": "Android Developers — App resources overview", "url": "https://developer.android.com/guide/topics/resources/providing-resources", "type": "docs"},
+    {"title": "Android Developers — Runtime Resource Overlays", "url": "https://source.android.com/docs/core/runtime/rros", "type": "docs"},
+    {"title": "Android Developers — Change app resources at runtime", "url": "https://source.android.com/docs/core/runtime/rros-defining", "type": "docs"}
+  ],
+  "lesson": "<h3>What Triggers a Configuration Change?</h3>\n<p>A <b>configuration change</b> occurs whenever a system property that affects resource resolution changes at runtime. The system destroys and recreates the Activity so it can reload resources matching the new configuration.</p>\n<table>\n<tr><th>Trigger</th><th>Config Flag</th><th>Common Scenario</th></tr>\n<tr><td>Screen rotation</td><td><code>orientation</code></td><td>User rotates phone</td></tr>\n<tr><td>Dark mode toggle</td><td><code>uiMode</code></td><td>System or quick-tile toggle</td></tr>\n<tr><td>Locale change</td><td><code>locale</code></td><td>User changes language in Settings</td></tr>\n<tr><td>Font scale</td><td><code>fontScale</code></td><td>Accessibility → Display size</td></tr>\n<tr><td>Screen size / density</td><td><code>screenSize</code>, <code>density</code></td><td>Foldable fold/unfold, display mode</td></tr>\n<tr><td>Keyboard availability</td><td><code>keyboard</code>, <code>keyboardHidden</code></td><td>Physical keyboard attached/detached</td></tr>\n<tr><td>Smallest screen width</td><td><code>smallestScreenSize</code></td><td>Multi-window resize</td></tr>\n</table>\n\n<h3>Default Behavior: Destroy + Recreate</h3>\n<p>When a config change fires, the system calls <code>onSaveInstanceState()</code> → <code>onDestroy()</code> → <code>onCreate()</code> with the saved Bundle. This is <b>intentional</b> — the Activity must reload resources (layouts, strings, drawables) that may differ for the new configuration.</p>\n<div class=\"diagram\">Config change fires (e.g., rotation)\n  │\n  ├── onPause()\n  ├── onSaveInstanceState(outState)   ← save transient UI state\n  ├── onStop()\n  ├── onDestroy()                     ← old Activity instance dies\n  │\n  ├── onCreate(savedInstanceState)    ← NEW instance, new resources loaded\n  ├── onStart()\n  └── onResume()\n\nViewModel survives — same instance, new Activity</div>\n\n<hr class=\"section-divider\">\n<h3>android:configChanges — Handle It Yourself</h3>\n<p>Declaring <code>android:configChanges</code> in the manifest tells the system <b>not</b> to destroy your Activity for those specific changes. Instead, <code>onConfigurationChanged()</code> is called.</p>\n<div class=\"lesson-code\">&lt;activity\n    android:name=\".VideoPlayerActivity\"\n    android:configChanges=\"orientation|screenSize|smallestScreenSize\" /&gt;</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// Called instead of destroy/recreate</span>\noverride fun onConfigurationChanged(newConfig: Configuration) {\n    super.onConfigurationChanged(newConfig)\n    <span class=\"cmt\">// Manually handle the change</span>\n    if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {\n        enterFullscreen()\n    }\n}</div>\n<div class=\"warn-box\"><b>When to use this (rarely):</b><br>\n- Video/media players: pausing playback on rotation is unacceptable<br>\n- Maps: rebuilding the map state is expensive<br>\n- WebViews: reloading a page loses user context<br><br>\n<b>When NOT to use this:</b><br>\n- Normal UI apps — you lose automatic resource reloading (dark mode drawables, landscape layouts, locale strings). You would need to manually reload every resource, which is error-prone and defeats the purpose of the resource system.</div>\n\n<hr class=\"section-divider\">\n<h3>State Preservation Matrix</h3>\n<p>Different state-saving mechanisms survive different destruction scenarios. This is the most critical table to memorize:</p>\n<table>\n<tr><th>Mechanism</th><th>Survives Config Change</th><th>Survives Process Death</th><th>Limit</th><th>Use For</th></tr>\n<tr><td><code>ViewModel</code></td><td>YES</td><td>NO</td><td>Heap memory</td><td>Screen state, loaded data, ongoing operations</td></tr>\n<tr><td><code>onSaveInstanceState</code></td><td>YES</td><td>YES</td><td>~500KB (Bundle transaction limit)</td><td>Small transient UI state: scroll position, selection, text input</td></tr>\n<tr><td><code>SavedStateHandle</code></td><td>YES</td><td>YES</td><td>~500KB (uses SavedState under the hood)</td><td>ViewModel state that must survive process death</td></tr>\n<tr><td><code>rememberSaveable</code></td><td>YES</td><td>YES</td><td>~500KB (backed by SavedState)</td><td>Compose equivalent of onSaveInstanceState</td></tr>\n<tr><td><code>remember { }</code></td><td>NO (recomposition only)</td><td>NO</td><td>Heap memory</td><td>Derived/computed values within a composition</td></tr>\n<tr><td>Room / DataStore</td><td>YES (persistent)</td><td>YES (persistent)</td><td>Disk space</td><td>User data, preferences, cached responses</td></tr>\n</table>\n<div class=\"info-box\"><b>The SavedState 500KB Limit:</b> The Bundle is serialized through Binder, which has a 1MB transaction buffer shared across ALL operations. In practice, keep your saved state well under 500KB. Store IDs or keys, not full objects — reload the data from ViewModel or repository after restoration.</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// SavedStateHandle in ViewModel — survives BOTH config change AND process death</span>\nclass SearchViewModel(\n    private val savedStateHandle: SavedStateHandle\n) : ViewModel() {\n    <span class=\"cmt\">// Automatically saved/restored across process death</span>\n    val query = savedStateHandle.getStateFlow(\"query\", \"\")\n\n    fun onQueryChanged(newQuery: String) {\n        savedStateHandle[\"query\"] = newQuery\n    }\n}</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// Compose: rememberSaveable vs remember</span>\n@Composable\nfun SearchBar() {\n    <span class=\"cmt\">// SURVIVES config change + process death</span>\n    var query by rememberSaveable { mutableStateOf(\"\") }\n\n    <span class=\"cmt\">// LOST on config change — only survives recomposition</span>\n    var expanded by remember { mutableStateOf(false) }\n}</div>\n\n<hr class=\"section-divider\">\n<h3>Resource Qualifiers & Directory Structure</h3>\n<p>Android resolves resources by matching directory qualifiers to the current configuration. Qualifiers are appended to the resource directory name with a dash:</p>\n<table>\n<tr><th>Qualifier</th><th>Example Directory</th><th>Matches When</th></tr>\n<tr><td>Night mode</td><td><code>values-night/</code></td><td>Dark theme active</td></tr>\n<tr><td>Orientation</td><td><code>layout-land/</code></td><td>Landscape orientation</td></tr>\n<tr><td>Smallest width</td><td><code>layout-sw600dp/</code></td><td>Tablet (shortest edge >= 600dp)</td></tr>\n<tr><td>API level</td><td><code>values-v31/</code></td><td>API 31+ (Android 12+)</td></tr>\n<tr><td>Locale</td><td><code>values-es/</code>, <code>values-ja/</code></td><td>Spanish, Japanese</td></tr>\n<tr><td>Density</td><td><code>drawable-xxhdpi/</code></td><td>~480dpi screens</td></tr>\n</table>\n<div class=\"diagram\">res/\n├── layout/\n│   └── activity_main.xml           ← default (portrait, phone)\n├── layout-land/\n│   └── activity_main.xml           ← landscape\n├── layout-sw600dp/\n│   └── activity_main.xml           ← tablet\n├── layout-sw600dp-land/\n│   └── activity_main.xml           ← tablet landscape\n├── values/\n│   ├── strings.xml                 ← default (English)\n│   ├── colors.xml                  ← light theme colors\n│   └── themes.xml\n├── values-night/\n│   └── colors.xml                  ← dark theme colors\n├── values-es/\n│   └── strings.xml                 ← Spanish strings\n├── values-v31/\n│   └── themes.xml                  ← Material You dynamic colors\n├── drawable-mdpi/                  ← ~160dpi\n├── drawable-hdpi/                  ← ~240dpi\n├── drawable-xhdpi/                 ← ~320dpi\n├── drawable-xxhdpi/                ← ~480dpi\n└── drawable-xxxhdpi/               ← ~640dpi</div>\n<p>When multiple qualifiers match, Android uses a <b>best-match algorithm</b> that eliminates non-matching directories one qualifier at a time, in precedence order (MCC → language → layout direction → smallest width → screen size → orientation → UI mode → night → density → ...). The most specific surviving match wins.</p>\n\n<hr class=\"section-divider\">\n<h3>Runtime Resource Overlays (RROs)</h3>\n<p>RROs let you <b>override any app's resources at runtime without modifying its APK</b>. They are the mechanism behind OEM theming, Material You dynamic colors, and carrier customizations.</p>\n\n<h4>How RROs Work</h4>\n<div class=\"diagram\">Target App (com.example.app)\n├── res/values/colors.xml\n│   └── colorPrimary = #6200EE          ← original\n│\nOverlay APK (com.example.overlay)\n├── res/values/colors.xml\n│   └── colorPrimary = #FF5722          ← override!\n├── AndroidManifest.xml\n│   └── &lt;overlay targetPackage=\"com.example.app\" .../&gt;\n│\n┌──────────────────────────────────────────┐\n│  idmap2: builds mapping at install time  │\n│  target resource ID → overlay resource   │\n└──────────────────────────────────────────┘\n│\nAt runtime: app reads colorPrimary → gets #FF5722 (overlay wins)</div>\n\n<h4>Creating an RRO: AndroidManifest.xml</h4>\n<div class=\"lesson-code\">&lt;manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n    package=\"com.example.myoverlay\"&gt;\n\n    &lt;overlay\n        android:targetPackage=\"com.android.systemui\"\n        android:targetName=\"SystemUIOverlay\"\n        android:isStatic=\"false\"\n        android:priority=\"1\"\n        android:category=\"android.theme\" /&gt;\n\n    &lt;application android:hasCode=\"false\" /&gt;\n&lt;/manifest&gt;</div>\n<p>Key attributes:</p>\n<table>\n<tr><th>Attribute</th><th>Purpose</th></tr>\n<tr><td><code>targetPackage</code></td><td>Package name of the app whose resources to override</td></tr>\n<tr><td><code>targetName</code></td><td>Name of the overlayable group (API 29+) — limits which resources can be overlaid</td></tr>\n<tr><td><code>isStatic</code></td><td><code>true</code> = always enabled, cannot be toggled. <code>false</code> = can be enabled/disabled at runtime</td></tr>\n<tr><td><code>priority</code></td><td>Higher priority overlays win when multiple target the same resource</td></tr>\n</table>\n\n<h4>Static vs Dynamic Overlays</h4>\n<table>\n<tr><th></th><th>Static Overlay</th><th>Dynamic Overlay</th></tr>\n<tr><td>Enabled by</td><td>Always on at boot</td><td>Must be explicitly enabled</td></tr>\n<tr><td>Toggle at runtime</td><td>No</td><td>Yes — <code>cmd overlay enable/disable</code></td></tr>\n<tr><td>Use case</td><td>OEM branding, carrier config</td><td>Theming, user preferences</td></tr>\n<tr><td>Requires</td><td>Signed with platform key or pre-installed</td><td>Appropriate permissions</td></tr>\n</table>\n\n<h4>Overlayable Resources (API 29+)</h4>\n<p>Starting in Android 10, target apps declare which resources <b>can</b> be overlaid using <code>&lt;overlayable&gt;</code>:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">&lt;!-- In the TARGET app's res/values/overlayable.xml --&gt;</span>\n&lt;resources&gt;\n    &lt;overlayable name=\"SystemUIOverlay\"&gt;\n        &lt;policy type=\"public\"&gt;\n            &lt;item type=\"color\" name=\"colorPrimary\" /&gt;\n            &lt;item type=\"dimen\" name=\"status_bar_height\" /&gt;\n            &lt;item type=\"bool\" name=\"config_enableLockScreen\" /&gt;\n        &lt;/policy&gt;\n    &lt;/overlayable&gt;\n&lt;/resources&gt;</div>\n\n<h4>Fabricated Overlays (API 31+ / Android 12)</h4>\n<p>Fabricated overlays let the system create overlay resources <b>in memory without an APK</b>. This is how Material You generates dynamic color themes from the user's wallpaper:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// System-only API — used internally by ThemeOverlayController</span>\nval overlay = FabricatedOverlay.Builder(\"com.android.theme.color\", \"wallpaper\")\n    .setTargetPackage(\"android\")\n    .setResourceValue(\"color/system_accent1_100\", TypedValue.TYPE_INT_COLOR_ARGB8, extractedColor)\n    .build()\nOverlayManager.commit(OverlayManagerTransaction.newInstance().registerFabricatedOverlay(overlay))</div>\n<div class=\"info-box\"><b>Material You flow:</b> wallpaper change → color extraction → fabricated overlay created → system_accent1/2/3, system_neutral1/2 color palettes updated → all apps using <code>?attr/colorPrimary</code> (Material3) automatically pick up new colors without any app changes.</div>\n\n<h4>Shell Commands for RRO Debugging</h4>\n<div class=\"lesson-code\"><span class=\"cmt\"># List all overlays and their state (enabled/disabled)</span>\nadb shell cmd overlay list\n\n<span class=\"cmt\"># Enable/disable a specific overlay</span>\nadb shell cmd overlay enable com.example.myoverlay\nadb shell cmd overlay disable com.example.myoverlay\n\n<span class=\"cmt\"># Dump detailed overlay info</span>\nadb shell cmd overlay dump\n\n<span class=\"cmt\"># Inspect idmap2 mappings (target → overlay resource resolution)</span>\nadb shell idmap2 dump --idmap-path /data/resource-cache/com.example.myoverlay@overlay.apk@idmap\n\n<span class=\"cmt\"># List all idmap files</span>\nadb shell ls /data/resource-cache/</div>\n\n<hr class=\"section-divider\">\n<h3>How OEMs Use RROs</h3>\n<p>RROs are the primary customization mechanism for OEMs. They allow heavy theming without forking AOSP source code:</p>\n<table>\n<tr><th>OEM</th><th>What They Overlay</th><th>Examples</th></tr>\n<tr><td><b>Samsung OneUI</b></td><td>SystemUI, Settings, framework</td><td>Rounded corner radii, notification shade colors, default ringtones, status bar height, Quick Settings tile layout</td></tr>\n<tr><td><b>Google Pixel</b></td><td>System, SystemUI, Launcher</td><td>Material You dynamic colors (fabricated overlays), Pixel-specific feature flags, default wallpapers</td></tr>\n<tr><td><b>Carriers</b></td><td>Settings, TelephonyProvider</td><td>APN configs, VoLTE/VoWiFi toggles, carrier branding strings</td></tr>\n<tr><td><b>Xiaomi MIUI / HyperOS</b></td><td>Framework, SystemUI, core apps</td><td>Control center layout, icon shapes, animation durations</td></tr>\n</table>\n<div class=\"lesson-code\"><span class=\"cmt\"># On a Pixel device, you can see the overlay stack:</span>\nadb shell cmd overlay list android\n<span class=\"cmt\"># Output shows fabricated overlays for Material You colors:</span>\n<span class=\"cmt\"># [x] com.android.theme.color.custom.overlay  (enabled, fabricated)</span>\n<span class=\"cmt\"># [x] com.google.android.overlay.gmsconfig     (enabled, static)</span></div>\n<p>This is why the same AOSP-based Android looks completely different on a Samsung vs. Pixel vs. Xiaomi device — it's largely RROs, not source code forks.</p>",
+  "questions": [
+    {
+      "id": "cr-1",
+      "type": "multiple-choice",
+      "title": "Config Change Default Behavior",
+      "difficulty": "beginner",
+      "description": "What happens to an Activity by default when the user rotates the device?",
+      "options": [
+        "onConfigurationChanged() is called and the Activity continues running",
+        "The Activity is destroyed and a new instance is created with savedInstanceState",
+        "The Activity is paused but not destroyed",
+        "Only the Fragment is recreated, the Activity stays alive"
+      ],
+      "correctIndex": 1,
+      "explanation": "By default, a configuration change (like rotation) causes the system to call <code>onSaveInstanceState()</code>, then fully destroy the Activity (<code>onDestroy()</code>), and create a brand new instance (<code>onCreate()</code>) with the saved Bundle. This ensures the Activity loads resources matching the new configuration — for example, a landscape-specific layout from <code>layout-land/</code>.",
+      "hints": [
+        "The system needs to reload resources that may differ for the new configuration",
+        "Think about what happens to layout files when going portrait → landscape"
+      ]
+    },
+    {
+      "id": "cr-2",
+      "type": "multiple-choice",
+      "title": "State Preservation — ViewModel vs SavedStateHandle",
+      "difficulty": "intermediate",
+      "description": "A user is filling out a multi-step form. They get a phone call, the app goes to background, and the system kills the process to reclaim memory. When the user returns, which state-saving mechanisms still have their data?",
+      "options": [
+        "ViewModel only — it survives everything",
+        "onSaveInstanceState and SavedStateHandle — ViewModel data is lost on process death",
+        "All state is lost — the user must start over",
+        "Room/DataStore only — all in-memory state is lost"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>ViewModel</code> survives configuration changes (rotation, dark mode) but does NOT survive process death. <code>onSaveInstanceState</code> and <code>SavedStateHandle</code> survive BOTH because their data is serialized into a Bundle held by the system. For critical form data, use <code>SavedStateHandle</code> in your ViewModel to get the best of both: ViewModel convenience + process death survival. For truly persistent data, write to Room or DataStore.",
+      "hints": [
+        "Process death means the entire process is killed — all in-memory objects are gone",
+        "What mechanism serializes data for the system to hold outside the process?"
+      ]
+    },
+    {
+      "id": "cr-3",
+      "type": "what-does-this-do",
+      "title": "android:configChanges Side Effects",
+      "difficulty": "intermediate",
+      "description": "A developer adds this to their manifest. What are the consequences?",
+      "code": "<activity\n    android:name=\".MainActivity\"\n    android:configChanges=\"orientation|screenSize|uiMode|locale|fontScale\" />",
+      "options": [
+        "The Activity handles all config changes efficiently — this is best practice",
+        "The Activity is never recreated for these changes, but it also never reloads resources automatically — dark mode drawables, landscape layouts, locale strings, and scaled text must ALL be handled manually in onConfigurationChanged()",
+        "The Activity ignores these config changes entirely — nothing happens",
+        "Only orientation is handled, the other flags are ignored"
+      ],
+      "correctIndex": 1,
+      "explanation": "By declaring all these config changes, the Activity opts out of automatic recreation for rotation, dark mode, locale, and font scale changes. The Activity stays alive and <code>onConfigurationChanged()</code> is called instead. However, <b>resources are not automatically reloaded</b>. If you have <code>layout-land/</code>, <code>values-night/</code>, <code>values-es/</code>, or <code>values-sw600dp/</code> directories, those alternative resources will NOT be loaded. You must manually update every resource — which is why this approach is almost never appropriate for normal UI apps.",
+      "hints": [
+        "Think about what the system normally does during destroy/recreate that you're now skipping",
+        "Consider dark mode drawables, landscape layouts, and translated strings"
+      ]
+    },
+    {
+      "id": "cr-4",
+      "type": "fill-blank",
+      "title": "SavedStateHandle in ViewModel",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to create a ViewModel that preserves the search query across both configuration changes AND process death.",
+      "code": "class SearchViewModel(\n    private val savedStateHandle: ___1___\n) : ViewModel() {\n\n    val query = savedStateHandle.___2___(\"query\", \"\")\n\n    fun onQueryChanged(newQuery: String) {\n        savedStateHandle[\"query\"] = newQuery\n    }\n}",
+      "blanks": [
+        {
+          "answer": ["SavedStateHandle"],
+          "hint": "The Jetpack class that gives ViewModel access to SavedState"
+        },
+        {
+          "answer": ["getStateFlow"],
+          "hint": "Returns a StateFlow that automatically updates when the saved value changes"
+        }
+      ],
+      "explanation": "<code>SavedStateHandle</code> bridges the gap between ViewModel (survives config changes but not process death) and SavedState (survives both). By using <code>getStateFlow()</code>, you get a reactive <code>StateFlow</code> that automatically reflects changes. The data is serialized to a Bundle under the hood, so it survives process death — but keep values small (under 500KB total).",
+      "hints": [
+        "This class is injected into ViewModels automatically by Hilt or the default ViewModelProvider",
+        "The method returns a StateFlow backed by the saved state"
+      ]
+    },
+    {
+      "id": "cr-5",
+      "type": "multiple-choice",
+      "title": "RRO Overlay Mechanics",
+      "difficulty": "advanced",
+      "description": "An OEM wants to change the default accent color of SystemUI without modifying any AOSP source code. What is the correct approach?",
+      "options": [
+        "Fork the SystemUI source and change the color constant",
+        "Create a Runtime Resource Overlay APK that targets com.android.systemui and overrides the color resource, then pre-install it as a static overlay",
+        "Use adb shell settings put to change the color at runtime",
+        "Modify the framework's attrs.xml to change the default theme color"
+      ],
+      "correctIndex": 1,
+      "explanation": "RROs are specifically designed for this use case. The OEM creates a small overlay APK containing only the replacement color resource, with a manifest declaring <code>targetPackage=\"com.android.systemui\"</code> and <code>isStatic=\"true\"</code>. At build time, the overlay is pre-installed in the system partition. At boot, <code>idmap2</code> creates a mapping from SystemUI's original color resource ID to the overlay's replacement. SystemUI loads the OEM's color without any source code changes.",
+      "hints": [
+        "The goal is to override resources WITHOUT modifying the original APK",
+        "Think about what mechanism Android provides for resource-level customization"
+      ]
+    },
+    {
+      "id": "cr-6",
+      "type": "multiple-choice",
+      "title": "Static vs Dynamic Overlays",
+      "difficulty": "intermediate",
+      "description": "What is the key difference between a static and dynamic RRO?",
+      "options": [
+        "Static overlays are faster, dynamic overlays are slower",
+        "Static overlays are always enabled and cannot be toggled at runtime; dynamic overlays can be enabled/disabled via cmd overlay or OverlayManager API",
+        "Static overlays work on all API levels, dynamic overlays require API 31+",
+        "Static overlays can only change colors, dynamic overlays can change layouts"
+      ],
+      "correctIndex": 1,
+      "explanation": "A <b>static overlay</b> (<code>android:isStatic=\"true\"</code>) is always active from boot — used for OEM branding that should never change. A <b>dynamic overlay</b> (<code>android:isStatic=\"false\"</code>) can be toggled at runtime using <code>cmd overlay enable/disable</code> or the <code>OverlayManager</code> system service. Dynamic overlays are used for user-selectable themes, toggling features, or Material You color application.",
+      "hints": [
+        "Think about OEM branding (should always be on) vs. user-selected themes (togglable)",
+        "The key word is 'runtime' toggling"
+      ]
+    },
+    {
+      "id": "cr-7",
+      "type": "trivia",
+      "title": "Fabricated Overlays and Material You",
+      "difficulty": "advanced",
+      "description": "Explain how Material You (dynamic color theming) works under the hood using fabricated overlays on Android 12+.",
+      "keywords": [
+        "fabricated",
+        "wallpaper",
+        "color extraction",
+        "overlay",
+        "API 31",
+        "system_accent",
+        "ThemeOverlayController",
+        "dynamic",
+        "palette",
+        "idmap"
+      ],
+      "answer": "When the user changes their wallpaper on Android 12+, the system extracts dominant colors using a color-extraction algorithm. ThemeOverlayController then creates fabricated overlays — overlay resources generated in memory without needing an APK on disk. These overlays target the 'android' framework package and override the system_accent1/2/3 and system_neutral1/2 color palettes. Since fabricated overlays use the standard RRO idmap2 machinery, any app that references Material3 theme attributes (like ?attr/colorPrimary) automatically picks up the new colors without any code changes or app updates.",
+      "explanation": "Fabricated overlays (introduced in API 31) are the key innovation that makes Material You possible at scale. Previously, theme overlays required pre-built APKs. Fabricated overlays are created entirely in memory by the system server, making it possible to generate an unlimited number of color themes from any wallpaper. The <code>FabricatedOverlay.Builder</code> API allows setting individual resource values programmatically, and the overlay is applied through the same <code>OverlayManager</code> infrastructure as traditional RROs.",
+      "hints": [
+        "Think about how the system can create unique color themes for every wallpaper without pre-building APKs",
+        "Material You colors are applied to ALL apps — what system mechanism can override resources across all packages?"
+      ]
+    },
+    {
+      "id": "cr-8",
+      "type": "fix-bug",
+      "title": "State Lost on Process Death",
+      "difficulty": "intermediate",
+      "description": "Users report that the selected tab is lost when they switch to another app and come back. The ViewModel survives rotation fine but not process death. Fix it.",
+      "starterCode": "class DashboardViewModel : ViewModel() {\n    // BUG: selectedTab is lost on process death!\n    private val _selectedTab = MutableStateFlow(0)\n    val selectedTab: StateFlow<Int> = _selectedTab.asStateFlow()\n\n    fun onTabSelected(index: Int) {\n        _selectedTab.value = index\n    }\n}",
+      "checks": [
+        {
+          "pattern": "SavedStateHandle",
+          "message": "Use SavedStateHandle to survive process death",
+          "required": true
+        },
+        {
+          "pattern": "getStateFlow|getLiveData",
+          "message": "Use getStateFlow() or getLiveData() from SavedStateHandle for reactive state",
+          "required": true
+        }
+      ],
+      "solution": "class DashboardViewModel(\n    private val savedStateHandle: SavedStateHandle\n) : ViewModel() {\n    val selectedTab: StateFlow<Int> = savedStateHandle.getStateFlow(\"selectedTab\", 0)\n\n    fun onTabSelected(index: Int) {\n        savedStateHandle[\"selectedTab\"] = index\n    }\n}",
+      "explanation": "The original code uses a plain <code>MutableStateFlow</code> which lives in ViewModel memory — it survives config changes but is destroyed with the process. By switching to <code>SavedStateHandle.getStateFlow()</code>, the selected tab index is automatically serialized into a Bundle. When the system kills and restores the process, the Bundle is provided back to the new ViewModel instance, and the tab selection is restored. This is the standard pattern for any small UI state that must survive process death.",
+      "hints": [
+        "ViewModel survives rotation but NOT process death — what addition makes it survive both?",
+        "The fix requires adding a constructor parameter"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,192 @@
+{
+  "id": "battery-power",
+  "title": "Battery & Power Management",
+  "icon": "🔋",
+  "description": "Doze mode, App Standby Buckets, background execution limits, foreground service types, and battery-efficient patterns",
+  "references": [
+    {"title": "Android Developers — Optimize for Doze and App Standby", "url": "https://developer.android.com/training/monitoring-device-state/doze-standby", "type": "docs"},
+    {"title": "Android Developers — App Standby Buckets", "url": "https://developer.android.com/topic/performance/appstandby", "type": "docs"},
+    {"title": "Android Developers — Background Execution Limits", "url": "https://developer.android.com/about/versions/oreo/background", "type": "docs"},
+    {"title": "Android Developers — Foreground Service Types", "url": "https://developer.android.com/develop/background-work/services/foreground-services", "type": "docs"},
+    {"title": "Android Developers — Reduce Network Battery Drain", "url": "https://developer.android.com/training/efficient-downloads", "type": "docs"},
+    {"title": "Android Developers — Power Management Restrictions", "url": "https://developer.android.com/topic/performance/power", "type": "docs"}
+  ],
+  "lesson": "<h3>Doze Mode (API 23+)</h3>\n<p>When the device is <b>stationary, unplugged, and screen-off</b> for a period of time, the system enters <b>Doze mode</b> to save battery. There are two stages:</p>\n<div class=\"diagram\">Screen off + stationary + unplugged\n           │\n           ▼  (minutes)\n   ┌───────────────────┐\n   │   LIGHT DOZE      │  API 24+\n   │   ─────────────   │\n   │   • Network blocked│\n   │   • Jobs deferred  │\n   │   • Alarms deferred│\n   │   • BUT: still gets│\n   │     maintenance    │\n   │     windows often  │\n   └────────┬──────────┘\n            │  (longer inactivity)\n            ▼\n   ┌───────────────────┐\n   │   DEEP DOZE       │  API 23+\n   │   ─────────────   │\n   │   • Network blocked│\n   │   • Jobs/syncs off │\n   │   • Alarms deferred│\n   │   • Wakelocks ignored│\n   │   • Wi-Fi scans off│\n   │   • GPS off        │\n   │   • Maintenance    │\n   │     windows become │\n   │     increasingly   │\n   │     RARE           │\n   └───────────────────┘</div>\n<h4>What Still Works in Doze</h4>\n<table>\n<tr><th>Feature</th><th>Light Doze</th><th>Deep Doze</th></tr>\n<tr><td>High-priority FCM</td><td>Delivered</td><td>Delivered (temporarily wakes device)</td></tr>\n<tr><td>AlarmManager <code>setExactAndAllowWhileIdle()</code></td><td>Fires (throttled to 1/9 min)</td><td>Fires (throttled to 1/9 min)</td></tr>\n<tr><td>Regular AlarmManager</td><td>Deferred to maintenance window</td><td>Deferred to maintenance window</td></tr>\n<tr><td>Network access</td><td>Blocked</td><td>Blocked</td></tr>\n<tr><td>JobScheduler / WorkManager</td><td>Deferred</td><td>Deferred</td></tr>\n<tr><td>Wakelocks</td><td>Held</td><td><b>Ignored</b></td></tr>\n<tr><td>Foreground services</td><td>Run normally</td><td>Run normally (network still blocked)</td></tr>\n</table>\n<div class=\"warn-box\"><b>Testing tip:</b> Use <code>adb shell dumpsys deviceidle force-idle</code> to enter deep doze, and <code>adb shell dumpsys deviceidle unforce</code> to exit. Use <code>adb shell dumpsys deviceidle force-idle light</code> for light doze.</div>\n\n<hr class=\"section-divider\">\n<h3>App Standby Buckets (API 28+)</h3>\n<p>The system assigns each app to a <b>bucket</b> based on how recently and frequently the user interacted with it. The bucket determines how aggressively jobs, alarms, and network are restricted.</p>\n<table>\n<tr><th>Bucket</th><th>Criteria</th><th>Restrictions</th></tr>\n<tr><td><b>Active</b></td><td>Currently in use, or very recently used. Visible activity, foreground service, or notification tapped.</td><td>None — full access to jobs, alarms, and network.</td></tr>\n<tr><td><b>Working Set</b></td><td>Used regularly but not currently active. Runs most days.</td><td>Jobs run with minor delays. Alarms may shift by a few minutes.</td></tr>\n<tr><td><b>Frequent</b></td><td>Used often but not daily. Opened at least once in the last week or two.</td><td>Jobs limited to ~10 min sessions. Alarms may be deferred up to several hours. High-priority FCM capped at ~10/day.</td></tr>\n<tr><td><b>Rare</b></td><td>Seldom used — hasn't been opened in weeks.</td><td>Jobs limited to ~5 min sessions. Alarms deferred up to 24 hours. High-priority FCM capped at ~5/day. Network access restricted.</td></tr>\n<tr><td><b>Restricted</b> (API 31+)</td><td>App consumes excessive resources, or user has not opened it in months.</td><td>Can run <b>one job per day</b>. No expedited jobs. Alarms max 1/day. No FCM priority. Essentially frozen.</td></tr>\n</table>\n<div class=\"info-box\">Query your app's bucket at runtime:<br><code>val bucket = UsageStatsManager.getAppStandbyBucket()</code><br>But you <b>cannot set</b> your bucket — only the system decides.</div>\n\n<hr class=\"section-divider\">\n<h3>Background Execution Limits (API 26+)</h3>\n<p>Android 8.0 introduced three major restrictions for apps not in the foreground:</p>\n\n<h4>1. Service Restrictions</h4>\n<p>Background services are stopped within <b>a few minutes</b> after the app leaves the foreground. Calling <code>startService()</code> from the background throws <code>IllegalStateException</code>.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// CRASHES on API 26+ if app is in background:</span>\ncontext.startService(Intent(context, SyncService::class.java))\n\n<span class=\"cmt\">// Solutions:</span>\n<span class=\"cmt\">// 1. Use WorkManager (preferred for deferrable work)</span>\n<span class=\"cmt\">// 2. Use startForegroundService() + call startForeground() within 10 seconds</span>\ncontext.startForegroundService(Intent(context, SyncService::class.java))</div>\n\n<h4>2. Implicit Broadcast Restrictions</h4>\n<p>Apps targeting API 26+ <b>cannot register implicit broadcast receivers in the manifest</b> (with exceptions). You must register them at runtime.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// WON'T WORK in manifest for API 26+ targets:</span>\n&lt;receiver android:name=\".ConnectivityReceiver\"&gt;\n    &lt;intent-filter&gt;\n        &lt;action android:name=\"android.net.conn.CONNECTIVITY_CHANGE\" /&gt;\n    &lt;/intent-filter&gt;\n&lt;/receiver&gt;\n\n<span class=\"cmt\">// Exceptions still allowed in manifest:</span>\n<span class=\"cmt\">// ACTION_BOOT_COMPLETED, ACTION_LOCALE_CHANGED,</span>\n<span class=\"cmt\">// ACTION_MY_PACKAGE_REPLACED, etc.</span>\n\n<span class=\"cmt\">// For connectivity: use ConnectivityManager.NetworkCallback</span>\nval cm = getSystemService(ConnectivityManager::class.java)\ncm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {\n    override fun onAvailable(network: Network) { <span class=\"cmt\">/* online */</span> }\n    override fun onLost(network: Network) { <span class=\"cmt\">/* offline */</span> }\n})</div>\n\n<h4>3. Background Location (API 29+)</h4>\n<p>Apps must request <code>ACCESS_BACKGROUND_LOCATION</code> separately from foreground location. On API 30+, the system directs users to Settings to grant it — no in-app dialog. Google Play requires a declaration explaining why.</p>\n\n<hr class=\"section-divider\">\n<h3>Foreground Service Types (API 34+)</h3>\n<p>Starting with Android 14, every foreground service <b>must declare a type</b> in the manifest. Without it, <code>startForeground()</code> throws <code>MissingForegroundServiceTypeException</code>.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// AndroidManifest.xml — REQUIRED on API 34+</span>\n&lt;uses-permission android:name=\"android.permission.FOREGROUND_SERVICE\" /&gt;\n&lt;uses-permission android:name=\"android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK\" /&gt;\n\n&lt;service\n    android:name=\".MusicService\"\n    android:foregroundServiceType=\"mediaPlayback\"\n    android:exported=\"false\" /&gt;\n\n<span class=\"cmt\">// When starting, specify the type:</span>\nServiceCompat.startForeground(\n    service, NOTIFICATION_ID, notification,\n    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK\n)</div>\n<p><b>Available types:</b> <code>camera</code>, <code>connectedDevice</code>, <code>dataSync</code>, <code>health</code>, <code>location</code>, <code>mediaPlayback</code>, <code>mediaProjection</code>, <code>microphone</code>, <code>phoneCall</code>, <code>remoteMessaging</code>, <code>shortService</code>, <code>specialUse</code>, <code>systemExempted</code></p>\n<div class=\"warn-box\"><b>Each type requires specific permissions.</b> For example, <code>location</code> requires <code>ACCESS_FINE_LOCATION</code> or <code>ACCESS_COARSE_LOCATION</code>. <code>camera</code> requires <code>CAMERA</code> permission. Failing to hold the permission at runtime throws <code>SecurityException</code>.</div>\n<div class=\"info-box\"><b>Android 15 restriction:</b> <code>dataSync</code> foreground services are capped at <b>6 hours</b>. After that, the system calls <code>onTimeout()</code> and you must stop within seconds. Migrate long syncs to WorkManager.</div>\n\n<hr class=\"section-divider\">\n<h3>Network Radio Model & Battery Cost</h3>\n<p>Every network call on a mobile device has a hidden battery cost: the <b>radio tail</b>.</p>\n<div class=\"diagram\">Single HTTP request battery cost:\n\n  Power │\n  (mW)  │\n   300  │ ██████                               ← FULL POWER (~2s)\n        │       ████████████████                 ← HIGH TAIL (~5s)\n   100  │                       ████████████████ ← LOW TAIL (~12s)\n        │                                        ████\n    10  │──────────────────────────────────────────────── IDLE\n        └────────────────────────────────────────────────\n         0s    2s     7s           19s         ~25s\n\n  Total radio-on time: ~20-30 seconds for ONE request!\n  10 individual requests = 10 × 25s = ~250s of radio time\n  10 BATCHED requests   = 1 × 27s  = ~27s  of radio time</div>\n<p>The cellular radio has three states: <b>Full Power</b> (transmitting), <b>Tail</b> (staying on in case more data follows), and <b>Idle</b> (low power). Each transition from idle to full costs ~2 seconds of setup and keeps the radio alive for 20-30 seconds even for a tiny packet.</p>\n\n<hr class=\"section-divider\">\n<h3>Battery-Efficient Patterns</h3>\n\n<h4>1. Batch Network Calls</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// BAD: Individual requests scattered over time</span>\nfun trackEvent(event: Event) {\n    api.sendEvent(event) <span class=\"cmt\">// wakes radio for 25s each time!</span>\n}\n\n<span class=\"cmt\">// GOOD: Batch and send together</span>\nclass EventBatcher {\n    private val queue = mutableListOf&lt;Event&gt;()\n\n    fun trackEvent(event: Event) {\n        queue.add(event)\n        if (queue.size >= 10) flush()\n    }\n\n    fun flush() {\n        if (queue.isEmpty()) return\n        val batch = queue.toList()\n        queue.clear()\n        api.sendEventBatch(batch) <span class=\"cmt\">// ONE radio wake for all events</span>\n    }\n}</div>\n\n<h4>2. WorkManager Constraints</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// Let the system pick the most efficient time</span>\nval syncRequest = OneTimeWorkRequestBuilder&lt;SyncWorker&gt;()\n    .setConstraints(\n        Constraints.Builder()\n            .setRequiredNetworkType(NetworkType.UNMETERED) <span class=\"cmt\">// Wi-Fi only</span>\n            .setRequiresBatteryNotLow(true)                <span class=\"cmt\">// >15% battery</span>\n            .setRequiresCharging(true)                     <span class=\"cmt\">// on charger</span>\n            .build()\n    )\n    .build()</div>\n\n<h4>3. Wakelock Best Practices</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// ALWAYS use a timeout — prevents battery drain from leaked wakelocks</span>\nval wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)\n    .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, \"app:sync\")\n\nwakeLock.acquire(10 * 60 * 1000L) <span class=\"cmt\">// 10 minute TIMEOUT</span>\ntry {\n    performSync()\n} finally {\n    if (wakeLock.isHeld) wakeLock.release()\n}\n\n<span class=\"cmt\">// NEVER do this — infinite wakelock = battery killer</span>\n<span class=\"cmt\">// wakeLock.acquire() // no timeout!</span></div>\n<div class=\"warn-box\"><b>Android Vitals</b> flags apps with wakelocks held >1 hour in the background. This directly affects your Play Store ranking and visibility. Always pass a timeout to <code>acquire()</code>.</div>\n\n<h4>4. Location Coalescing</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// Let FusedLocationProvider batch with other apps' requests</span>\nval locationRequest = LocationRequest.Builder(\n    Priority.PRIORITY_BALANCED_POWER_ACCURACY,\n    60_000L <span class=\"cmt\">// interval: 60 seconds</span>\n)\n    .setMaxUpdateDelayMillis(300_000L) <span class=\"cmt\">// batch up to 5 minutes</span>\n    .setMinUpdateDistanceMeters(50f)    <span class=\"cmt\">// skip if barely moved</span>\n    .build()\n\n<span class=\"cmt\">// setMaxUpdateDelayMillis enables batching: the system can</span>\n<span class=\"cmt\">// hold locations and deliver them all at once, saving battery</span></div>",
+  "questions": [
+    {
+      "id": "bp-pwr-1",
+      "type": "multiple-choice",
+      "title": "Doze Mode Behavior",
+      "difficulty": "intermediate",
+      "description": "Your app schedules a <code>WorkManager</code> job to sync data every 30 minutes. The user puts the phone on a table, screen off, unplugged. After 2 hours, how many syncs have likely completed?",
+      "options": [
+        "4 syncs (every 30 minutes as scheduled)",
+        "0 syncs — all deferred until the user picks up the phone or a maintenance window opens",
+        "2 syncs — Doze cuts the frequency in half",
+        "4 syncs — WorkManager bypasses Doze restrictions"
+      ],
+      "correctIndex": 1,
+      "explanation": "In Doze mode, <b>all JobScheduler and WorkManager tasks are deferred</b> to the next maintenance window. The system batches everything together. Maintenance windows become increasingly rare in deep Doze. The syncs will run eventually — either during a maintenance window or when the user picks up the device — but not on schedule. Only high-priority FCM messages and <code>setExactAndAllowWhileIdle()</code> alarms can break through Doze.",
+      "hints": [
+        "Think about what Doze defers vs. what it allows through",
+        "WorkManager uses JobScheduler under the hood"
+      ]
+    },
+    {
+      "id": "bp-pwr-2",
+      "type": "multiple-choice",
+      "title": "App Standby Buckets",
+      "difficulty": "advanced",
+      "description": "A news app that the user opens once a week is in the <b>Frequent</b> bucket. It uses high-priority FCM to push breaking news alerts. What happens?",
+      "options": [
+        "All high-priority FCMs are delivered instantly, regardless of bucket",
+        "High-priority FCMs are capped at ~10/day — excess messages are downgraded to normal priority and deferred",
+        "The app is completely blocked from receiving FCM",
+        "High-priority FCMs are delivered but limited to 3/day"
+      ],
+      "correctIndex": 1,
+      "explanation": "In the <b>Frequent</b> bucket, high-priority FCM messages are capped at approximately <b>10 per day</b>. Messages beyond the cap are treated as normal priority and deferred. In the <b>Rare</b> bucket, it drops to ~5/day. In the <b>Restricted</b> bucket, no FCM priority is granted at all. Only the <b>Active</b> and <b>Working Set</b> buckets have no FCM cap. This is why user engagement matters — it directly affects your ability to reach users.",
+      "hints": [
+        "Buckets don't block FCM entirely, but they throttle it",
+        "The quota is different for each bucket"
+      ]
+    },
+    {
+      "id": "bp-pwr-3",
+      "type": "what-does-this-do",
+      "title": "Network Radio Tail Energy",
+      "difficulty": "intermediate",
+      "description": "An analytics SDK sends a small HTTP request (100 bytes) every time the user taps a button. The user taps 15 buttons over 10 minutes. How much total radio-on time does this cause, and what is the efficient alternative?",
+      "code": "fun onButtonClick(buttonId: String) {\n    scope.launch(Dispatchers.IO) {\n        api.trackClick(buttonId)  // ~100 bytes per request\n    }\n}",
+      "options": [
+        "~3 seconds total — small requests use minimal radio",
+        "~15 seconds total — 1 second per request",
+        "~375 seconds (6+ minutes) of radio-on time — each request wakes the radio for ~25 seconds",
+        "~150 seconds — the radio batches small requests automatically"
+      ],
+      "correctIndex": 2,
+      "explanation": "Each individual network request wakes the cellular radio from idle, which keeps it powered for <b>~20-30 seconds</b> (the \"radio tail\"). 15 requests x 25 seconds = ~375 seconds of radio-on time for just 1500 bytes of data. The fix: <b>batch events in memory</b> and send them in a single request (or use WorkManager). Batched, all 15 events go in one request = ~27 seconds of radio time total. This is the single biggest battery optimization for apps that send frequent small requests.",
+      "hints": [
+        "Think about the radio state machine: idle → full power → tail → idle",
+        "The data size doesn't matter — it's the number of separate connections that hurts"
+      ]
+    },
+    {
+      "id": "bp-pwr-4",
+      "type": "fix-bug",
+      "title": "Wakelock Without Timeout",
+      "difficulty": "intermediate",
+      "description": "This sync service acquires a wakelock to keep the CPU running during a data sync. If the sync hangs or throws an exception, the wakelock is never released and drains the battery. Fix both issues.",
+      "starterCode": "class SyncService : Service() {\n    private lateinit var wakeLock: PowerManager.WakeLock\n\n    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {\n        wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)\n            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, \"app:sync\")\n        wakeLock.acquire() // No timeout!\n\n        thread {\n            performSync() // What if this throws or hangs?\n            wakeLock.release()\n            stopSelf()\n        }\n        return START_NOT_STICKY\n    }\n}",
+      "checks": [
+        {
+          "pattern": "acquire\\(\\d",
+          "message": "Pass a timeout to acquire() to prevent infinite wakelocks",
+          "required": true
+        },
+        {
+          "pattern": "finally",
+          "message": "Use try/finally to ensure the wakelock is always released",
+          "required": true
+        }
+      ],
+      "solution": "class SyncService : Service() {\n    private lateinit var wakeLock: PowerManager.WakeLock\n\n    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {\n        wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)\n            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, \"app:sync\")\n        wakeLock.acquire(10 * 60 * 1000L) // 10-minute timeout\n\n        thread {\n            try {\n                performSync()\n            } finally {\n                if (wakeLock.isHeld) wakeLock.release()\n                stopSelf()\n            }\n        }\n        return START_NOT_STICKY\n    }\n}",
+      "explanation": "Two critical fixes: (1) <b>Timeout on acquire()</b> — if the wakelock is never manually released (crash, hang, logic error), it automatically expires after the timeout. Android Vitals flags wakelocks held >1 hour and penalizes your app listing. (2) <b>try/finally</b> — ensures release() runs even if performSync() throws. Always check <code>isHeld</code> before releasing to avoid <code>RuntimeException</code> from double-release.",
+      "hints": [
+        "What happens if performSync() throws an exception before release()?",
+        "How can you prevent the wakelock from being held forever if the code hangs?"
+      ]
+    },
+    {
+      "id": "bp-pwr-5",
+      "type": "multiple-choice",
+      "title": "Foreground Service Types (API 34+)",
+      "difficulty": "intermediate",
+      "description": "You are adding a music playback foreground service to an app targeting API 34. You declare <code>&lt;service android:name=\".MusicService\" /&gt;</code> in the manifest without specifying <code>foregroundServiceType</code>. What happens when you call <code>startForeground()</code>?",
+      "options": [
+        "It works normally — the type is optional",
+        "The service runs but logs a warning in Logcat",
+        "startForeground() throws MissingForegroundServiceTypeException at runtime",
+        "The app fails to install on API 34 devices"
+      ],
+      "correctIndex": 2,
+      "explanation": "Starting with <b>API 34 (Android 14)</b>, every foreground service must declare a <code>foregroundServiceType</code> in the manifest. Calling <code>startForeground()</code> without one throws <code>MissingForegroundServiceTypeException</code>. You must also hold the corresponding type-specific permission (e.g., <code>FOREGROUND_SERVICE_MEDIA_PLAYBACK</code>) and pass the type constant to <code>ServiceCompat.startForeground()</code>.",
+      "hints": [
+        "Android 14 made foreground service types mandatory, not optional",
+        "Think about when the error surfaces — at compile time, install time, or runtime?"
+      ]
+    },
+    {
+      "id": "bp-pwr-6",
+      "type": "trivia",
+      "title": "Background Execution Limits",
+      "difficulty": "advanced",
+      "description": "Explain the three major restrictions Android 8.0 (API 26) placed on background apps and the recommended migration path for each.",
+      "keywords": [
+        "service",
+        "broadcast",
+        "startService",
+        "IllegalStateException",
+        "implicit",
+        "manifest",
+        "WorkManager",
+        "foreground",
+        "registerReceiver",
+        "location"
+      ],
+      "answer": "Android 8.0 introduced three restrictions: (1) Background service limits — calling startService() when the app is in the background throws IllegalStateException. Migrate to WorkManager for deferrable work or startForegroundService() for user-visible tasks. (2) Implicit broadcast restrictions — most implicit broadcasts registered in the manifest won't be delivered to background apps. Register them dynamically with registerReceiver() at runtime, or use explicit broadcasts. (3) Background location — further restricted in API 29+, requiring a separate ACCESS_BACKGROUND_LOCATION permission. Use foreground services with the location type for continuous location needs.",
+      "explanation": "These restrictions were Google's first major push to curb battery drain from background apps. Before API 26, any app could start services, listen for system broadcasts, and poll location indefinitely — even if the user hadn't opened the app in weeks. The restrictions forced the ecosystem toward battery-efficient APIs like WorkManager and runtime-registered receivers.",
+      "hints": [
+        "Think about what a malicious or poorly-written app could do before these limits existed",
+        "Each restriction has a recommended replacement API"
+      ]
+    },
+    {
+      "id": "bp-pwr-7",
+      "type": "fill-blank",
+      "title": "Location Batching for Battery",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to create a battery-efficient location request that batches updates and skips locations when the device barely moves.",
+      "code": "val locationRequest = LocationRequest.Builder(\n    Priority.PRIORITY_BALANCED_POWER_ACCURACY,\n    60_000L // request every 60 seconds\n)\n    .___1___(300_000L)  // batch up to 5 minutes\n    .___2___(50f)       // skip if moved <50 meters\n    .build()",
+      "blanks": [
+        {
+          "answer": [
+            "setMaxUpdateDelayMillis"
+          ],
+          "hint": "This method tells the system how long it can hold location updates before delivering them in a batch"
+        },
+        {
+          "answer": [
+            "setMinUpdateDistanceMeters"
+          ],
+          "hint": "This method sets a minimum displacement threshold — no update if the device barely moved"
+        }
+      ],
+      "explanation": "<code>setMaxUpdateDelayMillis()</code> enables <b>location batching</b> — the system can accumulate multiple location fixes and deliver them all at once, letting the main processor sleep between deliveries. <code>setMinUpdateDistanceMeters()</code> adds a displacement filter so the app doesn't wake up for trivial movement. Together, these can reduce location-related battery drain by 50-80% compared to unbatched, zero-threshold requests.",
+      "hints": [
+        "One controls HOW LONG the system can delay delivery, the other controls HOW FAR the device must move",
+        "Both are methods on LocationRequest.Builder"
+      ]
+    },
+    {
+      "id": "bp-pwr-8",
+      "type": "what-does-this-do",
+      "title": "Deep Doze vs Light Doze",
+      "difficulty": "advanced",
+      "description": "A messaging app uses a regular <code>AlarmManager.setExact()</code> alarm to poll for new messages every 5 minutes. A foreground service plays music. The phone has been sitting on a desk, screen off, for 1 hour. What is the state of each?",
+      "code": "// Alarm setup\nval alarm = getSystemService(AlarmManager::class.java)\nalarm.setExact(\n    AlarmManager.ELAPSED_REALTIME_WAKEUP,\n    SystemClock.elapsedRealtime() + 5 * 60 * 1000,\n    pendingIntent\n)\n\n// Foreground service\nclass MusicService : Service() {\n    override fun onStartCommand(...): Int {\n        startForeground(1, notification)\n        mediaPlayer.start()\n        return START_STICKY\n    }\n}",
+      "options": [
+        "Both the alarm and music service work normally",
+        "The alarm fires every 5 minutes as scheduled; the music service is killed by Doze",
+        "The alarm is deferred to the next maintenance window; the music service continues playing but has no network access",
+        "Both are completely blocked until the user picks up the phone"
+      ],
+      "correctIndex": 2,
+      "explanation": "In deep Doze: (1) <code>setExact()</code> alarms are <b>deferred</b> to the next maintenance window — only <code>setExactAndAllowWhileIdle()</code> or <code>setAlarmClock()</code> can fire during Doze (and even then, throttled to ~1 per 9 minutes). (2) <b>Foreground services continue running</b> — Doze does not kill them — but <b>network access is blocked</b>. The music plays fine (local playback), but if it needs to stream, it will fail. This is a common gotcha: foreground service + Doze = service alive but network dead.",
+      "hints": [
+        "Doze treats foreground services and alarms very differently",
+        "Think about what 'deferred' means vs. 'killed'"
+      ]
+    }
+  ]
+}

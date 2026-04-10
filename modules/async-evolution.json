@@ -1,0 +1,203 @@
+{
+  "id": "async-evolution",
+  "title": "The Async Evolution in Android",
+  "icon": "⏳",
+  "description": "Complete timeline of async mechanisms from Thread to Coroutines — why each existed, why it was replaced, and what to use today",
+  "references": [
+    {"title": "Android Developers — Background Tasks Overview", "url": "https://developer.android.com/develop/background-work", "type": "docs"},
+    {"title": "Android Developers — Deprecated AsyncTask", "url": "https://developer.android.com/reference/android/os/AsyncTask", "type": "docs"},
+    {"title": "Android Developers — WorkManager", "url": "https://developer.android.com/topic/libraries/architecture/workmanager", "type": "docs"},
+    {"title": "Kotlin Coroutines Guide", "url": "https://kotlinlang.org/docs/coroutines-guide.html", "type": "docs"},
+    {"title": "Android Developers — Threading on Android", "url": "https://developer.android.com/guide/background/threading", "type": "article"},
+    {"title": "Jake Wharton — The Evolution of Android Async", "url": "https://jakewharton.com/", "type": "article"}
+  ],
+  "lesson": "<h3>The Async Timeline</h3>\n<p>Android's approach to background work has evolved dramatically over 15+ years. Each generation solved real problems but introduced new ones. Understanding this history is <b>critical</b> for interviews — you'll encounter all of these in legacy codebases, and interviewers love asking \"why was X replaced by Y?\"</p>\n<div class=\"diagram\">ANDROID ASYNC EVOLUTION TIMELINE\n\n2008 ──── java.lang.Thread (API 1)\n  │         Raw threads, no lifecycle awareness\n  │\n2009 ──── AsyncTask (API 3)\n  │         Simplified background → UI updates\n  │         ⚠ Activity leaks, serial/parallel confusion\n  │\n2009 ──── Handler + HandlerThread\n  │         Message queue pattern, foundation of UI thread\n  │         Still used internally by Android framework\n  │\n2010 ──── java.util.concurrent (Executors)\n  │         Thread pools, Future, proper concurrency\n  │         ⚠ Future.get() blocks the calling thread\n  │\n2011 ──── IntentService (API 1, popular ~2011)\n  │         Background thread + auto-stop\n  │         ⚠ No easy result delivery, deprecated API 30\n  │\n2013 ──── Loader / AsyncTaskLoader (API 11)\n  │         Lifecycle-aware data loading\n  │         ⚠ Complex API, deprecated in favor of ViewModel\n  │\n2014 ──── JobScheduler (API 21)\n  │         System-level scheduling with constraints\n  │         ⚠ API 21+ only, verbose API\n  │\n2016 ──── RxJava\n  │         Reactive streams, composable operators\n  │         ⚠ Steep learning curve, heavy dependency\n  │\n2018 ──── Kotlin Coroutines (stable)\n  │         Structured concurrency, lightweight, sequential\n  │         ✓ Current standard for async code\n  │\n2019 ──── WorkManager (Jetpack)\n          Guaranteed background work, backward compatible\n          ✓ Current standard for deferrable tasks</div>\n\n<hr class=\"section-divider\">\n<h3>1. java.lang.Thread (API 1, 2008)</h3>\n<p><b>Why it existed:</b> The only option at launch. Android enforces the \"main thread\" rule — network/disk on the main thread throws <code>NetworkOnMainThreadException</code> (API 11+). Developers had to manually create threads.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// The raw approach — still valid but dangerous</span>\nclass MyActivity : Activity() {\n    fun fetchData() {\n        Thread {\n            val data = api.fetchUser()  <span class=\"cmt\">// background thread ✓</span>\n\n            <span class=\"cmt\">// Can't touch views from background thread!</span>\n            <span class=\"cmt\">// textView.text = data  ← CalledFromWrongThreadException</span>\n\n            runOnUiThread {\n                textView.text = data.name  <span class=\"cmt\">// switch back to main ✓</span>\n            }\n        }.start()\n    }\n}</div>\n<div class=\"warn-box\"><b>Problems with raw Thread:</b><br>\n1. <b>No lifecycle awareness</b> — thread keeps running after Activity is destroyed → crash on UI update<br>\n2. <b>No cancellation</b> — no built-in way to cancel work when user navigates away<br>\n3. <b>Thread explosion</b> — each Thread is ~1MB stack; creating 100 threads = 100MB<br>\n4. <b>Manual thread switching</b> — have to call <code>runOnUiThread</code> to update UI<br>\n5. <b>No error handling</b> — uncaught exception crashes the app</div>\n\n<hr class=\"section-divider\">\n<h3>2. AsyncTask (API 3, Deprecated API 30)</h3>\n<p><b>Why it existed:</b> Solved the \"background work → update UI\" pattern with a structured API. The most common async tool for years.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// The canonical AsyncTask — DO NOT use in new code</span>\nclass FetchUserTask(private val activity: MyActivity) :\n    AsyncTask&lt;String, Int, User&gt;() {\n\n    override fun doInBackground(vararg params: String): User {\n        <span class=\"cmt\">// Runs on background thread</span>\n        publishProgress(50)\n        return api.fetchUser(params[0])\n    }\n\n    override fun onProgressUpdate(vararg values: Int) {\n        <span class=\"cmt\">// Runs on main thread</span>\n        activity.progressBar.progress = values[0]\n    }\n\n    override fun onPostExecute(result: User) {\n        <span class=\"cmt\">// Runs on main thread — can update UI</span>\n        activity.textView.text = result.name  <span class=\"cmt\">// ⚠ Activity may be dead!</span>\n    }\n}\n\n<span class=\"cmt\">// Usage:</span>\nFetchUserTask(this).execute(\"user123\")</div>\n<div class=\"warn-box\"><b>Why AsyncTask was deprecated (API 30):</b><br>\n1. <b>Activity leak</b> — holds reference to Activity; if Activity is destroyed during work, the reference keeps it alive (memory leak) and <code>onPostExecute</code> crashes on a dead view<br>\n2. <b>Serial vs Parallel confusion</b> — pre-Honeycomb: parallel by default; Honeycomb+: serial by default. <code>executeOnExecutor(THREAD_POOL_EXECUTOR)</code> for parallel. Most devs didn't know this.<br>\n3. <b>No lifecycle awareness</b> — doesn't cancel on config change. Rotation = new Activity = old AsyncTask updating dead Activity<br>\n4. <b>Swallowed exceptions</b> — exception in <code>doInBackground</code> silently fails if not handled</div>\n\n<hr class=\"section-divider\">\n<h3>3. Handler + HandlerThread</h3>\n<p><b>Why it existed:</b> The <b>foundation</b> of Android's threading model. The main thread IS a Handler+Looper. Every <code>View.post()</code>, <code>runOnUiThread()</code>, and <code>Activity.runOnUiThread()</code> uses Handler internally.</p>\n<div class=\"info-box\">This mechanism is covered in depth in the <b>Handler & Looper</b> module. Here's the key pattern for background work:</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// HandlerThread = Thread with its own Looper (message queue)</span>\nval bgThread = HandlerThread(\"BackgroundWork\").apply { start() }\nval bgHandler = Handler(bgThread.looper)\nval mainHandler = Handler(Looper.getMainLooper())\n\n<span class=\"cmt\">// Post work to background thread</span>\nbgHandler.post {\n    val data = api.fetchUser()  <span class=\"cmt\">// runs on bgThread</span>\n    mainHandler.post {\n        textView.text = data.name  <span class=\"cmt\">// runs on main thread</span>\n    }\n}\n\n<span class=\"cmt\">// Delayed work</span>\nmainHandler.postDelayed({ refreshUi() }, 5000)\n\n<span class=\"cmt\">// MUST quit when done to prevent leak</span>\nbgThread.quitSafely()</div>\n<p><b>Still used for:</b> <code>Dispatchers.Main</code> uses Handler internally. Android framework services use HandlerThread extensively. You rarely create them directly anymore, but understanding them is essential.</p>\n\n<hr class=\"section-divider\">\n<h3>4. java.util.concurrent (Executors, ThreadPoolExecutor)</h3>\n<p><b>Why it existed:</b> Java's standard concurrency library. Proper thread pools prevent thread explosion and reuse threads efficiently.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Thread pool types</span>\nval fixedPool = Executors.newFixedThreadPool(4)       <span class=\"cmt\">// exactly 4 threads</span>\nval cachedPool = Executors.newCachedThreadPool()      <span class=\"cmt\">// grows/shrinks as needed</span>\nval singleThread = Executors.newSingleThreadExecutor() <span class=\"cmt\">// serial execution</span>\nval scheduled = Executors.newScheduledThreadPool(2)    <span class=\"cmt\">// delayed/periodic</span>\n\n<span class=\"cmt\">// Submit work</span>\nval future: Future&lt;User&gt; = fixedPool.submit(Callable {\n    api.fetchUser(\"user123\")\n})\n\n<span class=\"cmt\">// ⚠ BLOCKS the calling thread until result is ready!</span>\nval user = future.get()  <span class=\"cmt\">// DON'T call on Main thread!</span>\n\n<span class=\"cmt\">// With timeout (still blocks)</span>\nval user = future.get(10, TimeUnit.SECONDS)\n\n<span class=\"cmt\">// Cancel</span>\nfuture.cancel(true)  <span class=\"cmt\">// mayInterruptIfRunning</span></div>\n<div class=\"diagram\">Thread Pool Types — When to Use Each:\n\nnewFixedThreadPool(N)      N threads, LinkedBlockingQueue\n├─ Use: CPU-bound work (image processing)\n├─ N = Runtime.getRuntime().availableProcessors()\n└─ ⚠ Queue is unbounded → can OOM if tasks pile up\n\nnewCachedThreadPool()      0-∞ threads, SynchronousQueue\n├─ Use: Many short-lived I/O tasks\n├─ Threads idle for 60s are killed\n└─ ⚠ Can create too many threads under load\n\nnewSingleThreadExecutor()  1 thread, LinkedBlockingQueue\n├─ Use: Sequential operations (DB writes)\n└─ Guarantees FIFO ordering\n\nnewScheduledThreadPool(N)  N core threads, DelayedWorkQueue\n├─ Use: Periodic tasks (polling)\n└─ scheduleAtFixedRate / scheduleWithFixedDelay</div>\n<div class=\"warn-box\"><b>Key problem:</b> <code>Future.get()</code> is <b>blocking</b>. If you call it on the main thread, your UI freezes. Java 8 added <code>CompletableFuture</code> (API 24 on Android) for non-blocking composition, but its API is verbose compared to coroutines.</div>\n\n<hr class=\"section-divider\">\n<h3>5. IntentService (API 1, Deprecated API 30)</h3>\n<p><b>Why it existed:</b> Solved the \"fire-and-forget background work\" pattern. Runs in its own thread, processes intents sequentially, and auto-stops when the queue is empty.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// IntentService — deprecated, use WorkManager instead</span>\nclass UploadService : IntentService(\"UploadService\") {\n\n    override fun onHandleIntent(intent: Intent?) {\n        <span class=\"cmt\">// Runs on a BACKGROUND thread (not main)</span>\n        val filePath = intent?.getStringExtra(\"file_path\") ?: return\n        val file = File(filePath)\n        api.upload(file)  <span class=\"cmt\">// blocking call is fine here</span>\n        <span class=\"cmt\">// Service auto-stops when queue is empty</span>\n    }\n}\n\n<span class=\"cmt\">// Start it:</span>\nval intent = Intent(this, UploadService::class.java)\nintent.putExtra(\"file_path\", \"/sdcard/photo.jpg\")\nstartService(intent)</div>\n<div class=\"warn-box\"><b>Why IntentService was deprecated:</b><br>\n1. <b>Background execution limits</b> — Android 8.0+ restricts background service starts; <code>startService()</code> throws <code>IllegalStateException</code> from background<br>\n2. <b>No easy result callback</b> — had to use <code>LocalBroadcastManager</code> or <code>ResultReceiver</code> to send results back<br>\n3. <b>Not guaranteed</b> — system can kill it; no retry/constraint logic<br>\n4. Replaced by <code>WorkManager</code> for deferrable work, <code>Foreground Service</code> for ongoing work</div>\n\n<hr class=\"section-divider\">\n<h3>6. Loader / AsyncTaskLoader (API 11, Deprecated)</h3>\n<p><b>Why it existed:</b> First attempt at lifecycle-aware data loading. Survives configuration changes (rotation) and caches results.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// AsyncTaskLoader — deprecated, use ViewModel + coroutines</span>\nclass UserLoader(context: Context, private val userId: String) :\n    AsyncTaskLoader&lt;User&gt;(context) {\n\n    private var cachedUser: User? = null\n\n    override fun loadInBackground(): User {\n        return api.fetchUser(userId)  <span class=\"cmt\">// background thread</span>\n    }\n\n    override fun deliverResult(data: User?) {\n        cachedUser = data\n        super.deliverResult(data)\n    }\n\n    override fun onStartLoading() {\n        cachedUser?.let { deliverResult(it) } ?: forceLoad()\n    }\n}\n\n<span class=\"cmt\">// In Activity (using LoaderManager):</span>\nsupportLoaderManager.initLoader(0, null,\n    object : LoaderManager.LoaderCallbacks&lt;User&gt; {\n        override fun onCreateLoader(id: Int, args: Bundle?) =\n            UserLoader(this@MyActivity, \"user123\")\n        override fun onLoadFinished(loader: Loader&lt;User&gt;, data: User) {\n            textView.text = data.name\n        }\n        override fun onLoaderReset(loader: Loader&lt;User&gt;) {}\n    })</div>\n<div class=\"warn-box\"><b>Why Loaders were deprecated:</b><br>\n1. <b>Extremely verbose</b> — simple data load requires multiple callbacks and a custom Loader subclass<br>\n2. <b>Tied to Activity/Fragment</b> — LoaderManager lifecycle was confusing<br>\n3. <b>Replaced by ViewModel + LiveData/Flow</b> — same benefits (survives rotation, cached) with far less code</div>\n\n<hr class=\"section-divider\">\n<h3>7. JobScheduler (API 21)</h3>\n<p><b>Why it existed:</b> Android needed system-level scheduling that respects battery, network, and charging constraints. Jobs survive reboots and are batched by the system for efficiency.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// JobScheduler — still valid but WorkManager wraps it</span>\nclass SyncJobService : JobService() {\n    override fun onStartJob(params: JobParameters): Boolean {\n        <span class=\"cmt\">// Runs on MAIN thread! Must offload work.</span>\n        Thread {\n            performSync()\n            jobFinished(params, false)  <span class=\"cmt\">// false = don't reschedule</span>\n        }.start()\n        return true  <span class=\"cmt\">// true = work is still running async</span>\n    }\n\n    override fun onStopJob(params: JobParameters): Boolean {\n        return true  <span class=\"cmt\">// true = reschedule if stopped early</span>\n    }\n}\n\n<span class=\"cmt\">// Schedule it:</span>\nval jobScheduler = getSystemService(Context.JOB_SCHEDULER_SERVICE) as JobScheduler\nval job = JobInfo.Builder(JOB_ID, ComponentName(this, SyncJobService::class.java))\n    .setRequiredNetworkType(JobInfo.NETWORK_TYPE_UNMETERED)  <span class=\"cmt\">// WiFi only</span>\n    .setRequiresCharging(true)\n    .setPersisted(true)  <span class=\"cmt\">// survive reboot</span>\n    .setPeriodic(15 * 60 * 1000)  <span class=\"cmt\">// every 15 min minimum</span>\n    .build()\njobScheduler.schedule(job)</div>\n<p><b>Still valid but:</b> WorkManager uses JobScheduler internally on API 23+ and provides a simpler API, backward compatibility, and chaining.</p>\n\n<hr class=\"section-divider\">\n<h3>8. RxJava (2016)</h3>\n<p><b>Why it existed:</b> Brought reactive programming to Android. Composable stream operators, powerful threading control (<code>subscribeOn</code>/<code>observeOn</code>), and elegant chaining. Dominated Android async from 2016-2019.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// RxJava — powerful but complex</span>\napi.fetchUser(\"user123\")                          <span class=\"cmt\">// returns Single&lt;User&gt;</span>\n    .subscribeOn(Schedulers.io())                 <span class=\"cmt\">// run on IO thread</span>\n    .observeOn(AndroidSchedulers.mainThread())    <span class=\"cmt\">// deliver on Main</span>\n    .flatMap { user ->\n        api.fetchPosts(user.id)                   <span class=\"cmt\">// chain another call</span>\n    }\n    .map { posts -> posts.filter { it.isPublished } } <span class=\"cmt\">// transform</span>\n    .subscribe(\n        { posts -> adapter.submitList(posts) },   <span class=\"cmt\">// onSuccess</span>\n        { error -> showError(error) }             <span class=\"cmt\">// onError</span>\n    )\n\n<span class=\"cmt\">// ⚠ MUST dispose to prevent leaks!</span>\nprivate val disposables = CompositeDisposable()\n\noverride fun onDestroy() {\n    disposables.clear()  <span class=\"cmt\">// cancel all subscriptions</span>\n    super.onDestroy()\n}</div>\n<div class=\"diagram\">RxJava Core Types:\n\nObservable&lt;T&gt;    0..N items, no backpressure\nFlowable&lt;T&gt;      0..N items, WITH backpressure\nSingle&lt;T&gt;        Exactly 1 item or error\nMaybe&lt;T&gt;         0 or 1 item or error\nCompletable      No items, just success/error\n\nKey Operators:\nmap()           Transform each item\nflatMap()       Chain async operations\nfilter()        Filter items\nzip()           Combine multiple streams\ndebounce()      Wait for pause in emissions\nswitchMap()     Cancel previous, use latest</div>\n<div class=\"warn-box\"><b>Why RxJava lost to Coroutines:</b><br>\n1. <b>Steep learning curve</b> — Observable vs Flowable vs Single vs Maybe vs Completable; backpressure strategies; marble diagrams<br>\n2. <b>Heavy dependency</b> — adds ~2MB to APK, thousands of methods (dex limit concerns)<br>\n3. <b>Manual disposal</b> — must manage CompositeDisposable per lifecycle; forgetting = memory leak<br>\n4. <b>Stack traces from hell</b> — errors show internal RxJava machinery, not your code<br>\n5. <b>Looks nothing like sequential code</b> — callback chains wrapped in operators</div>\n\n<hr class=\"section-divider\">\n<h3>9. Kotlin Coroutines (2018, stable)</h3>\n<p><b>Why it won:</b> Sequential-looking code that runs asynchronously. Lightweight (suspend instead of blocking), structured concurrency (automatic cancellation), and first-class Android support via <code>viewModelScope</code> / <code>lifecycleScope</code>.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// The same user+posts logic — compare to RxJava above</span>\nviewModelScope.launch {\n    try {\n        val user = api.fetchUser(\"user123\")          <span class=\"cmt\">// suspend, non-blocking</span>\n        val posts = api.fetchPosts(user.id)           <span class=\"cmt\">// sequential, clear</span>\n        val published = posts.filter { it.isPublished }\n        _uiState.value = UiState.Success(published)\n    } catch (e: Exception) {\n        _uiState.value = UiState.Error(e.message)\n    }\n}\n\n<span class=\"cmt\">// Parallel? Just use async:</span>\nviewModelScope.launch {\n    val user = async { api.fetchUser(id) }\n    val posts = async { api.fetchPosts(id) }\n    showProfile(user.await(), posts.await())  <span class=\"cmt\">// total = slowest</span>\n}\n\n<span class=\"cmt\">// No manual disposal! viewModelScope auto-cancels on onCleared()</span></div>\n<div class=\"info-box\"><b>See the Coroutines Deep Dive module</b> for scopes, dispatchers, exception handling, SupervisorJob, and advanced patterns.</div>\n\n<hr class=\"section-divider\">\n<h3>10. WorkManager (2019, Jetpack)</h3>\n<p><b>Why it exists:</b> For <b>guaranteed</b> background work that must eventually run, even if the app is killed or the device reboots. Uses JobScheduler (API 23+), AlarmManager + BroadcastReceiver (older APIs) internally.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// WorkManager — guaranteed background execution</span>\nclass UploadWorker(ctx: Context, params: WorkerParameters) :\n    CoroutineWorker(ctx, params) {\n\n    override suspend fun doWork(): Result {\n        val filePath = inputData.getString(\"file_path\") ?: return Result.failure()\n        return try {\n            api.upload(File(filePath))\n            Result.success()\n        } catch (e: Exception) {\n            if (runAttemptCount < 3) Result.retry() else Result.failure()\n        }\n    }\n}\n\n<span class=\"cmt\">// Schedule it:</span>\nval request = OneTimeWorkRequestBuilder&lt;UploadWorker&gt;()\n    .setConstraints(Constraints.Builder()\n        .setRequiredNetworkType(NetworkType.CONNECTED)\n        .setRequiresBatteryNotLow(true)\n        .build())\n    .setInputData(workDataOf(\"file_path\" to \"/sdcard/photo.jpg\"))\n    .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)\n    .build()\n\nWorkManager.getInstance(context).enqueue(request)\n\n<span class=\"cmt\">// Chaining:</span>\nWorkManager.getInstance(context)\n    .beginWith(compressWork)\n    .then(uploadWork)\n    .then(cleanupWork)\n    .enqueue()</div>\n\n<hr class=\"section-divider\">\n<h3>11. Decision Matrix: What to Use When</h3>\n<div class=\"diagram\">CHOOSING THE RIGHT ASYNC MECHANISM (2024+)\n\n┌─────────────────────────────────────────────────────────────┐\n│  Is the work DEFERRABLE (can run later)?                    │\n│                                                             │\n│  YES ──► Must SURVIVE app death / reboot?                   │\n│          │                                                  │\n│          YES ──► WorkManager                                │\n│          │       (upload, sync, periodic cleanup)            │\n│          │                                                  │\n│          NO  ──► Kotlin Coroutines                          │\n│                  (viewModelScope / lifecycleScope)           │\n│                                                             │\n│  NO (must run NOW) ──► User-visible / ongoing?              │\n│                        │                                    │\n│                        YES ──► Foreground Service           │\n│                        │       (music, navigation, upload)  │\n│                        │                                    │\n│                        NO  ──► Kotlin Coroutines            │\n│                                (withContext, async/await)   │\n└─────────────────────────────────────────────────────────────┘</div>\n<table>\n<tr><th>Scenario</th><th>Use</th><th>Why Not Others</th></tr>\n<tr><td>API call → update UI</td><td>Coroutines (viewModelScope)</td><td>AsyncTask deprecated, RxJava overkill</td></tr>\n<tr><td>Upload file reliably</td><td>WorkManager</td><td>Must survive process death</td></tr>\n<tr><td>Music playback</td><td>Foreground Service</td><td>User-visible, long-running</td></tr>\n<tr><td>Periodic sync every 15 min</td><td>WorkManager (periodic)</td><td>JobScheduler works but WM is simpler</td></tr>\n<tr><td>Parallel API calls</td><td>Coroutines (async/await)</td><td>Thread pools are too low-level</td></tr>\n<tr><td>Database query</td><td>Coroutines (Room suspend)</td><td>Room has built-in suspend support</td></tr>\n<tr><td>Delayed UI action (500ms)</td><td>Handler.postDelayed or delay()</td><td>Simple timer, no heavy framework needed</td></tr>\n<tr><td>Reactive UI stream</td><td>Flow / StateFlow</td><td>RxJava is valid but heavier</td></tr>\n</table>\n<div class=\"warn-box\"><b>Interview tip:</b> Never say \"just use coroutines for everything.\" WorkManager exists because coroutines die with your process. Foreground Services exist because some work must be visible. Know which tool fits which constraint.</div>",
+  "questions": [
+    {
+      "id": "ae-1",
+      "type": "multiple-choice",
+      "title": "AsyncTask's Fatal Flaw",
+      "difficulty": "intermediate",
+      "description": "Why was <code>AsyncTask</code> deprecated in Android API 30?",
+      "options": [
+        "It was too slow — raw threads were faster",
+        "It held an implicit reference to the Activity, causing memory leaks on configuration changes and potential crashes in onPostExecute",
+        "Google wanted to force everyone to use Kotlin",
+        "It didn't support background threads"
+      ],
+      "correctIndex": 1,
+      "explanation": "AsyncTask's biggest problem was the Activity leak. A typical <code>AsyncTask</code> subclass holds a reference to the outer Activity (either explicitly or as a non-static inner class). When the Activity is destroyed during rotation, the AsyncTask keeps it alive in memory. Worse, <code>onPostExecute()</code> then tries to update views on a dead Activity, causing crashes. This also combined with the serial-vs-parallel confusion: pre-Honeycomb tasks ran in parallel, post-Honeycomb they ran serially by default, surprising many developers.",
+      "hints": [
+        "Think about what happens when the user rotates the screen while AsyncTask is running",
+        "What object does a non-static inner class hold a reference to?"
+      ]
+    },
+    {
+      "id": "ae-2",
+      "type": "what-does-this-do",
+      "title": "Thread vs Coroutine Resource Usage",
+      "difficulty": "intermediate",
+      "description": "What happens when you run this code? Will it succeed or fail, and why?",
+      "code": "// Approach A: Raw Threads\nfun launchWithThreads() {\n    repeat(100_000) {\n        Thread {\n            Thread.sleep(5000)\n        }.start()\n    }\n}\n\n// Approach B: Coroutines\nfun launchWithCoroutines() = runBlocking {\n    repeat(100_000) {\n        launch {\n            delay(5000)\n        }\n    }\n}",
+      "options": [
+        "Both succeed — modern devices have enough memory",
+        "Approach A throws OutOfMemoryError (100K threads x ~1MB stack = ~100GB). Approach B succeeds because coroutines are lightweight and suspend instead of blocking threads.",
+        "Both throw OutOfMemoryError",
+        "Approach A succeeds, Approach B fails because coroutines have a limit"
+      ],
+      "correctIndex": 1,
+      "explanation": "Each JVM thread allocates ~1MB of stack space. 100,000 threads would require ~100GB of memory, which will crash with <code>OutOfMemoryError</code>. Coroutines are fundamentally different — they are <b>suspended computations</b> stored as small objects on the heap (a few hundred bytes each). 100,000 coroutines use only a few MB. The <code>delay()</code> function suspends the coroutine without blocking a thread, while <code>Thread.sleep()</code> blocks an actual OS thread.",
+      "hints": [
+        "How much memory does one Thread use? Multiply by 100,000.",
+        "Coroutines suspend (release the thread), threads block (hold the thread)."
+      ]
+    },
+    {
+      "id": "ae-3",
+      "type": "multiple-choice",
+      "title": "Future.get() Trap",
+      "difficulty": "intermediate",
+      "description": "What's wrong with this code?",
+      "code": "class MyActivity : Activity() {\n    private val executor = Executors.newFixedThreadPool(4)\n    \n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        \n        val future = executor.submit(Callable {\n            api.fetchUser(\"user123\")\n        })\n        \n        // Update UI with result\n        val user = future.get()\n        textView.text = user.name\n    }\n}",
+      "options": [
+        "The executor should be newCachedThreadPool instead",
+        "future.get() blocks the main thread — the UI freezes until the network call completes, potentially causing an ANR",
+        "You can't use executors in an Activity",
+        "The code is fine, future.get() returns immediately"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>Future.get()</code> is a <b>blocking call</b>. It suspends the calling thread until the result is available. Since this is called in <code>onCreate()</code> on the main thread, the UI freezes for the entire duration of the network call. If the call takes longer than 5 seconds, Android shows an ANR (Application Not Responding) dialog. The fix is to use a callback, <code>CompletableFuture.thenAccept()</code>, or better yet, Kotlin coroutines.",
+      "hints": [
+        "What thread is onCreate() running on?",
+        "What does 'blocking' mean for the UI?"
+      ]
+    },
+    {
+      "id": "ae-4",
+      "type": "fix-bug",
+      "title": "Migrate AsyncTask to Coroutines",
+      "difficulty": "advanced",
+      "description": "This legacy code uses AsyncTask and has the classic Activity leak bug. Migrate it to use coroutines with proper lifecycle awareness.",
+      "starterCode": "class UserActivity : AppCompatActivity() {\n    private lateinit var textView: TextView\n    \n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        textView = findViewById(R.id.textView)\n        \n        // BUG: AsyncTask leaks Activity, crashes on rotation\n        object : AsyncTask<String, Void, User>() {\n            override fun doInBackground(vararg params: String): User {\n                return api.fetchUser(params[0])\n            }\n            override fun onPostExecute(result: User) {\n                textView.text = result.name  // May crash!\n            }\n        }.execute(\"user123\")\n    }\n}",
+      "checks": [
+        {
+          "pattern": "lifecycleScope|viewModelScope",
+          "message": "Use a lifecycle-aware coroutine scope",
+          "required": true
+        },
+        {
+          "pattern": "launch|async",
+          "message": "Use launch or async to start the coroutine",
+          "required": true
+        },
+        {
+          "pattern": "withContext|Dispatchers",
+          "message": "Use withContext or a dispatcher for background work",
+          "required": true
+        }
+      ],
+      "solution": "class UserActivity : AppCompatActivity() {\n    private lateinit var textView: TextView\n    \n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        textView = findViewById(R.id.textView)\n        \n        lifecycleScope.launch {\n            try {\n                val user = withContext(Dispatchers.IO) {\n                    api.fetchUser(\"user123\")\n                }\n                textView.text = user.name  // Safe — auto-cancelled on destroy\n            } catch (e: Exception) {\n                textView.text = \"Error: ${e.message}\"\n            }\n        }\n    }\n}",
+      "explanation": "<code>lifecycleScope.launch</code> ties the coroutine to the Activity's lifecycle — it auto-cancels when the Activity is destroyed, so no leak and no crash on a dead view. <code>withContext(Dispatchers.IO)</code> moves the network call to a background thread. When it returns, we're back on Main automatically. The code reads sequentially, handles errors with standard try/catch, and has zero memory leak risk.",
+      "hints": [
+        "Which coroutine scope is tied to the Activity lifecycle?",
+        "How do you run a block on a background thread inside a coroutine?"
+      ]
+    },
+    {
+      "id": "ae-5",
+      "type": "multiple-choice",
+      "title": "WorkManager vs Coroutines",
+      "difficulty": "intermediate",
+      "description": "Your app needs to upload a photo to the server. The upload should succeed even if the user closes the app, the device reboots, or the network drops temporarily. Which mechanism should you use?",
+      "options": [
+        "Coroutines with viewModelScope — it's the modern approach",
+        "A Foreground Service — it prevents the process from being killed",
+        "WorkManager with network constraints and retry policy — it guarantees execution across process death and reboots",
+        "RxJava with retry operators"
+      ],
+      "correctIndex": 2,
+      "explanation": "This is a <b>guaranteed execution</b> scenario — the work must complete eventually regardless of process death or reboot. <code>viewModelScope</code> coroutines die when the ViewModel is cleared (and certainly when the process dies). A Foreground Service keeps the process alive but doesn't automatically retry on network failure or reboot. <code>WorkManager</code> persists work requests to a database, survives process death and reboot, supports network/battery constraints, and has built-in retry with backoff. It is specifically designed for this use case.",
+      "hints": [
+        "What happens to coroutines when the app process is killed?",
+        "Which mechanism persists work requests to survive process death?"
+      ]
+    },
+    {
+      "id": "ae-6",
+      "type": "multiple-choice",
+      "title": "RxJava vs Coroutines",
+      "difficulty": "intermediate",
+      "description": "A teammate argues that RxJava is strictly better than Coroutines because it has more operators (debounce, switchMap, combineLatest). What is the best counter-argument?",
+      "options": [
+        "Coroutines have all the same operators and more",
+        "RxJava is deprecated",
+        "Kotlin Flow provides equivalent reactive stream operators (debounce, flatMapLatest, combine) while coroutines provide simpler sequential async code — you get both paradigms with lighter dependency and better stack traces",
+        "There is no counter-argument — RxJava is better for reactive streams"
+      ],
+      "correctIndex": 2,
+      "explanation": "Kotlin Flow covers the reactive stream use case with operators like <code>debounce</code>, <code>flatMapLatest</code> (equivalent to switchMap), <code>combine</code>, and <code>conflate</code>. Meanwhile, for simple async operations (API call → UI update), coroutines provide cleaner sequential code that doesn't need reactive operators at all. The combined coroutines + Flow package is smaller (~300KB vs ~2MB for RxJava), produces readable stack traces, integrates natively with lifecycle scopes, and doesn't require manual <code>CompositeDisposable</code> management.",
+      "hints": [
+        "Coroutines handle sequential async. What handles reactive streams in Kotlin?",
+        "Think about dependency size, learning curve, and stack traces."
+      ]
+    },
+    {
+      "id": "ae-7",
+      "type": "trivia",
+      "title": "The Evolution Story",
+      "difficulty": "advanced",
+      "description": "Trace the evolution: explain why raw Threads led to AsyncTask, why AsyncTask led to RxJava, and why RxJava led to Coroutines. What specific problem did each successor solve?",
+      "keywords": [
+        "Thread",
+        "lifecycle",
+        "leak",
+        "AsyncTask",
+        "callback",
+        "reactive",
+        "RxJava",
+        "sequential",
+        "structured",
+        "coroutine",
+        "cancel",
+        "scope"
+      ],
+      "answer": "Raw Threads had no lifecycle awareness and required manual runOnUiThread switching — AsyncTask wrapped this into doInBackground/onPostExecute but leaked Activities on rotation and had serial/parallel confusion. RxJava solved composability with operators and clean threading (subscribeOn/observeOn) but had a steep learning curve, heavy dependency, and required manual disposal. Kotlin Coroutines solved all three: sequential-looking code (no callback hell), structured concurrency (automatic cancellation via scopes), and lightweight threads (suspend instead of block). Each generation traded complexity in one area for simplicity in another, until coroutines achieved the best balance.",
+      "explanation": "The progression shows a clear trend: each generation added lifecycle awareness and reduced boilerplate. Threads had zero lifecycle integration. AsyncTask added UI-thread delivery but leaked. RxJava added composability but was complex. Coroutines achieved the goal: code that looks sequential, runs asynchronously, and cancels automatically when the lifecycle ends.",
+      "hints": [
+        "Each mechanism solved one problem but introduced another",
+        "Think about: lifecycle awareness, cancellation, code readability, and resource usage"
+      ]
+    },
+    {
+      "id": "ae-8",
+      "type": "fill-blank",
+      "title": "IntentService Replacement",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to create a WorkManager worker that replaces an IntentService for background file compression.",
+      "code": "class CompressWorker(ctx: Context, params: WorkerParameters) :\n    ___1___(ctx, params) {\n\n    override suspend fun ___2___(): Result {\n        val filePath = inputData.getString(\"file_path\")\n            ?: return Result.failure()\n        return try {\n            compressFile(File(filePath))\n            Result.___3___()\n        } catch (e: Exception) {\n            Result.___4___()\n        }\n    }\n}",
+      "blanks": [
+        {
+          "answer": ["CoroutineWorker"],
+          "hint": "WorkManager's coroutine-aware Worker base class"
+        },
+        {
+          "answer": ["doWork"],
+          "hint": "The main method that performs the background work"
+        },
+        {
+          "answer": ["success"],
+          "hint": "Return value when work completes successfully"
+        },
+        {
+          "answer": ["retry", "failure"],
+          "hint": "Return value to retry or fail the work"
+        }
+      ],
+      "explanation": "<code>CoroutineWorker</code> is the modern Worker base class that supports suspend functions. <code>doWork()</code> runs on a background dispatcher automatically. Return <code>Result.success()</code> on completion, <code>Result.retry()</code> to retry with backoff, or <code>Result.failure()</code> to mark as permanently failed. This replaces IntentService with guaranteed execution, constraint support, and coroutine integration.",
+      "hints": [
+        "This is the suspend-function-compatible worker class",
+        "WorkManager uses Result.success(), Result.retry(), and Result.failure()"
+      ]
+    }
+  ]
+}

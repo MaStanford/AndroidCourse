@@ -1,0 +1,219 @@
+{
+  "id": "handler-looper",
+  "title": "Handler, Looper & MessageQueue",
+  "icon": "📨",
+  "description": "The threading backbone of Android: Looper event loops, MessageQueue scheduling, Handler dispatch, and sync barriers",
+  "references": [
+    {"title": "Android Developers — Looper", "url": "https://developer.android.com/reference/android/os/Looper", "type": "docs"},
+    {"title": "Android Developers — Handler", "url": "https://developer.android.com/reference/android/os/Handler", "type": "docs"},
+    {"title": "Android Developers — HandlerThread", "url": "https://developer.android.com/reference/android/os/HandlerThread", "type": "docs"},
+    {"title": "AOSP Source — Looper.java", "url": "https://cs.android.com/android/platform/superproject/+/master:frameworks/base/core/java/android/os/Looper.java", "type": "source"},
+    {"title": "AOSP Source — MessageQueue.java", "url": "https://cs.android.com/android/platform/superproject/+/master:frameworks/base/core/java/android/os/MessageQueue.java", "type": "source"}
+  ],
+  "lesson": "<h3>The Core Mental Model: Thread + Looper + MessageQueue + Handler</h3>\n<p>Every Android app is built on top of one fundamental pattern: a <b>thread</b> running an infinite loop that pulls <b>messages</b> from a queue and dispatches them. This is how the UI thread works, and it is how you can make any thread work the same way.</p>\n<div class=\"diagram\">Thread\n  │\n  └── Looper (infinite loop)\n        │\n        └── MessageQueue (priority queue, sorted by timestamp)\n              │\n              ├── Message { what=1, obj=data, target=handler, when=T }\n              ├── Message { callback=Runnable, target=handler, when=T+50 }\n              └── Message { what=2, arg1=42, target=handler, when=T+100 }\n                    │\n                    ▼\n              Handler (sends messages IN, dispatches them OUT)\n                    │\n                    ├── sendMessage(msg)      → enqueue\n                    ├── post(runnable)         → enqueue as callback\n                    └── handleMessage(msg)     → called by Looper when dequeued</div>\n<div class=\"info-box\"><b>Key insight:</b> A Handler is always bound to exactly ONE Looper (and its thread). When you post a message through a Handler, the message runs on <b>that Handler's Looper thread</b>, not the thread you called post() from. This is what makes cross-thread communication work.</div>\n\n<hr class=\"section-divider\">\n<h3>How the Main Thread Works</h3>\n<p>The main thread is not special magic. It is a regular Java thread with a Looper attached. Here is (simplified) what <code>ActivityThread.main()</code> does when your app starts:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Simplified ActivityThread.main() — the REAL entry point of every Android app</span>\npublic static void main(String[] args) {\n    <span class=\"cmt\">// 1. Create the Looper + MessageQueue for this thread</span>\n    Looper.prepareMainLooper();\n\n    <span class=\"cmt\">// 2. Create the ActivityThread (manages Activity lifecycle)</span>\n    ActivityThread thread = new ActivityThread();\n    thread.attach(false);\n\n    <span class=\"cmt\">// 3. Get the main Handler (H class) for receiving system messages</span>\n    if (sMainThreadHandler == null) {\n        sMainThreadHandler = thread.getHandler();\n    }\n\n    <span class=\"cmt\">// 4. Start the infinite loop — this call NEVER returns</span>\n    Looper.loop();  <span class=\"cmt\">// ← blocks forever, processing messages</span>\n\n    throw new RuntimeException(\"Main thread loop unexpectedly exited\");\n}</div>\n<p>Every lifecycle callback (<code>onCreate</code>, <code>onResume</code>, <code>onDraw</code>) is just a <b>Message</b> processed by this loop. When people say \"don't block the main thread,\" they mean: don't do slow work inside a message handler, because the next message (e.g., drawing the next frame) is waiting in the queue.</p>\n<div class=\"diagram\">Main Thread Timeline:\n\n  ┌─────────┐  ┌──────────┐  ┌─────────┐  ┌──────────┐  ┌─────────┐\n  │ onCreate │  │ onResume │  │ INPUT   │  │ DRAW     │  │ INPUT   │\n  │ Activity │  │ Activity │  │ touch   │  │ frame    │  │ key     │\n  └─────────┘  └──────────┘  └─────────┘  └──────────┘  └─────────┘\n       ▲             ▲            ▲             ▲            ▲\n       │             │            │             │            │\n  ─────┴─────────────┴────────────┴─────────────┴────────────┴────▶ time\n       msg1          msg2         msg3          msg4         msg5\n\n  Looper.loop() pulls one message at a time, sequentially.\n  If msg3 takes 500ms → frame drop (ANR if >5s)</div>\n\n<hr class=\"section-divider\">\n<h3>MessageQueue: Priority Queue + epoll Blocking</h3>\n<p>MessageQueue is a <b>singly linked list sorted by <code>when</code> timestamp</b> (not FIFO — it is a time-ordered priority queue). Each Message has a <code>when</code> field indicating the earliest time it should be dispatched.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Simplified MessageQueue.enqueueMessage()</span>\nboolean enqueueMessage(Message msg, long when) {\n    synchronized (this) {\n        msg.when = when;\n        Message p = mMessages; <span class=\"cmt\">// head of linked list</span>\n\n        <span class=\"cmt\">// Insert at head if queue is empty, or new msg is earliest</span>\n        if (p == null || when == 0 || when < p.when) {\n            msg.next = p;\n            mMessages = msg;\n            needWake = true; <span class=\"cmt\">// wake the blocked thread</span>\n        } else {\n            <span class=\"cmt\">// Walk the list to find insertion point (sorted by when)</span>\n            Message prev;\n            for (;;) {\n                prev = p;\n                p = p.next;\n                if (p == null || when < p.when) break;\n            }\n            msg.next = p;\n            prev.next = msg;\n        }\n\n        if (needWake) {\n            nativeWake(mPtr); <span class=\"cmt\">// write to eventfd → wakes epoll</span>\n        }\n    }\n}\n\n<span class=\"cmt\">// Simplified MessageQueue.next() — called by Looper.loop()</span>\nMessage next() {\n    for (;;) {\n        nativePollOnce(mPtr, nextPollTimeoutMillis);\n        <span class=\"cmt\">// ↑ blocks on epoll_wait() until timeout or nativeWake()</span>\n\n        synchronized (this) {\n            Message msg = mMessages;\n            if (msg != null && msg.when <= now) {\n                mMessages = msg.next;\n                return msg; <span class=\"cmt\">// dispatch this message</span>\n            }\n            <span class=\"cmt\">// Not ready yet — compute how long to sleep</span>\n            nextPollTimeoutMillis = (int)(msg.when - now);\n        }\n    }\n}</div>\n<div class=\"info-box\"><b>Why epoll?</b> The main thread cannot busy-wait (that would burn CPU). Instead, <code>nativePollOnce()</code> calls Linux <code>epoll_wait()</code> which puts the thread to sleep with zero CPU cost. When a new message arrives, <code>nativeWake()</code> writes a byte to an eventfd, which wakes the epoll. This is why the main thread uses 0% CPU when idle.</div>\n\n<hr class=\"section-divider\">\n<h3>Handler: The Interface to the Queue</h3>\n<p>A Handler does two things: (1) <b>enqueue</b> messages into the MessageQueue, and (2) <b>dispatch</b> them when the Looper pulls them out. Every message carries a reference to the Handler that sent it (the <code>target</code> field).</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Creating a Handler — ALWAYS specify a Looper explicitly (API 30+)</span>\nval mainHandler = Handler(Looper.getMainLooper())\n\n<span class=\"cmt\">// ── Sending messages ──</span>\n\n<span class=\"cmt\">// Option 1: post a Runnable (wraps it in a Message internally)</span>\nmainHandler.post {\n    textView.text = \"Updated from background thread\"\n}\n\n<span class=\"cmt\">// Option 2: postDelayed — runs after a delay</span>\nmainHandler.postDelayed({\n    showTimeout()\n}, 5000) <span class=\"cmt\">// 5 seconds from now</span>\n\n<span class=\"cmt\">// Option 3: sendMessage — for structured message passing</span>\nval msg = Message.obtain(mainHandler, WHAT_UPDATE, dataObject)\nmainHandler.sendMessage(msg)\n\n<span class=\"cmt\">// Option 4: sendMessageAtFrontOfQueue — skip ahead (rare, use carefully)</span>\nmainHandler.sendMessageAtFrontOfQueue(urgentMsg)</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// Handling messages — override handleMessage for structured messages</span>\nclass MyHandler(looper: Looper) : Handler(looper) {\n    override fun handleMessage(msg: Message) {\n        when (msg.what) {\n            WHAT_UPDATE -> {\n                val data = msg.obj as MyData\n                updateUI(data)\n            }\n            WHAT_ERROR -> showError(msg.arg1)\n        }\n    }\n}\n\n<span class=\"cmt\">// Under the hood, Looper.loop() does this:</span>\n<span class=\"cmt\">//   msg.target.dispatchMessage(msg)</span>\n<span class=\"cmt\">// dispatchMessage checks:</span>\n<span class=\"cmt\">//   1. msg.callback != null? → run the Runnable</span>\n<span class=\"cmt\">//   2. mCallback != null?    → Handler.Callback.handleMessage()</span>\n<span class=\"cmt\">//   3. else                  → this.handleMessage(msg)</span></div>\n<div class=\"warn-box\"><b>Memory leak trap:</b> Never use <code>Handler()</code> (no-arg constructor, deprecated). An inner class Handler holds an implicit reference to the outer Activity. If a delayed message is in the queue when the Activity is destroyed, the Handler keeps the Activity alive → memory leak. Solutions: (1) use a static inner class with a WeakReference, (2) call <code>handler.removeCallbacksAndMessages(null)</code> in onDestroy, or (3) use <code>lifecycleScope</code> instead.</div>\n\n<hr class=\"section-divider\">\n<h3>Message Pooling: obtain() vs new Message()</h3>\n<p>Creating Message objects generates garbage. Android solves this with an <b>object pool</b> — a linked list of recycled Message objects. Always use <code>Message.obtain()</code> instead of <code>new Message()</code>.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// WRONG — allocates a new object, creates GC pressure</span>\nval msg = Message()\nmsg.what = 42\nhandler.sendMessage(msg)\n\n<span class=\"cmt\">// RIGHT — reuses a recycled Message from the pool</span>\nval msg = Message.obtain(handler, 42) <span class=\"cmt\">// sets target + what</span>\nhandler.sendMessage(msg)\n\n<span class=\"cmt\">// ALSO RIGHT — handler.obtainMessage() is a convenience wrapper</span>\nval msg = handler.obtainMessage(42, dataObj)\nhandler.sendMessage(msg)</div>\n<div class=\"diagram\">Message Pool (singly linked list, max 50):\n\n  sPool → [Message] → [Message] → [Message] → null\n              │\n              ▼\n  obtain()  → takes head, resets all fields, returns it\n  recycle() → clears fields, pushes onto head\n\n  Looper.loop() calls msg.recycleUnchecked() AUTOMATICALLY\n  after dispatch — you do NOT need to recycle manually.</div>\n<div class=\"info-box\"><b>Pool size limit:</b> The pool holds a maximum of 50 Messages (<code>MAX_POOL_SIZE = 50</code>). Under heavy messaging, some Messages will be GC'd, but the pool keeps the common case allocation-free.</div>\n\n<hr class=\"section-divider\">\n<h3>HandlerThread: A Thread with a Built-In Looper</h3>\n<p>Normally you need boilerplate to set up a Looper on a background thread. <code>HandlerThread</code> does it for you — it calls <code>Looper.prepare()</code> and <code>Looper.loop()</code> automatically.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Creating a background thread with its own message queue</span>\nval handlerThread = HandlerThread(\"MyBackgroundThread\")\nhandlerThread.start() <span class=\"cmt\">// Looper.prepare() + Looper.loop() happen inside</span>\n\n<span class=\"cmt\">// Create a Handler attached to that thread's Looper</span>\nval bgHandler = Handler(handlerThread.looper)\n\n<span class=\"cmt\">// Post work to the background thread</span>\nbgHandler.post {\n    <span class=\"cmt\">// This runs on \"MyBackgroundThread\", NOT the main thread</span>\n    val result = heavyComputation()\n\n    <span class=\"cmt\">// Switch back to main thread to update UI</span>\n    mainHandler.post {\n        textView.text = result\n    }\n}\n\n<span class=\"cmt\">// IMPORTANT: quit when done to avoid thread leaks</span>\nhandlerThread.quitSafely() <span class=\"cmt\">// processes remaining messages, then exits</span>\n<span class=\"cmt\">// vs handlerThread.quit()  — drops pending messages immediately</span></div>\n<div class=\"info-box\"><b>Use cases for HandlerThread:</b><br>\n- Serial background work (database writes, logging) where order matters<br>\n- Long-lived worker threads (sensor polling, Bluetooth communication)<br>\n- <code>IntentService</code> uses a HandlerThread internally<br>\n- Whenever you need a dedicated thread with a message queue</div>\n\n<hr class=\"section-divider\">\n<h3>Sync Barriers and Choreographer</h3>\n<p>A <b>sync barrier</b> is a special Message with <code>target == null</code>. When the Looper encounters it, it <b>skips all synchronous messages</b> and only dispatches <b>asynchronous</b> ones. This is how Android ensures that drawing commands get priority over everything else.</p>\n<div class=\"diagram\">Normal queue processing:\n  [msg1] → [msg2] → [msg3] → dispatch in order\n\nWith sync barrier:\n  [BARRIER] → [msg1:sync] → [msg2:ASYNC] → [msg3:sync] → [msg4:ASYNC]\n                  skip!         ▲              skip!         ▲\n                             dispatch                    dispatch\n\n  Barrier blocks ALL sync messages.\n  Only async messages pass through.\n  Barrier must be removed explicitly via removeSyncBarrier().</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// How Choreographer uses sync barriers (simplified):</span>\n\n<span class=\"cmt\">// 1. VSYNC signal arrives → Choreographer posts a barrier</span>\nMessageQueue queue = Looper.myQueue();\nint token = queue.postSyncBarrier(); <span class=\"cmt\">// blocks sync msgs</span>\n\n<span class=\"cmt\">// 2. Choreographer posts its traversal as an ASYNC message</span>\nMessage msg = Message.obtain(handler, traversalRunnable);\nmsg.setAsynchronous(true); <span class=\"cmt\">// this msg passes through the barrier</span>\nhandler.sendMessage(msg);\n\n<span class=\"cmt\">// 3. Traversal runs (measure/layout/draw) with priority</span>\n<span class=\"cmt\">// 4. After traversal, barrier is removed</span>\nqueue.removeSyncBarrier(token);\n<span class=\"cmt\">// Now sync messages flow again</span></div>\n<div class=\"warn-box\"><b>Danger:</b> If you post a sync barrier and forget to remove it, the main thread <b>freezes</b> — all regular messages (input events, lifecycle callbacks) are blocked forever. This is a real source of hard-to-debug ANRs. The <code>postSyncBarrier()</code> API is <code>@hide</code> for this reason — you cannot call it from app code without reflection.</div>\n\n<hr class=\"section-divider\">\n<h3>The Classic Async Pattern: Background Thread to Main Thread</h3>\n<p>Before coroutines and RxJava, this Handler pattern was the standard way to do background work and update the UI. Understanding it is essential because it is what coroutines compile down to under the hood.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// The classic pre-coroutine async pattern</span>\nclass MyActivity : AppCompatActivity() {\n    private val mainHandler = Handler(Looper.getMainLooper())\n    private lateinit var bgThread: HandlerThread\n    private lateinit var bgHandler: Handler\n\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n\n        <span class=\"cmt\">// Set up background thread</span>\n        bgThread = HandlerThread(\"NetworkThread\")\n        bgThread.start()\n        bgHandler = Handler(bgThread.looper)\n\n        loadData()\n    }\n\n    private fun loadData() {\n        showLoading()\n\n        <span class=\"cmt\">// Step 1: Run on background thread</span>\n        bgHandler.post {\n            val result = try {\n                api.fetchUser(userId) <span class=\"cmt\">// blocking network call — OK here</span>\n            } catch (e: Exception) {\n                null\n            }\n\n            <span class=\"cmt\">// Step 2: Switch back to main thread for UI update</span>\n            mainHandler.post {\n                if (result != null) {\n                    showUser(result)\n                } else {\n                    showError()\n                }\n            }\n        }\n    }\n\n    override fun onDestroy() {\n        super.onDestroy()\n        <span class=\"cmt\">// CRITICAL: prevent leaks and stale callbacks</span>\n        bgHandler.removeCallbacksAndMessages(null)\n        mainHandler.removeCallbacksAndMessages(null)\n        bgThread.quitSafely()\n    }\n}</div>\n<div class=\"info-box\"><b>Modern equivalent:</b> The Handler pattern above is exactly what <code>Dispatchers.Main</code> and <code>Dispatchers.IO</code> do under the hood. <code>Dispatchers.Main</code> posts Runnables to a Handler bound to the main Looper. <code>withContext(Dispatchers.IO)</code> posts work to an IO thread pool. Coroutines are syntactic sugar over Handler + thread pools.</div>\n\n<hr class=\"section-divider\">\n<h3>Looper Internals: prepare() and loop()</h3>\n<p>You can attach a Looper to any thread. The two key methods are <code>prepare()</code> (creates the Looper and MessageQueue) and <code>loop()</code> (starts the infinite dispatch loop).</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// How to turn any thread into a looper thread (what HandlerThread does)</span>\nThread {\n    Looper.prepare()  <span class=\"cmt\">// creates Looper + MessageQueue, stores in ThreadLocal</span>\n    val handler = Handler(Looper.myLooper()!!)\n\n    <span class=\"cmt\">// Post an initial task</span>\n    handler.post { doSomething() }\n\n    Looper.loop()     <span class=\"cmt\">// blocks forever, processing messages</span>\n    <span class=\"cmt\">// Code here is unreachable unless quit() is called</span>\n}.start()\n\n<span class=\"cmt\">// ThreadLocal storage — each thread gets its own Looper</span>\n<span class=\"cmt\">// Looper.myLooper() returns the Looper for the CURRENT thread</span>\n<span class=\"cmt\">// Looper.getMainLooper() returns the main thread's Looper (global)</span></div>\n<div class=\"warn-box\"><b>Rules:</b><br>\n- <code>Looper.prepare()</code> can only be called <b>once per thread</b>. Calling it twice throws RuntimeException.<br>\n- <code>Looper.prepareMainLooper()</code> can only be called <b>once per app</b>. The framework calls it — you never should.<br>\n- A thread without <code>Looper.prepare()</code> cannot create a Handler. You will get: \"Can't create handler inside thread that has not called Looper.prepare()\"</div>\n\n<hr class=\"section-divider\">\n<h3>Quick Reference: Message Fields</h3>\n<table>\n<tr><th>Field</th><th>Type</th><th>Purpose</th></tr>\n<tr><td><code>what</code></td><td>int</td><td>Message type identifier (your custom constant)</td></tr>\n<tr><td><code>arg1, arg2</code></td><td>int</td><td>Lightweight int args (no allocation)</td></tr>\n<tr><td><code>obj</code></td><td>Object</td><td>Arbitrary data payload</td></tr>\n<tr><td><code>data</code></td><td>Bundle</td><td>Extra data (lazily allocated)</td></tr>\n<tr><td><code>target</code></td><td>Handler</td><td>Which Handler dispatches this message</td></tr>\n<tr><td><code>callback</code></td><td>Runnable</td><td>If set, run this instead of handleMessage()</td></tr>\n<tr><td><code>when</code></td><td>long</td><td>Timestamp for when to dispatch (uptimeMillis)</td></tr>\n<tr><td><code>next</code></td><td>Message</td><td>Next message in linked list (queue or pool)</td></tr>\n</table>",
+  "questions": [
+    {
+      "id": "hl-1",
+      "type": "multiple-choice",
+      "title": "Handler Thread Binding",
+      "difficulty": "intermediate",
+      "description": "A Handler is created on a background thread with <code>Handler(Looper.getMainLooper())</code>. When you call <code>handler.post { updateTextView() }</code> from that background thread, where does <code>updateTextView()</code> execute?",
+      "options": [
+        "On the background thread that called post()",
+        "On the main (UI) thread",
+        "On a new thread created by the Handler",
+        "It throws an exception because you can't create a Handler from a background thread"
+      ],
+      "correctIndex": 1,
+      "explanation": "A Handler is bound to the <b>Looper</b> passed to its constructor, not the thread that creates it. Since <code>Looper.getMainLooper()</code> is the main thread's Looper, the Runnable is enqueued into the main thread's MessageQueue and dispatched on the main thread. This is the fundamental mechanism for cross-thread communication in Android.",
+      "hints": [
+        "The Handler is bound to a Looper, not to the thread that created it",
+        "Think about which thread's MessageQueue the Runnable goes into"
+      ]
+    },
+    {
+      "id": "hl-2",
+      "type": "what-does-this-do",
+      "title": "Message Ordering",
+      "difficulty": "intermediate",
+      "description": "What is the output order and why?",
+      "code": "val handler = Handler(Looper.getMainLooper())\n\nhandler.postDelayed({ Log.d(\"TAG\", \"A\") }, 300)\nhandler.post { Log.d(\"TAG\", \"B\") }\nhandler.postDelayed({ Log.d(\"TAG\", \"C\") }, 100)\nhandler.post { Log.d(\"TAG\", \"D\") }",
+      "options": [
+        "A, B, C, D (insertion order)",
+        "B, D, C, A (immediate messages first, then by delay)",
+        "D, B, C, A (reverse order)",
+        "B, C, D, A (random order, threading is unpredictable)"
+      ],
+      "correctIndex": 1,
+      "explanation": "MessageQueue is sorted by <code>when</code> timestamp. <code>post()</code> sets <code>when = now</code>, so B and D have the earliest timestamps and run first (in insertion order since they have effectively equal times). <code>postDelayed(100)</code> puts C at now+100ms, and <code>postDelayed(300)</code> puts A at now+300ms. Result: <b>B, D, C, A</b>.",
+      "hints": [
+        "MessageQueue is not FIFO — it's sorted by timestamp",
+        "post() is equivalent to postDelayed(runnable, 0)"
+      ]
+    },
+    {
+      "id": "hl-3",
+      "type": "fix-bug",
+      "title": "Handler Memory Leak",
+      "difficulty": "advanced",
+      "description": "This code leaks the Activity. When the user rotates the device, the old Activity is destroyed but cannot be garbage collected. Fix the leak.",
+      "starterCode": "class MyActivity : AppCompatActivity() {\n    private val handler = Handler(Looper.getMainLooper())\n\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        // Schedule a delayed update in 30 seconds\n        handler.postDelayed({\n            // This lambda captures 'this' (the Activity)\n            textView.text = \"Updated!\"\n        }, 30_000)\n    }\n\n    // BUG: Activity rotates at T+5s.\n    // The delayed message sits in the queue for 25 more seconds,\n    // holding a reference to the destroyed Activity.\n}",
+      "checks": [
+        {
+          "pattern": "removeCallbacksAndMessages|removeCallbacks",
+          "message": "Remove pending messages in onDestroy to break the reference chain",
+          "required": true
+        },
+        {
+          "pattern": "onDestroy",
+          "message": "Clean up in onDestroy()",
+          "required": true
+        }
+      ],
+      "solution": "class MyActivity : AppCompatActivity() {\n    private val handler = Handler(Looper.getMainLooper())\n\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        handler.postDelayed({\n            textView.text = \"Updated!\"\n        }, 30_000)\n    }\n\n    override fun onDestroy() {\n        super.onDestroy()\n        // Remove ALL pending messages and callbacks\n        handler.removeCallbacksAndMessages(null)\n    }\n}",
+      "explanation": "When the Activity is destroyed (rotation), any pending messages in the MessageQueue still hold a reference to the Handler, which holds a reference to the Activity (via the lambda capturing <code>this</code>). Calling <code>handler.removeCallbacksAndMessages(null)</code> in <code>onDestroy()</code> clears all pending messages, breaking the reference chain and allowing the Activity to be garbage collected.",
+      "hints": [
+        "The delayed Runnable captures a reference to the Activity",
+        "Messages stay in the queue even after the Activity is destroyed",
+        "There's a Handler method that removes ALL pending work"
+      ]
+    },
+    {
+      "id": "hl-4",
+      "type": "multiple-choice",
+      "title": "Message.obtain() vs new Message()",
+      "difficulty": "intermediate",
+      "description": "Why should you use <code>Message.obtain()</code> instead of <code>new Message()</code>?",
+      "options": [
+        "Message.obtain() is thread-safe, new Message() is not",
+        "Message.obtain() recycles from an object pool, avoiding garbage collection pressure",
+        "new Message() is deprecated and throws an exception on API 30+",
+        "Message.obtain() runs the message immediately without queuing"
+      ],
+      "correctIndex": 1,
+      "explanation": "Android maintains a pool of up to 50 recycled Message objects in a singly linked list. <code>Message.obtain()</code> grabs one from the pool and resets its fields, avoiding allocation. After the Looper dispatches a message, it automatically returns it to the pool. On a busy main thread processing 60+ messages per second (every frame), this prevents significant GC pressure.",
+      "hints": [
+        "Think about what happens when you create thousands of short-lived objects",
+        "Android's main thread processes a LOT of messages — one per frame minimum"
+      ]
+    },
+    {
+      "id": "hl-5",
+      "type": "fill-blank",
+      "title": "HandlerThread Setup",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to create a background HandlerThread, post work to it, and clean up properly.",
+      "code": "val bgThread = ___1___(\"WorkerThread\")\nbgThread.___2___()\n\nval bgHandler = Handler(bgThread.___3___)\n\nbgHandler.post {\n    val result = doHeavyWork()\n    Handler(Looper.getMainLooper()).post {\n        textView.text = result\n    }\n}\n\n// In onDestroy:\nbgThread.___4___()",
+      "blanks": [
+        {
+          "answer": ["HandlerThread"],
+          "hint": "The convenience class that wraps Thread + Looper"
+        },
+        {
+          "answer": ["start"],
+          "hint": "You need to start the thread before using its Looper"
+        },
+        {
+          "answer": ["looper"],
+          "hint": "The property that returns the thread's Looper after start()"
+        },
+        {
+          "answer": ["quitSafely", "quit"],
+          "hint": "Stop the looper to avoid leaking the thread"
+        }
+      ],
+      "explanation": "<code>HandlerThread</code> is a Thread subclass that calls <code>Looper.prepare()</code> and <code>Looper.loop()</code> in its <code>run()</code> method. After calling <code>start()</code>, you access its Looper via the <code>looper</code> property and create a Handler bound to it. Always call <code>quitSafely()</code> when done — it lets pending messages finish, then exits the loop. Without quit, the thread runs forever.",
+      "hints": [
+        "Think about the class name that combines Handler + Thread",
+        "A thread must be started before you can use it",
+        "The HandlerThread exposes its Looper as a property",
+        "quitSafely() processes remaining messages before stopping"
+      ]
+    },
+    {
+      "id": "hl-6",
+      "type": "multiple-choice",
+      "title": "Sync Barriers and Choreographer",
+      "difficulty": "advanced",
+      "description": "What is a sync barrier in the MessageQueue, and why does Choreographer use one?",
+      "options": [
+        "A sync barrier pauses ALL messages until a condition is met, used for thread synchronization",
+        "A sync barrier blocks synchronous messages and only lets asynchronous messages pass — Choreographer uses it to give drawing commands priority over other work",
+        "A sync barrier prevents multiple threads from posting messages simultaneously",
+        "A sync barrier is a lock that ensures messages are processed in FIFO order"
+      ],
+      "correctIndex": 1,
+      "explanation": "A sync barrier is a special Message with <code>target == null</code>. When the Looper encounters it, it skips all normal (synchronous) messages and only dispatches messages marked as <b>asynchronous</b> (<code>msg.setAsynchronous(true)</code>). Choreographer posts a sync barrier when VSYNC arrives, then posts its traversal (measure/layout/draw) as an async message. This ensures drawing gets priority over input events, callbacks, and other queued work — critical for maintaining 60fps.",
+      "hints": [
+        "Think about what happens to non-drawing messages when the screen needs to render",
+        "The barrier filters messages based on a flag, not timing"
+      ]
+    },
+    {
+      "id": "hl-7",
+      "type": "what-does-this-do",
+      "title": "Looper.prepare() Error",
+      "difficulty": "intermediate",
+      "description": "What happens when this code runs?",
+      "code": "Thread {\n    val handler = Handler(Looper.myLooper()!!)\n    handler.post { Log.d(\"TAG\", \"Hello\") }\n}.start()",
+      "options": [
+        "Prints \"Hello\" on the new thread",
+        "Prints \"Hello\" on the main thread",
+        "Crashes with NullPointerException — Looper.myLooper() returns null because Looper.prepare() was never called",
+        "Crashes with RuntimeException: \"Can't create handler inside thread that has not called Looper.prepare()\""
+      ],
+      "correctIndex": 2,
+      "explanation": "A new thread does not have a Looper by default. <code>Looper.myLooper()</code> returns <code>null</code> for a thread that has not called <code>Looper.prepare()</code>. The <code>!!</code> operator then throws a <code>NullPointerException</code>. The fix: either call <code>Looper.prepare()</code> before creating the Handler, use <code>HandlerThread</code>, or pass <code>Looper.getMainLooper()</code> if you want the main thread.",
+      "hints": [
+        "By default, only the main thread has a Looper",
+        "What does Looper.myLooper() return on a fresh thread?"
+      ]
+    },
+    {
+      "id": "hl-8",
+      "type": "fix-bug",
+      "title": "Background to Main Thread Communication",
+      "difficulty": "intermediate",
+      "description": "This code crashes with \"Only the original thread that created a view hierarchy can touch its views.\" Fix it using a Handler.",
+      "starterCode": "class MyActivity : AppCompatActivity() {\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        setContentView(R.layout.activity_main)\n\n        Thread {\n            val data = fetchDataFromNetwork() // slow, blocking call\n            // BUG: Updating UI from a background thread!\n            findViewById<TextView>(R.id.textView).text = data\n        }.start()\n    }\n}",
+      "checks": [
+        {
+          "pattern": "Handler|runOnUiThread",
+          "message": "Use Handler(Looper.getMainLooper()) or runOnUiThread to switch to the UI thread",
+          "required": true
+        },
+        {
+          "pattern": "Looper\\.getMainLooper|mainLooper|runOnUiThread",
+          "message": "Target the main thread's Looper for UI updates",
+          "required": true
+        }
+      ],
+      "solution": "class MyActivity : AppCompatActivity() {\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        setContentView(R.layout.activity_main)\n        val mainHandler = Handler(Looper.getMainLooper())\n\n        Thread {\n            val data = fetchDataFromNetwork()\n            mainHandler.post {\n                findViewById<TextView>(R.id.textView).text = data\n            }\n        }.start()\n    }\n}",
+      "explanation": "Android's View system is single-threaded — only the main (UI) thread can modify views. The fix creates a Handler bound to <code>Looper.getMainLooper()</code>, then uses <code>handler.post { }</code> to enqueue the UI update onto the main thread's MessageQueue. The Looper on the main thread picks it up and runs it safely. Alternatively, <code>runOnUiThread { }</code> (which uses a Handler internally) works too.",
+      "hints": [
+        "You need to move the UI update to the main thread",
+        "A Handler bound to the main Looper can post work to the main thread",
+        "The network call should stay on the background thread"
+      ]
+    },
+    {
+      "id": "hl-9",
+      "type": "multiple-choice",
+      "title": "ActivityThread.main()",
+      "difficulty": "advanced",
+      "description": "What does <code>Looper.loop()</code> do inside <code>ActivityThread.main()</code>?",
+      "options": [
+        "It runs once to set up the Activity, then returns",
+        "It starts an infinite loop that pulls messages from the MessageQueue and dispatches them to their target Handlers — this is how ALL lifecycle callbacks, input events, and frame draws are processed",
+        "It creates a new thread for each incoming message",
+        "It polls the GPU for VSYNC signals at 60fps"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>Looper.loop()</code> is a <code>for(;;)</code> infinite loop. Each iteration calls <code>MessageQueue.next()</code> (which blocks on <code>epoll_wait</code> if the queue is empty), gets a Message, and calls <code>msg.target.dispatchMessage(msg)</code>. Every single thing on the main thread — <code>onCreate()</code>, touch events, <code>invalidate()</code>, <code>onDraw()</code> — is a Message dispatched by this loop. The call to <code>Looper.loop()</code> never returns under normal operation.",
+      "hints": [
+        "Think about what 'loop' means literally",
+        "How does the main thread keep running after onCreate() finishes?"
+      ]
+    }
+  ]
+}

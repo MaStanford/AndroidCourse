@@ -1,0 +1,226 @@
+{
+  "id": "debugging-profiling",
+  "title": "Debugging & Profiling Tools",
+  "icon": "🔍",
+  "description": "Perfetto, LeakCanary, Android Studio Profiler, StrictMode, Layout Inspector, and systematic debugging",
+  "references": [
+    {"title": "Perfetto Trace Viewer", "url": "https://ui.perfetto.dev/", "type": "docs"},
+    {"title": "Android Developers — Inspect traces with Perfetto", "url": "https://developer.android.com/topic/performance/tracing", "type": "docs"},
+    {"title": "LeakCanary — Getting Started", "url": "https://square.github.io/leakcanary/getting_started/", "type": "docs"},
+    {"title": "Android Studio Profiler", "url": "https://developer.android.com/studio/profile", "type": "docs"},
+    {"title": "StrictMode Documentation", "url": "https://developer.android.com/reference/android/os/StrictMode", "type": "docs"},
+    {"title": "Jetpack Compose Performance — Stability", "url": "https://developer.android.com/develop/ui/compose/performance/stability", "type": "docs"}
+  ],
+  "lesson": "<h3>Debugging & Profiling Tool Overview</h3>\n<p>Knowing <b>which tool to reach for</b> is half the battle. Each tool targets a specific class of problem:</p>\n<table>\n<tr><th>Tool</th><th>What It Finds</th><th>When to Use</th><th>Overhead</th></tr>\n<tr><td><b>Perfetto / Systrace</b></td><td>Jank, slow frames, binder contention, thread scheduling</td><td>App feels slow, frames drop, ANR suspected</td><td>Low (kernel-level tracing)</td></tr>\n<tr><td><b>LeakCanary</b></td><td>Memory leaks (retained objects after GC)</td><td>Memory grows over time, OOM crashes</td><td>Debug builds only</td></tr>\n<tr><td><b>Android Studio Profiler</b></td><td>CPU hot spots, memory allocations, energy drain</td><td>General profiling, allocation tracking, battery analysis</td><td>Medium</td></tr>\n<tr><td><b>StrictMode</b></td><td>Disk/network on main thread, leaked closables</td><td>Development-time policy enforcement</td><td>Low (detection only)</td></tr>\n<tr><td><b>Layout Inspector</b></td><td>Compose recomposition counts, view hierarchy depth</td><td>UI not updating, excessive recomposition</td><td>Low (snapshot)</td></tr>\n<tr><td><b>MAT (Memory Analyzer)</b></td><td>Heap object graph, dominator trees, retained size</td><td>Deep memory investigation, hprof analysis</td><td>Offline (post-capture)</td></tr>\n</table>\n\n<hr class=\"section-divider\">\n<h3>Perfetto / Systrace: System-Wide Tracing</h3>\n<p>Perfetto is the modern replacement for Systrace. It captures kernel-level scheduling, Choreographer frame timing, binder transactions, and custom app trace sections — all in one timeline.</p>\n\n<h4>Capturing a Trace via ADB</h4>\n<div class=\"lesson-code\"><span class=\"cmt\"># Record a 10-second trace with key categories</span>\nadb shell perfetto \\\n  -c - --txt \\\n  -o /data/misc/perfetto-traces/trace.perfetto-trace \\\n  <<EOF\nbuffers: {\n  size_kb: 63488\n  fill_policy: RING_BUFFER\n}\ndata_sources: {\n  config {\n    name: \"linux.ftrace\"\n    ftrace_config {\n      ftrace_events: \"sched/sched_switch\"\n      ftrace_events: \"power/suspend_resume\"\n      atrace_categories: \"view\"\n      atrace_categories: \"am\"\n      atrace_categories: \"gfx\"\n      atrace_categories: \"input\"\n      atrace_apps: \"com.example.myapp\"\n    }\n  }\n}\nduration_ms: 10000\nEOF\n\n<span class=\"cmt\"># Pull and open in https://ui.perfetto.dev/</span>\nadb pull /data/misc/perfetto-traces/trace.perfetto-trace .</div>\n\n<h4>What to Look For in a Perfetto Trace</h4>\n<div class=\"info-box\"><b>Key Trace Markers for Frame Performance:</b><br>\n<b>Choreographer#doFrame</b> — one slice per frame; should be &lt; 16.6 ms (60 fps) or &lt; 8.3 ms (120 fps)<br>\n<b>measure / layout / draw</b> — the three View phases inside each frame; look for outliers<br>\n<b>RenderThread</b> — GPU command submission; long slices = overdraw or complex shaders<br>\n<b>Binder transactions</b> — synchronous IPC on the main thread blocks frames; look for binder:reply slices<br>\n<b>SurfaceFlinger</b> — compositor; if it drops your buffer, the issue is on the system side</div>\n<div class=\"diagram\">Perfetto Timeline (one janky frame):\n\nMain Thread:  ──[Choreographer#doFrame 28ms]──────────────────\n                  ├─[measure 2ms]\n                  ├─[layout 1ms]\n                  ├─[draw 4ms]\n                  └─[binder:reply 18ms] ← BLOCKING IPC!\n\nRenderThread: ─────────────────────[syncAndDraw 3ms]──────────\n\nSurfaceFlinger:──────────────────────────[missed vsync!]──────\n\nDiagnosis: Binder call on main thread during frame = jank.\nFix: Move the binder call off main thread.</div>\n\n<hr class=\"section-divider\">\n<h3>Custom Trace Sections</h3>\n<p>Add your own markers to Perfetto traces to measure specific code paths:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Java/Kotlin — manual begin/end</span>\nimport android.os.Trace\n\nfun loadDashboard() {\n    Trace.beginSection(\"DashboardLoad\")\n    try {\n        val data = repository.fetchData()\n        renderDashboard(data)\n    } finally {\n        Trace.endSection()\n    }\n}\n\n<span class=\"cmt\">// Kotlin inline helper — no try/finally boilerplate</span>\ninline fun &lt;T&gt; trace(sectionName: String, block: () -&gt; T): T {\n    Trace.beginSection(sectionName)\n    return try {\n        block()\n    } finally {\n        Trace.endSection()\n    }\n}\n\n<span class=\"cmt\">// Usage — shows up as named slices in Perfetto</span>\ntrace(\"ParseJSON\") {\n    gson.fromJson(json, MyData::class.java)\n}\n\ntrace(\"ImageDecode\") {\n    BitmapFactory.decodeStream(stream)\n}</div>\n<div class=\"warn-box\"><b>Trace section names are truncated to 127 characters.</b> Keep them short but descriptive. Also, <code>Trace.beginSection</code> / <code>endSection</code> must be called on the <b>same thread</b> — for async work use <code>Trace.beginAsyncSection</code> / <code>endAsyncSection</code> with a matching cookie integer.</div>\n\n<hr class=\"section-divider\">\n<h3>LeakCanary: Automatic Leak Detection</h3>\n<p>LeakCanary detects memory leaks at runtime with <b>zero configuration</b>. Here is exactly how it works under the hood:</p>\n<div class=\"diagram\">LeakCanary Detection Flow:\n\n1. Activity/Fragment destroyed\n       │\n       ▼\n2. LeakCanary wraps it in a WeakReference\n   with a unique key\n       │\n       ▼\n3. Waits 5 seconds, then triggers GC\n       │\n       ▼\n4. Checks: was the WeakReference cleared?\n       │\n   ┌───┴───┐\n   │ YES   │ NO → Object was NOT collected → LEAK!\n   │       │       │\n   │ OK ✓  │       ▼\n   │       │  5. Dumps heap (hprof file)\n   │       │       │\n   │       │       ▼\n   │       │  6. Analyzes hprof to find the\n   │       │     SHORTEST reference chain from\n   │       │     GC root → leaked object\n   │       │       │\n   │       │       ▼\n   │       │  7. Shows notification with the\n   └───────┘     leak trace (like a stack trace\n                 but for object references)</div>\n\n<h4>Zero-Config Setup</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// build.gradle.kts — that's it, nothing else needed</span>\ndependencies {\n    debugImplementation(\"com.squareup.leakcanary:leakcanary-android:2.14\")\n}\n\n<span class=\"cmt\">// LeakCanary auto-installs via a ContentProvider.</span>\n<span class=\"cmt\">// No Application subclass code needed.</span>\n<span class=\"cmt\">// It watches Activities, Fragments, Views, ViewModels,</span>\n<span class=\"cmt\">// and Services automatically.</span></div>\n\n<h4>Reading a Leak Trace</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// Example LeakCanary output:</span>\n┬───\n│ GC Root: Global variable in system class\n│\n├─ com.example.app.AudioManager instance\n│    Leaking: NO (singleton)\n│    ↓ AudioManager.listener\n│                    ~~~~~~~~\n├─ com.example.app.MusicFragment$1 instance  <span class=\"cmt\">← anonymous inner class</span>\n│    Leaking: UNKNOWN\n│    ↓ MusicFragment$1.this$0\n│                       ~~~~~~\n╰─ com.example.app.MusicFragment instance\n     Leaking: YES (Fragment#mView is null)\n\n<span class=\"cmt\">// Translation: AudioManager holds a reference to an</span>\n<span class=\"cmt\">// anonymous listener, which holds an implicit reference</span>\n<span class=\"cmt\">// to MusicFragment. The fragment is destroyed but can't</span>\n<span class=\"cmt\">// be garbage collected.</span>\n<span class=\"cmt\">// Fix: Unregister the listener in onDestroyView().</span></div>\n\n<hr class=\"section-divider\">\n<h3>The 5 Most Common Android Memory Leaks</h3>\n<table>\n<tr><th>#</th><th>Pattern</th><th>Why It Leaks</th><th>Fix</th></tr>\n<tr><td>1</td><td><b>Unregistered listeners/callbacks</b></td><td>Singleton holds reference to Activity/Fragment via callback</td><td>Unregister in <code>onStop()</code> or <code>onDestroyView()</code></td></tr>\n<tr><td>2</td><td><b>Anonymous inner classes</b></td><td>Inner class holds implicit <code>this$0</code> reference to enclosing Activity</td><td>Use static class + WeakReference, or lambda without capturing <code>this</code></td></tr>\n<tr><td>3</td><td><b>Static Context reference</b></td><td><code>companion object</code> or static field holds Activity context forever</td><td>Use <code>applicationContext</code> or clear the reference</td></tr>\n<tr><td>4</td><td><b>Fragment View binding not nulled</b></td><td>Fragment outlives its view; binding holds view references</td><td>Set <code>_binding = null</code> in <code>onDestroyView()</code></td></tr>\n<tr><td>5</td><td><b>GlobalScope coroutines</b></td><td>Coroutine captures Activity/ViewModel reference, never cancelled</td><td>Use <code>viewModelScope</code> or <code>lifecycleScope</code></td></tr>\n</table>\n<div class=\"lesson-code\"><span class=\"cmt\">// LEAK #1: Unregistered listener</span>\nclass PlayerActivity : AppCompatActivity() {\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        AudioManager.addPlaybackListener(this) <span class=\"cmt\">// registers</span>\n    }\n    <span class=\"cmt\">// BUG: Never calls AudioManager.removePlaybackListener(this)</span>\n    <span class=\"cmt\">// Fix: override onDestroy() and unregister</span>\n}\n\n<span class=\"cmt\">// LEAK #2: Anonymous inner class capturing Activity</span>\nclass ChatActivity : AppCompatActivity() {\n    fun sendMessage() {\n        api.send(message, object : Callback {\n            override fun onSuccess() {\n                <span class=\"cmt\">// 'this@ChatActivity' is captured implicitly!</span>\n                showToast(\"Sent\")\n            }\n        })\n    }\n}\n\n<span class=\"cmt\">// LEAK #4: Fragment binding not nulled</span>\nclass ListFragment : Fragment() {\n    private var _binding: FragmentListBinding? = null\n    private val binding get() = _binding!!\n\n    override fun onDestroyView() {\n        super.onDestroyView()\n        _binding = null  <span class=\"cmt\">// REQUIRED — without this, leaked!</span>\n    }\n}</div>\n\n<hr class=\"section-divider\">\n<h3>Android Studio Profiler</h3>\n<p>The integrated profiler has three panels: <b>CPU</b>, <b>Memory</b>, and <b>Energy</b>. Each reveals different classes of problems.</p>\n\n<h4>CPU Profiler</h4>\n<div class=\"info-box\"><b>Two recording modes:</b><br>\n<b>Sample-based</b> — captures call stacks at intervals (low overhead, good for production-like profiling)<br>\n<b>Instrumented</b> — wraps every method entry/exit (high overhead, exact timing, misses nothing)<br><br>\n<b>Flame Chart</b> — x-axis is time, y-axis is call stack depth. Wide bars = slow methods. Look for flat plateaus (long-running methods) and deep stacks (excessive recursion/nesting).</div>\n<div class=\"diagram\">Reading a Flame Chart:\n\n  ┌─────────────────────────────────────────┐\n  │           main()                        │  ← widest = total time\n  ├──────────────────┬──────────────────────┤\n  │   loadData()     │    renderUI()        │\n  ├────────┬─────────┤                      │\n  │ parse()│ decode() │                     │\n  ├────────┘         │                      │\n  │                  │                      │\n\nWide + flat = hot spot. Narrow + deep = okay.\n\nKey insight: Look for YOUR code that's wide.\nLibrary code at the bottom is expected.</div>\n\n<h4>Memory Profiler</h4>\n<div class=\"info-box\"><b>Allocation tracking</b> shows every object allocated and where. The memory graph tells a story:<br><br>\n<b>Steady line</b> — healthy, stable memory<br>\n<b>Sawtooth pattern</b> (up-down-up-down) — GC pressure! Objects allocated and immediately discarded. Common cause: allocating in <code>onDraw()</code> or <code>onBindViewHolder()</code><br>\n<b>Staircase pattern</b> (up-flat-up-flat) — memory leak! Objects accumulate and are never freed<br>\n<b>Sudden spike</b> — large allocation (bitmap, buffer). May cause OOM on low-memory devices.</div>\n\n<h4>Energy Profiler</h4>\n<p>Shows what is draining the battery:</p>\n<table>\n<tr><th>Drain Source</th><th>What to Look For</th><th>Fix</th></tr>\n<tr><td><b>Radio wake</b></td><td>Frequent short network requests waking the cellular radio</td><td>Batch requests, use WorkManager for deferrable work</td></tr>\n<tr><td><b>GPS / Location</b></td><td>Continuous high-accuracy location updates</td><td>Use <code>PRIORITY_BALANCED_POWER_ACCURACY</code>, increase interval</td></tr>\n<tr><td><b>Wakelocks</b></td><td>CPU or screen kept on longer than needed</td><td>Release wakelocks promptly, use timeout parameter</td></tr>\n</table>\n\n<hr class=\"section-divider\">\n<h3>StrictMode: Catch Problems During Development</h3>\n<p>StrictMode detects things you accidentally do on the wrong thread, plus VM-level resource leaks. Enable it early in your Application class:</p>\n<div class=\"lesson-code\">class MyApplication : Application() {\n    override fun onCreate() {\n        super.onCreate()\n        if (BuildConfig.DEBUG) {\n            <span class=\"cmt\">// ThreadPolicy: what you must NOT do on the main thread</span>\n            StrictMode.setThreadPolicy(\n                StrictMode.ThreadPolicy.Builder()\n                    .detectDiskReads()     <span class=\"cmt\">// SharedPreferences on main!</span>\n                    .detectDiskWrites()    <span class=\"cmt\">// File I/O on main!</span>\n                    .detectNetwork()       <span class=\"cmt\">// Network on main! (also throws NetworkOnMainThreadException)</span>\n                    .penaltyLog()          <span class=\"cmt\">// Log to Logcat</span>\n                    .penaltyDeath()        <span class=\"cmt\">// Crash the app (aggressive but effective)</span>\n                    .build()\n            )\n\n            <span class=\"cmt\">// VmPolicy: detect resource leaks across any thread</span>\n            StrictMode.setVmPolicy(\n                StrictMode.VmPolicy.Builder()\n                    .detectLeakedClosableObjects()   <span class=\"cmt\">// Cursor, InputStream not closed</span>\n                    .detectLeakedSqlLiteObjects()     <span class=\"cmt\">// SQLite cursors not closed</span>\n                    .detectActivityLeaks()            <span class=\"cmt\">// Activity instance leaked</span>\n                    .penaltyLog()\n                    .build()\n            )\n        }\n    }\n}</div>\n<div class=\"warn-box\"><b>StrictMode should only be enabled in debug builds.</b> In release builds, the overhead and crashes are unacceptable. Guard with <code>BuildConfig.DEBUG</code>. Also note: <code>penaltyDeath()</code> crashes the app on the first violation — great for CI, but annoying during casual development. Use <code>penaltyLog()</code> alone during exploration.</div>\n\n<hr class=\"section-divider\">\n<h3>Compose Recomposition Tracking</h3>\n<p>In Jetpack Compose, performance problems usually mean <b>too many recompositions</b> or <b>unstable parameters</b>. The Layout Inspector visualizes both:</p>\n<div class=\"info-box\"><b>Layout Inspector → Recomposition Counts:</b><br>\n<b>Recomposition count</b> — how many times a composable re-executed. High count on a static composable = bug<br>\n<b>Skip count</b> — how many times Compose SKIPPED recomposition because inputs didn't change. High skip count = good (Compose is smart)<br>\n<b>Stability</b> — whether the compiler marked parameters as stable. Unstable params = recompose EVERY time parent recomposes</div>\n<div class=\"diagram\">Layout Inspector Recomposition View:\n\nComposable            Recompositions    Skipped\n──────────────────    ──────────────    ───────\nChatScreen                    1             0\n  MessageList                12             0   ← recomposing a LOT\n    MessageItem (0)           1            11   ← good: skips often\n    MessageItem (1)          12             0   ← BAD: never skips!\n    MessageItem (2)           1            11\n\nWhy does MessageItem(1) never skip?\n→ Its parameter is an UNSTABLE class.\n→ Compose can't prove equality, so it recomposes every time.\n\nFix: Mark the data class @Immutable or @Stable,\nor ensure all its fields are primitive/immutable types.</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// UNSTABLE — List is a mutable interface, Compose can't trust it</span>\ndata class Message(\n    val id: String,\n    val text: String,\n    val reactions: List&lt;Reaction&gt;  <span class=\"cmt\">// List = unstable!</span>\n)\n\n<span class=\"cmt\">// STABLE — use kotlinx.collections.immutable</span>\nimport kotlinx.collections.immutable.ImmutableList\n\n@Immutable\ndata class Message(\n    val id: String,\n    val text: String,\n    val reactions: ImmutableList&lt;Reaction&gt;  <span class=\"cmt\">// ImmutableList = stable ✓</span>\n)</div>\n\n<hr class=\"section-divider\">\n<h3>Debugging Decision Tree</h3>\n<p>When something is wrong, start here:</p>\n<div class=\"diagram\">What's the symptom?\n│\n├─ \"App is janky / frames drop\"\n│   └─→ Perfetto trace\n│       Look at: Choreographer#doFrame duration,\n│       binder calls on main thread, long measure/layout/draw\n│\n├─ \"Memory keeps growing\" / OOM crash\n│   └─→ LeakCanary (auto-detection)\n│       └─→ Android Studio Memory Profiler (allocation tracking)\n│           └─→ MAT (deep hprof analysis)\n│       Pattern: Staircase graph = leak. Sawtooth = GC pressure.\n│\n├─ \"Battery drains fast\"\n│   └─→ Android Studio Energy Profiler\n│       Look at: radio wakes, GPS usage, held wakelocks\n│\n├─ \"UI not updating\" / \"wrong state\"\n│   └─→ Layout Inspector\n│       Check: recomposition counts, stability annotations\n│\n├─ \"App crashes with ANR\"\n│   └─→ StrictMode (prevention) + Perfetto (diagnosis)\n│       Look at: main thread blocked &gt; 5 seconds\n│       Common: DB query, network, file I/O on main thread\n│\n└─ \"Slow startup\"\n    └─→ Perfetto (app startup metric)\n        + Android Studio CPU Profiler (flame chart)\n        Look at: Application.onCreate(), ContentProviders,\n        Dagger/Hilt injection time</div>",
+  "questions": [
+    {
+      "id": "dp-1",
+      "type": "multiple-choice",
+      "title": "Choosing the Right Tool",
+      "difficulty": "intermediate",
+      "description": "Your app's memory usage graph shows a <b>staircase pattern</b> — memory rises in steps and never drops back down. Which tool should you reach for first?",
+      "options": [
+        "Perfetto — to look at frame timing",
+        "LeakCanary — to detect which objects are being retained",
+        "Energy Profiler — to check for wakelock issues",
+        "StrictMode — to detect disk reads on main thread"
+      ],
+      "correctIndex": 1,
+      "explanation": "A staircase memory pattern (up-flat-up-flat) is the classic signature of a <b>memory leak</b> — objects are being allocated and never freed. LeakCanary detects exactly this: it watches destroyed Activities/Fragments, forces GC, and if the object survives, dumps the heap and shows the reference chain keeping it alive. The Memory Profiler confirms the pattern, but LeakCanary pinpoints the cause.",
+      "hints": [
+        "A staircase pattern means objects accumulate and are never collected",
+        "Which tool specializes in finding retained objects after GC?"
+      ]
+    },
+    {
+      "id": "dp-2",
+      "type": "what-does-this-do",
+      "title": "Interpreting a Perfetto Trace",
+      "difficulty": "advanced",
+      "description": "You see this in a Perfetto trace. What is the problem and how would you fix it?",
+      "code": "Main Thread Timeline (one frame):\n\n[Choreographer#doFrame ──────── 42ms ────────]\n  [measure 1ms]\n  [layout 1ms]\n  [draw 2ms]\n  [binder:reply ────── 35ms ──────]",
+      "options": [
+        "The measure/layout/draw phases are too slow — simplify the view hierarchy",
+        "RenderThread is blocked — GPU is overloaded with overdraw",
+        "A synchronous binder (IPC) call on the main thread is blocking for 35ms, causing the frame to exceed the 16.6ms budget",
+        "SurfaceFlinger is dropping buffers — this is a system-level issue"
+      ],
+      "correctIndex": 2,
+      "explanation": "The measure (1ms), layout (1ms), and draw (2ms) phases are fast. The problem is the <b>binder:reply</b> slice taking 35ms — this is a synchronous IPC call happening on the main thread during frame rendering. The total frame time is 42ms, well over the 16.6ms budget for 60fps. Fix: move the binder call (likely a system service query like PackageManager or ContentResolver) off the main thread using <code>withContext(Dispatchers.IO)</code>.",
+      "hints": [
+        "Look at the time breakdown — which slice dominates the 42ms?",
+        "Binder calls are inter-process communication — they block until the other process responds"
+      ]
+    },
+    {
+      "id": "dp-3",
+      "type": "multiple-choice",
+      "title": "LeakCanary Leak Trace",
+      "difficulty": "advanced",
+      "description": "You see this LeakCanary trace. What is the leak and how do you fix it?<br><pre>┬───\n│ GC Root: Global variable in system class\n│\n├─ com.example.app.EventBus instance\n│    Leaking: NO (singleton)\n│    ↓ EventBus.listeners\n├─ java.util.ArrayList\n│    ↓ ArrayList[2]\n├─ com.example.app.ProfileFragment instance\n│    Leaking: YES (Fragment#mView is null)\n╰───</pre>",
+      "options": [
+        "EventBus is leaking because it's a singleton — replace with Hilt injection",
+        "ArrayList is the wrong collection type — replace with LinkedList",
+        "ProfileFragment registered as a listener on EventBus but never unregistered, so the singleton holds a reference to the destroyed fragment",
+        "The fragment's view binding needs to be nulled in onDestroyView()"
+      ],
+      "correctIndex": 2,
+      "explanation": "The leak trace shows: <b>EventBus</b> (singleton, NOT leaking) holds an ArrayList of listeners, which contains <b>ProfileFragment</b> (IS leaking — its view is null, meaning it's been destroyed). The fragment registered itself as a listener but never called <code>EventBus.unregister(this)</code> in <code>onDestroyView()</code> or <code>onDestroy()</code>. This is leak pattern #1: unregistered listeners. Fix: <code>override fun onDestroyView() { EventBus.unregister(this); super.onDestroyView() }</code>.",
+      "hints": [
+        "Follow the reference chain from GC root to the leaked object",
+        "What is keeping the fragment alive after it was destroyed?"
+      ]
+    },
+    {
+      "id": "dp-4",
+      "type": "multiple-choice",
+      "title": "Memory Profiler Sawtooth Pattern",
+      "difficulty": "intermediate",
+      "description": "The Memory Profiler shows a rapid <b>sawtooth pattern</b> — memory repeatedly climbs and then sharply drops. What does this indicate and what's the likely cause?",
+      "options": [
+        "Memory leak — objects are never freed",
+        "GC pressure — objects are rapidly allocated and discarded, triggering frequent garbage collection. Likely cause: allocating objects in onDraw(), onBindViewHolder(), or a tight loop",
+        "Normal healthy behavior — the GC is working as expected",
+        "The heap is too small — increase it with android:largeHeap=\"true\""
+      ],
+      "correctIndex": 1,
+      "explanation": "A sawtooth pattern means the app allocates objects rapidly, filling the heap, then GC runs and reclaims them, the heap drops, and the cycle repeats. This causes <b>GC pressure</b> — each GC pause (even a concurrent one) steals CPU time and can cause micro-jank. Common causes: allocating <code>Paint</code>, <code>Rect</code>, or <code>String</code> objects inside <code>onDraw()</code>, creating new objects in <code>onBindViewHolder()</code> for every scroll event, or string concatenation in loops. Fix: pre-allocate reusable objects and hoist allocations out of hot paths.",
+      "hints": [
+        "Sawtooth = up-down-up-down in rapid succession",
+        "What happens when you allocate objects that are immediately discardable?"
+      ]
+    },
+    {
+      "id": "dp-5",
+      "type": "what-does-this-do",
+      "title": "StrictMode Violations",
+      "difficulty": "intermediate",
+      "description": "You add StrictMode to your app and immediately see this in Logcat. What is happening and how should you fix it?",
+      "code": "D/StrictMode: StrictMode policy violation:\n  android.os.StrictMode$StrictModeDiskReadViolation\n    at android.app.SharedPreferencesImpl.getAll(SharedPreferencesImpl.java:312)\n    at com.example.app.SettingsRepository.getUserPrefs(SettingsRepository.kt:24)\n    at com.example.app.MainActivity.onCreate(MainActivity.kt:38)",
+      "options": [
+        "SharedPreferences is corrupted and needs to be cleared",
+        "SharedPreferences is reading from disk on the main thread in onCreate() — move the read to a background thread or migrate to DataStore",
+        "StrictMode is buggy and produces false positives for SharedPreferences",
+        "This only happens on first launch and can be safely ignored"
+      ],
+      "correctIndex": 1,
+      "explanation": "StrictMode detected a <b>disk read on the main thread</b>. <code>SharedPreferences.getAll()</code> reads the XML file from disk synchronously. While it's cached after the first read, that first read can take 10-100ms on older devices or with large preference files — blocking the main thread during <code>onCreate()</code> and delaying the first frame. Fix options: (1) use <code>apply()</code> instead of <code>commit()</code> for writes, (2) move reads to <code>Dispatchers.IO</code> with coroutines, or (3) migrate to Jetpack <b>DataStore</b> which is async by default.",
+      "hints": [
+        "The violation type tells you exactly what happened: DiskReadViolation",
+        "The stack trace shows it's called from MainActivity.onCreate — the main thread"
+      ]
+    },
+    {
+      "id": "dp-6",
+      "type": "multiple-choice",
+      "title": "Compose Recomposition Debugging",
+      "difficulty": "advanced",
+      "description": "In the Layout Inspector, you see that <code>UserCard</code> has 47 recompositions and 0 skips, while its parent <code>UserList</code> has 47 recompositions. All other siblings have 1 recomposition and 46 skips. What is the most likely cause?",
+      "options": [
+        "UserCard has a bug in its remember{} calls",
+        "UserCard receives an unstable parameter — Compose cannot prove equality, so it recomposes every time its parent recomposes",
+        "UserList is using LazyColumn incorrectly",
+        "There is a side effect inside UserCard triggering infinite recomposition"
+      ],
+      "correctIndex": 1,
+      "explanation": "When a composable has a <b>high recomposition count and zero skips</b>, while its siblings skip frequently, the problem is almost always an <b>unstable parameter</b>. Compose skips recomposition when all parameters are equal to the previous call. But if a parameter type is unstable (e.g., contains <code>List</code>, <code>Map</code>, or a class from an external module), Compose cannot prove equality and must recompose every time. Fix: mark the data class <code>@Immutable</code> or <code>@Stable</code>, or use <code>kotlinx.collections.immutable</code> types for collection fields.",
+      "hints": [
+        "0 skips means Compose NEVER decided it could skip — why?",
+        "Compare with siblings: they skip 46/47 times. What's different about UserCard's inputs?"
+      ]
+    },
+    {
+      "id": "dp-7",
+      "type": "fix-bug",
+      "title": "Fix the Memory Leak",
+      "difficulty": "intermediate",
+      "description": "This Fragment leaks its view. Fix the code so the view reference is properly cleaned up.",
+      "starterCode": "class SearchFragment : Fragment(R.layout.fragment_search) {\n    private var _binding: FragmentSearchBinding? = null\n    private val binding get() = _binding!!\n    private val adapter = SearchAdapter()\n\n    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n        super.onViewCreated(view, savedInstanceState)\n        _binding = FragmentSearchBinding.bind(view)\n        binding.recyclerView.adapter = adapter\n        LocationManager.addLocationListener(this::onLocation)\n    }\n\n    private fun onLocation(location: Location) {\n        binding.distanceText.text = \"${location.distanceTo(target)}m\"\n    }\n\n    override fun onDestroyView() {\n        super.onDestroyView()\n        // BUG: binding and listener not cleaned up!\n    }\n}",
+      "checks": [
+        {
+          "pattern": "_binding\\s*=\\s*null",
+          "message": "Null out the binding reference in onDestroyView()",
+          "required": true
+        },
+        {
+          "pattern": "removeLocationListener|removeListener|unregister",
+          "message": "Unregister the location listener in onDestroyView()",
+          "required": true
+        }
+      ],
+      "solution": "class SearchFragment : Fragment(R.layout.fragment_search) {\n    private var _binding: FragmentSearchBinding? = null\n    private val binding get() = _binding!!\n    private val adapter = SearchAdapter()\n\n    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n        super.onViewCreated(view, savedInstanceState)\n        _binding = FragmentSearchBinding.bind(view)\n        binding.recyclerView.adapter = adapter\n        LocationManager.addLocationListener(this::onLocation)\n    }\n\n    private fun onLocation(location: Location) {\n        binding.distanceText.text = \"${location.distanceTo(target)}m\"\n    }\n\n    override fun onDestroyView() {\n        super.onDestroyView()\n        LocationManager.removeLocationListener(this::onLocation)\n        binding.recyclerView.adapter = null\n        _binding = null\n    }\n}",
+      "explanation": "Two leaks fixed: (1) <code>_binding = null</code> releases the view references — without this, the Fragment (which outlives its view during back-stack transactions) holds dead view references. (2) <code>removeLocationListener</code> unregisters the callback — without this, the LocationManager singleton holds a reference to the Fragment forever. Bonus: setting <code>recyclerView.adapter = null</code> prevents the RecyclerView from holding adapter/ViewHolder references after the view is destroyed.",
+      "hints": [
+        "Two things need cleanup: the view binding AND the listener registration",
+        "Fragments can outlive their views — onDestroyView() is called but onDestroy() is not"
+      ]
+    },
+    {
+      "id": "dp-8",
+      "type": "multiple-choice",
+      "title": "CPU Profiler — Sample vs Instrumented",
+      "difficulty": "intermediate",
+      "description": "You want to measure the exact execution time of each method in your JSON parsing pipeline. Which CPU profiling mode should you use?",
+      "options": [
+        "Sample-based — it has lower overhead and is more accurate for timing",
+        "Instrumented — it wraps every method entry/exit so you get exact call counts and durations, at the cost of higher overhead",
+        "Either mode works identically for this use case",
+        "Neither — use Perfetto instead"
+      ],
+      "correctIndex": 1,
+      "explanation": "<b>Instrumented</b> mode wraps every method call with timing instrumentation, giving you exact entry/exit timestamps and call counts. This is ideal when you need precise timing of specific methods (like a parsing pipeline). The tradeoff is higher overhead — the app runs slower during profiling, which can distort wall-clock measurements. <b>Sample-based</b> mode periodically snapshots the call stack (e.g., every 1ms), so it has low overhead but can miss short methods. Use sample-based for \"where is time going overall?\" and instrumented for \"how long does this specific method take?\"",
+      "hints": [
+        "You need EXACT timing for each method — which mode measures every entry and exit?",
+        "Consider the trade-off: precision vs overhead"
+      ]
+    },
+    {
+      "id": "dp-9",
+      "type": "what-does-this-do",
+      "title": "Identifying the Leak Pattern",
+      "difficulty": "advanced",
+      "description": "What memory leak pattern does this code exhibit, and what will LeakCanary report?",
+      "code": "class VideoPlayerActivity : AppCompatActivity() {\n\n    companion object {\n        var lastActivity: VideoPlayerActivity? = null\n    }\n\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        lastActivity = this\n    }\n\n    // No onDestroy override to clear lastActivity\n}",
+      "options": [
+        "No leak — companion object references are automatically cleared",
+        "Leak pattern #3: Static Context reference. The companion object (static field) holds the Activity after it is destroyed. LeakCanary will show a chain from GC root (class static field) → lastActivity → VideoPlayerActivity",
+        "Leak pattern #2: Anonymous inner class holding implicit reference",
+        "Leak pattern #5: GlobalScope coroutine capturing the Activity"
+      ],
+      "correctIndex": 1,
+      "explanation": "This is <b>leak pattern #3: static Context reference</b>. The <code>companion object</code> property <code>lastActivity</code> is a static field at the JVM level. It holds a strong reference to the Activity instance. When the Activity is destroyed (e.g., on rotation), the static field still points to the old instance, preventing garbage collection. Every rotation creates a new Activity while leaking the old one. Fix: clear the reference in <code>onDestroy()</code> or, better yet, avoid storing Activity references in static fields entirely — use a ViewModel or application-scoped service instead.",
+      "hints": [
+        "companion object properties are static fields on the JVM",
+        "What happens when the Activity is destroyed but the static field still references it?"
+      ]
+    },
+    {
+      "id": "dp-10",
+      "type": "trivia",
+      "title": "Debugging Decision Tree",
+      "difficulty": "intermediate",
+      "description": "Describe the systematic approach for debugging an Android app that is experiencing janky scrolling. What tools would you use in what order, and what would you look for in each?",
+      "keywords": [
+        "Perfetto",
+        "Choreographer",
+        "frame",
+        "main thread",
+        "measure",
+        "layout",
+        "draw",
+        "RenderThread",
+        "binder",
+        "allocation",
+        "GC",
+        "recomposition"
+      ],
+      "answer": "For janky scrolling: (1) Start with Perfetto/Systrace to see the frame timeline — look at Choreographer#doFrame slices exceeding 16.6ms. Identify which phase is slow: measure/layout/draw or a blocking binder call. (2) If frames show long measure/layout, use Layout Inspector to check view hierarchy depth or excessive Compose recompositions during scroll. (3) If the Memory Profiler shows a sawtooth pattern during scrolling, you have GC pressure — allocating objects in onBindViewHolder() or composable lambdas. (4) Use CPU Profiler with sample-based recording to find hot methods during scroll. (5) Check for StrictMode violations — disk reads triggered by scrolling (e.g., loading preferences per item).",
+      "explanation": "Systematic debugging avoids guessing. Perfetto gives the big picture (which frames are slow and why). Layout Inspector and Memory Profiler zoom into specific causes. The key is to let the data guide you rather than assuming the cause — a janky scroll could be caused by main thread blocking, excessive recomposition, GC pressure, or even a slow content provider query.",
+      "hints": [
+        "Start broad (Perfetto — whole system view) then narrow down",
+        "Frame budget is 16.6ms at 60fps — any frame exceeding this is janky",
+        "Consider multiple possible causes: CPU, memory, IPC, rendering"
+      ]
+    }
+  ]
+}

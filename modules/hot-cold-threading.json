@@ -1,0 +1,183 @@
+{
+  "id": "hot-cold-threading",
+  "title": "Hot vs Cold Streams & Threading",
+  "icon": "🌡️",
+  "description": "Cold streams, hot streams, cold-to-hot conversion, threading models across RxJava/Flow/LiveData, backpressure, and Channel vs SharedFlow",
+  "references": [
+    {"title": "Kotlin Flow Documentation", "url": "https://kotlinlang.org/docs/flow.html", "type": "docs"},
+    {"title": "StateFlow and SharedFlow", "url": "https://developer.android.com/kotlin/flow/stateflow-and-sharedflow", "type": "docs"},
+    {"title": "RxJava — Hot vs Cold Observables", "url": "https://github.com/ReactiveX/RxJava/wiki/Observable", "type": "docs"},
+    {"title": "Roman Elizarov — Cold flows, hot channels", "url": "https://elizarov.medium.com/cold-flows-hot-channels-d74769805f9", "type": "article"},
+    {"title": "Android Developers — Kotlin Channels", "url": "https://kotlinlang.org/docs/channels.html", "type": "docs"}
+  ],
+  "lesson": "<h3>Cold Streams — The DVD Analogy</h3>\n<p>A <b>cold stream</b> is like a DVD: every subscriber starts the movie from the beginning. The producer doesn't start until someone subscribes, and each subscriber gets its own independent execution.</p>\n<div class=\"info-box\"><b>Cold stream characteristics:</b><br>\n1. Producer starts <b>on subscription</b> — no work until someone collects/subscribes<br>\n2. Each subscriber gets an <b>independent</b> execution (own copy of the data)<br>\n3. <b>Unicast</b> — one producer per subscriber<br>\n4. Lifecycle tied to the subscriber</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// Kotlin Flow — cold by default</span>\nval userFlow: Flow&lt;User&gt; = flow {\n    println(\"Fetching...\")       <span class=\"cmt\">// runs EACH time someone collects</span>\n    val user = api.getUser()\n    emit(user)\n}\n\n<span class=\"cmt\">// Nothing happens yet — flow is just a blueprint</span>\nval flow = userFlow\n\n<span class=\"cmt\">// NOW it runs — \"Fetching...\" prints</span>\nuserFlow.collect { user -> showUser(user) }\n\n<span class=\"cmt\">// Collecting AGAIN runs the whole thing from scratch</span>\nuserFlow.collect { user -> showUser(user) }  <span class=\"cmt\">// \"Fetching...\" prints again</span></div>\n<p>Other cold streams: <code>Observable.create { }</code> in RxJava (the lambda runs per subscriber), Kotlin <code>Sequence</code> (lazy, computed on iteration), and Java <code>Stream</code>.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// RxJava — Observable.create is cold</span>\nval observable = Observable.create&lt;Int&gt; { emitter ->\n    println(\"Starting work\")    <span class=\"cmt\">// runs per subscriber</span>\n    emitter.onNext(1)\n    emitter.onNext(2)\n    emitter.onComplete()\n}\n\nobservable.subscribe { println(it) }  <span class=\"cmt\">// \"Starting work\", 1, 2</span>\nobservable.subscribe { println(it) }  <span class=\"cmt\">// \"Starting work\", 1, 2 (fresh execution)</span></div>\n\n<hr class=\"section-divider\">\n<h3>Hot Streams — The Live TV Analogy</h3>\n<p>A <b>hot stream</b> is like live TV: the broadcast is running whether you're watching or not. You tune in and see whatever is playing <b>now</b> — you miss what already aired.</p>\n<div class=\"info-box\"><b>Hot stream characteristics:</b><br>\n1. Producer runs <b>independently</b> of subscribers<br>\n2. All subscribers share the <b>same</b> stream of data<br>\n3. <b>Multicast</b> — one producer, many subscribers<br>\n4. Subscribers may miss values emitted before they subscribed</div>\n\n<h4>StateFlow — Always has a current value</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// StateFlow: hot, always has a value, conflates (keeps latest only)</span>\nclass UserViewModel : ViewModel() {\n    private val _uiState = MutableStateFlow(UiState.Loading)\n    val uiState: StateFlow&lt;UiState&gt; = _uiState.asStateFlow()\n\n    fun loadUser() {\n        viewModelScope.launch {\n            _uiState.value = UiState.Loading\n            val user = repository.getUser()\n            _uiState.value = UiState.Success(user)\n        }\n    }\n}\n<span class=\"cmt\">// New collectors immediately get the CURRENT value</span>\n<span class=\"cmt\">// If Loading→Success emitted fast, collector only sees Success (conflation)</span></div>\n\n<h4>SharedFlow — No initial value, configurable replay</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// SharedFlow: hot, no initial value, configurable buffer/replay</span>\nclass EventBus {\n    private val _events = MutableSharedFlow&lt;Event&gt;(\n        replay = 0,            <span class=\"cmt\">// new subscribers don't get old events</span>\n        extraBufferCapacity = 1,\n        onBufferOverflow = BufferOverflow.DROP_OLDEST\n    )\n    val events: SharedFlow&lt;Event&gt; = _events.asSharedFlow()\n\n    suspend fun emit(event: Event) { _events.emit(event) }\n}\n<span class=\"cmt\">// StateFlow IS a SharedFlow with replay=1 + distinctUntilChanged + initial value</span></div>\n\n<h4>RxJava Hot Types</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// BehaviorSubject — like StateFlow (replays last value)</span>\nval subject = BehaviorSubject.createDefault(\"initial\")\nsubject.onNext(\"A\")\nsubject.onNext(\"B\")\nsubject.subscribe { println(it) }  <span class=\"cmt\">// prints \"B\" (latest value)</span>\n\n<span class=\"cmt\">// PublishSubject — like SharedFlow(replay=0)</span>\nval publish = PublishSubject.create&lt;String&gt;()\npublish.onNext(\"missed\")           <span class=\"cmt\">// no one listening</span>\npublish.subscribe { println(it) }  <span class=\"cmt\">// nothing printed for \"missed\"</span>\npublish.onNext(\"received\")         <span class=\"cmt\">// prints \"received\"</span>\n\n<span class=\"cmt\">// ReplaySubject — like SharedFlow(replay=N)</span>\nval replay = ReplaySubject.createWithSize&lt;String&gt;(2)\nreplay.onNext(\"A\")\nreplay.onNext(\"B\")\nreplay.onNext(\"C\")\nreplay.subscribe { println(it) }   <span class=\"cmt\">// prints \"B\", \"C\" (last 2)</span></div>\n\n<h4>LiveData — The Android-specific hot holder</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// LiveData: hot, lifecycle-aware, always main thread observation</span>\nclass MyViewModel : ViewModel() {\n    private val _user = MutableLiveData&lt;User&gt;()\n    val user: LiveData&lt;User&gt; = _user\n\n    fun load() {\n        viewModelScope.launch {\n            val result = repository.getUser()\n            _user.value = result           <span class=\"cmt\">// must be on Main thread</span>\n            <span class=\"cmt\">// _user.postValue(result)  — from background thread</span>\n        }\n    }\n}\n<span class=\"cmt\">// Observers auto-removed when lifecycle reaches DESTROYED</span>\n<span class=\"cmt\">// BUT: no backpressure, no operators, not Flow-compatible</span></div>\n\n<hr class=\"section-divider\">\n<h3>Converting Cold to Hot</h3>\n<p>You often need to take a cold data source (DB query, API call) and share the result as a hot stream for the UI. Here are the conversion patterns:</p>\n<div class=\"diagram\">Cold Flow ──── stateIn() ────→ StateFlow  (replay=1, always has value)\nCold Flow ──── shareIn() ───→ SharedFlow (configurable replay)\n\nRxJava:\nObservable ─── share() ────→ ConnectableObservable (refcounted)\nObservable ─── replay(1) ──→ replays last to new subscribers\nObservable ─── BehaviorSubject.create() → explicit subject\n\nKey difference:\n  stateIn/shareIn: SCOPE-aware, auto-cancel when scope dies\n  RxJava share:    manual disposal needed</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// stateIn — cold Flow → StateFlow (most common in ViewModels)</span>\nclass SearchViewModel(repo: SearchRepository) : ViewModel() {\n    val results: StateFlow&lt;List&lt;Result&gt;&gt; = repo.observeResults()  <span class=\"cmt\">// cold Flow</span>\n        .stateIn(\n            scope = viewModelScope,        <span class=\"cmt\">// ties lifetime to ViewModel</span>\n            started = SharingStarted.WhileSubscribed(5000), <span class=\"cmt\">// stop after 5s no collectors</span>\n            initialValue = emptyList()     <span class=\"cmt\">// StateFlow needs an initial value</span>\n        )\n}\n\n<span class=\"cmt\">// shareIn — cold Flow → SharedFlow (events, not state)</span>\nval notifications: SharedFlow&lt;Notification&gt; = repo.notificationStream()\n    .shareIn(\n        scope = viewModelScope,\n        started = SharingStarted.Lazily,   <span class=\"cmt\">// start on first collector</span>\n        replay = 0                         <span class=\"cmt\">// don't replay old notifications</span>\n    )</div>\n<div class=\"warn-box\"><b>SharingStarted.WhileSubscribed(5000)</b> is the recommended default for UI state. The 5-second timeout survives configuration changes (screen rotation) without restarting the upstream flow, but still cleans up when the user actually leaves.</div>\n\n<hr class=\"section-divider\">\n<h3>Threading Model Comparison</h3>\n<p>This is one of the most frequently confused topics. Each library handles threading differently:</p>\n\n<h4>RxJava: subscribeOn vs observeOn</h4>\n<div class=\"diagram\">subscribeOn(io) — sets the thread where the SOURCE runs\nobserveOn(main) — switches the thread for DOWNSTREAM operators\n\n  Observable.create { ... }          ← runs on IO (subscribeOn)\n    .subscribeOn(Schedulers.io())    ← ONLY THE FIRST subscribeOn MATTERS\n    .map { transform(it) }          ← still on IO\n    .subscribeOn(Schedulers.computation()) ← IGNORED! First one wins\n    .observeOn(AndroidSchedulers.mainThread())  ← switches to Main\n    .filter { it.isValid }           ← runs on Main\n    .observeOn(Schedulers.io())      ← switches BACK to IO\n    .flatMap { api.fetch(it) }       ← runs on IO\n    .observeOn(AndroidSchedulers.mainThread())\n    .subscribe { updateUI(it) }      ← runs on Main\n\nRule: subscribeOn = where source runs (first wins)\n      observeOn  = where everything AFTER runs (each one switches)</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// RxJava common mistake: multiple subscribeOn</span>\nObservable.fromCallable { heavyComputation() }  <span class=\"cmt\">// runs on IO</span>\n    .subscribeOn(Schedulers.io())               <span class=\"cmt\">// ✓ first — this is used</span>\n    .subscribeOn(Schedulers.computation())       <span class=\"cmt\">// ✗ ignored! only first matters</span>\n    .observeOn(AndroidSchedulers.mainThread())\n    .subscribe { result -> showResult(result) }</div>\n\n<h4>Kotlin Flow: flowOn (upstream only)</h4>\n<div class=\"diagram\">flow { emit(fetchData()) }     ← runs on IO (flowOn below changes this)\n  .map { transform(it) }       ← runs on IO (upstream of flowOn)\n  .flowOn(Dispatchers.IO)      ← affects everything ABOVE\n  .filter { it.isValid }       ← runs on collector's context (Main)\n  .collect { updateUI(it) }    ← runs on whatever dispatcher you collect in\n\nRule: flowOn = changes context for everything UPSTREAM\n      collection context = determines downstream thread\n      (opposite direction from RxJava's observeOn!)</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// Flow threading — flowOn affects UPSTREAM</span>\nval results = repository.searchFlow(query)   <span class=\"cmt\">// emits on IO</span>\n    .map { parseResults(it) }                <span class=\"cmt\">// runs on IO (above flowOn)</span>\n    .flowOn(Dispatchers.IO)                  <span class=\"cmt\">// ↑ everything above on IO</span>\n    .map { filterForUI(it) }                 <span class=\"cmt\">// runs on Main (collector context)</span>\n\n<span class=\"cmt\">// Collect in viewModelScope → Main dispatcher</span>\nviewModelScope.launch {\n    results.collect { data -> _uiState.value = data }  <span class=\"cmt\">// Main</span>\n}</div>\n\n<h4>LiveData: Always Main Thread</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// LiveData observation is ALWAYS on main thread</span>\n<span class=\"cmt\">// No threading control at observation site</span>\nviewModel.user.observe(viewLifecycleOwner) { user ->\n    <span class=\"cmt\">// GUARANTEED main thread — no exceptions</span>\n    nameTextView.text = user.name\n}\n\n<span class=\"cmt\">// To do background work, use liveData builder:</span>\nval user: LiveData&lt;User&gt; = liveData(Dispatchers.IO) {\n    val data = repository.getUser()  <span class=\"cmt\">// runs on IO</span>\n    emit(data)                       <span class=\"cmt\">// switches to Main automatically</span>\n}</div>\n\n<h4>Side-by-Side Threading Comparison</h4>\n<table>\n<tr><th>Aspect</th><th>RxJava</th><th>Kotlin Flow</th><th>LiveData</th></tr>\n<tr><td>Set upstream thread</td><td><code>subscribeOn()</code></td><td><code>flowOn()</code></td><td><code>liveData(Dispatchers.IO)</code></td></tr>\n<tr><td>Switch downstream</td><td><code>observeOn()</code></td><td>Collection context</td><td>N/A (always Main)</td></tr>\n<tr><td>Direction</td><td>subscribeOn: up, observeOn: down</td><td>flowOn: up only</td><td>N/A</td></tr>\n<tr><td>Multiple switches</td><td>Multiple observeOn OK</td><td>Multiple flowOn OK (each scopes above it)</td><td>Not possible</td></tr>\n<tr><td>Gotcha</td><td>Only FIRST subscribeOn matters</td><td>Cannot emit from different dispatcher than flowOn without channelFlow</td><td>Must postValue from BG thread</td></tr>\n</table>\n\n<hr class=\"section-divider\">\n<h3>Backpressure — When the Producer Is Faster Than the Consumer</h3>\n<p>Backpressure occurs when the emitter produces items faster than the collector can process them. Each framework handles this differently:</p>\n<div class=\"diagram\">Producer: 🏭💨💨💨  (fast)     Consumer: 🐌 (slow)\n\nWhat happens to the items the consumer can't keep up with?\n\n┌──────────────────────────────────────────────────────────────┐\n│ RxJava Observable    │ NO backpressure → MissingBackpressure │\n│                      │ Exception if buffer overflows         │\n│                                                              │\n│ RxJava Flowable      │ Explicit strategies:                  │\n│   BUFFER             │ Queue all items (memory risk)          │\n│   DROP               │ Drop items that can't be processed    │\n│   LATEST             │ Keep only most recent item             │\n│   ERROR              │ Throw if buffer full                   │\n│   MISSING             │ No strategy — handle manually         │\n│                                                              │\n│ Kotlin Flow          │ Suspends producer (built-in!)          │\n│   .buffer()          │ Add buffer, producer keeps running     │\n│   .conflate()        │ Skip intermediate values (keep latest) │\n│   .collectLatest {}  │ Cancel previous processing on new item │\n│                                                              │\n│ StateFlow            │ Built-in conflation (always latest)    │\n│                      │ Never buffers, never suspends          │\n└──────────────────────────────────────────────────────────────┘</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// Flow backpressure — producer suspends by default</span>\nval fastProducer = flow {\n    repeat(1000) { i ->\n        emit(i)  <span class=\"cmt\">// suspends if collector is busy!</span>\n    }\n}\n\n<span class=\"cmt\">// buffer() — decouple producer and consumer with a buffer</span>\nfastProducer\n    .buffer(capacity = 64)\n    .collect { item ->\n        delay(100)  <span class=\"cmt\">// slow consumer — producer runs ahead up to 64 items</span>\n        process(item)\n    }\n\n<span class=\"cmt\">// conflate() — skip intermediate values, always process latest</span>\nsensorReadings\n    .conflate()\n    .collect { reading ->\n        delay(500)  <span class=\"cmt\">// slow UI update — skips readings emitted during processing</span>\n        updateGauge(reading)\n    }\n\n<span class=\"cmt\">// collectLatest — cancel previous processing when new value arrives</span>\nsearchQuery\n    .collectLatest { query ->\n        val results = api.search(query)  <span class=\"cmt\">// cancelled if new query arrives</span>\n        showResults(results)\n    }</div>\n<div class=\"warn-box\"><b>StateFlow is always conflated.</b> If you emit A → B → C rapidly, a slow collector may only see C. This is perfect for UI state (you only care about the latest) but <b>wrong for events</b> (you'd lose navigation commands or snackbar triggers). Use <code>SharedFlow</code> or <code>Channel</code> for events.</div>\n\n<hr class=\"section-divider\">\n<h3>Channel vs SharedFlow — When to Use Which</h3>\n<p>Both are hot, but they serve fundamentally different purposes:</p>\n<div class=\"diagram\">                Channel                         SharedFlow\n                ───────                         ──────────\nDelivery:       Each item to ONE receiver       Each item to ALL collectors\n                (fan-out / work distribution)   (multicast / event bus)\n\nAnalogy:        Work queue at a factory         Radio broadcast\n                (one worker picks up each task) (all radios hear the same)\n\nBuffering:      Built-in rendezvous/buffered    Configurable replay + buffer\nBack-pressure:  Suspends sender when full       Configurable overflow policy\nCompletion:     Can be closed                   Never completes\n\nUse for:        • Work distribution             • UI events (one-shot)\n                • One-time delivery              • Shared state changes\n                • Producer-consumer pattern      • Multiple observers\n                • Communication between          • Event bus\n                  coroutines</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// Channel — each item consumed by exactly ONE receiver</span>\nval workChannel = Channel&lt;Task&gt;(capacity = Channel.BUFFERED)\n\n<span class=\"cmt\">// Producer</span>\nscope.launch {\n    repeat(100) { i -> workChannel.send(Task(i)) }\n    workChannel.close()\n}\n\n<span class=\"cmt\">// Multiple consumers — each task goes to ONE consumer (fan-out)</span>\nrepeat(4) { workerId ->\n    scope.launch {\n        for (task in workChannel) {\n            println(\"Worker $workerId processing ${task.id}\")\n        }\n    }\n}\n\n<span class=\"cmt\">// SharedFlow — each item delivered to ALL collectors</span>\nval eventBus = MutableSharedFlow&lt;UiEvent&gt;()\n\n<span class=\"cmt\">// All collectors see the same event</span>\nscope.launch { eventBus.collect { handleInFragmentA(it) } }\nscope.launch { eventBus.collect { handleInFragmentB(it) } }\nscope.launch { eventBus.collect { logAnalytics(it) } }\n\neventBus.emit(UiEvent.ShowSnackbar(\"Saved!\"))  <span class=\"cmt\">// all three see this</span></div>\n<div class=\"info-box\"><b>Rule of thumb:</b><br>\n• Need each event processed by exactly one handler? → <code>Channel</code><br>\n• Need all observers to see every event? → <code>SharedFlow</code><br>\n• Need the latest state value always available? → <code>StateFlow</code><br>\n• Need lifecycle-aware observation without Flow? → <code>LiveData</code> (legacy)</div>",
+  "questions": [
+    {
+      "id": "hct-1",
+      "type": "multiple-choice",
+      "title": "Cold vs Hot Identification",
+      "difficulty": "intermediate",
+      "description": "Which of the following is a <b>cold</b> stream?",
+      "options": [
+        "StateFlow — it always has a current value",
+        "SharedFlow with replay = 1",
+        "flow { } builder — the lambda runs fresh for each collector",
+        "BehaviorSubject — it replays the last value to new subscribers"
+      ],
+      "correctIndex": 2,
+      "explanation": "The <code>flow { }</code> builder creates a <b>cold</b> stream. The lambda inside runs independently for each collector, starting from scratch every time. StateFlow, SharedFlow, and BehaviorSubject are all hot — they exist independently of subscribers and share emissions across all observers.",
+      "hints": [
+        "Cold = producer runs per subscriber, like pressing play on a DVD",
+        "Hot = producer runs regardless of subscribers, like live TV"
+      ]
+    },
+    {
+      "id": "hct-2",
+      "type": "what-does-this-do",
+      "title": "RxJava subscribeOn Gotcha",
+      "difficulty": "advanced",
+      "description": "On which threads does each stage of this RxJava chain execute?",
+      "code": "Observable.fromCallable { \n    println(\"Source: ${Thread.currentThread().name}\")\n    fetchDataFromDisk()\n}\n    .subscribeOn(Schedulers.io())\n    .map { data ->\n        println(\"Map: ${Thread.currentThread().name}\")\n        transform(data)\n    }\n    .subscribeOn(Schedulers.computation())  // second subscribeOn\n    .observeOn(AndroidSchedulers.mainThread())\n    .subscribe { result ->\n        println(\"Subscribe: ${Thread.currentThread().name}\")\n        showResult(result)\n    }",
+      "options": [
+        "Source: io, Map: computation, Subscribe: main",
+        "Source: io, Map: io, Subscribe: main — the second subscribeOn is ignored",
+        "Source: computation, Map: computation, Subscribe: main",
+        "Source: io, Map: main, Subscribe: main"
+      ],
+      "correctIndex": 1,
+      "explanation": "Only the <b>first</b> <code>subscribeOn</code> takes effect — it determines where the source and all upstream operators run. The second <code>subscribeOn(computation)</code> is completely ignored. <code>observeOn(mainThread)</code> switches everything downstream to the main thread. So: source and map both run on IO, subscribe runs on Main.",
+      "hints": [
+        "subscribeOn sets where the subscription (source) happens — only the first one matters",
+        "observeOn switches the thread for everything that comes AFTER it"
+      ]
+    },
+    {
+      "id": "hct-3",
+      "type": "what-does-this-do",
+      "title": "Flow flowOn Direction",
+      "difficulty": "advanced",
+      "description": "What thread does each operation run on?",
+      "code": "flow {\n    println(\"Emit: ${Thread.currentThread().name}\")\n    emit(heavyComputation())\n}\n    .map {\n        println(\"Map: ${Thread.currentThread().name}\")\n        formatResult(it)\n    }\n    .flowOn(Dispatchers.Default)\n    .filter {\n        println(\"Filter: ${Thread.currentThread().name}\")\n        it.isNotEmpty()\n    }\n    .collect {\n        println(\"Collect: ${Thread.currentThread().name}\")\n        updateUI(it)\n    }\n// collected in viewModelScope.launch { } (Main dispatcher)",
+      "options": [
+        "All on Default because flowOn is in the middle",
+        "Emit: Default, Map: Default, Filter: Main, Collect: Main",
+        "Emit: Main, Map: Default, Filter: Default, Collect: Main",
+        "Emit: Default, Map: Main, Filter: Main, Collect: Main"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>flowOn</code> changes the context for everything <b>upstream</b> (above it). The <code>flow { }</code> emission and <code>map</code> are upstream of <code>flowOn(Default)</code>, so they run on Default. The <code>filter</code> and <code>collect</code> are downstream — they run on the collector's context (Main, since collected in viewModelScope). This is the opposite direction from RxJava's <code>observeOn</code>.",
+      "hints": [
+        "flowOn affects everything ABOVE it, not below",
+        "The collector's coroutine context determines the downstream thread"
+      ]
+    },
+    {
+      "id": "hct-4",
+      "type": "multiple-choice",
+      "title": "StateFlow Conflation Trap",
+      "difficulty": "intermediate",
+      "description": "A ViewModel emits navigation events via StateFlow. The user taps a button twice quickly, navigating to ScreenA then ScreenB. What does the UI observer see?",
+      "code": "private val _nav = MutableStateFlow<NavEvent?>(null)\nval nav: StateFlow<NavEvent?> = _nav\n\nfun onButtonTap() {\n    _nav.value = NavEvent.GoTo(ScreenA)  // first tap\n    _nav.value = NavEvent.GoTo(ScreenB)  // second tap (immediately after)\n}",
+      "options": [
+        "Observer sees ScreenA then ScreenB — both events delivered",
+        "Observer sees only ScreenB — StateFlow conflates, dropping ScreenA",
+        "Observer sees ScreenA only — first value wins",
+        "App crashes due to rapid emissions"
+      ],
+      "correctIndex": 1,
+      "explanation": "StateFlow is <b>conflated</b> — it only keeps the latest value. Since both assignments happen synchronously before the collector resumes, the collector only sees <code>ScreenB</code>. The <code>ScreenA</code> event is lost. This is why <b>StateFlow is wrong for one-shot events</b> like navigation. Use <code>SharedFlow</code> or <code>Channel</code> for events instead.",
+      "hints": [
+        "StateFlow keeps only the most recent value",
+        "Think about what happens if two values are set before the collector runs"
+      ]
+    },
+    {
+      "id": "hct-5",
+      "type": "multiple-choice",
+      "title": "Channel vs SharedFlow Delivery",
+      "difficulty": "intermediate",
+      "description": "You have two collectors listening. A <code>Channel</code> sends the value <code>42</code>. Which collectors receive it?",
+      "code": "val channel = Channel<Int>()\n\nscope.launch { channel.consumeEach { println(\"A: $it\") } }\nscope.launch { channel.consumeEach { println(\"B: $it\") } }\n\nscope.launch { channel.send(42) }",
+      "options": [
+        "Both A and B print 42",
+        "Either A or B prints 42, but not both — Channel is fan-out (one receiver per item)",
+        "Neither prints — Channel requires explicit receive()",
+        "App crashes because Channel doesn't support multiple consumers"
+      ],
+      "correctIndex": 1,
+      "explanation": "A <code>Channel</code> delivers each item to exactly <b>one</b> receiver (fan-out pattern). When you have multiple consumers, the item goes to whichever receiver is ready first — it's consumed and gone. If you need all observers to see every emission, use <code>SharedFlow</code> instead. Channel is for work distribution, SharedFlow is for event broadcasting.",
+      "hints": [
+        "Think of a Channel like a work queue — one worker picks up each task",
+        "Contrast with SharedFlow which is like a radio broadcast to all listeners"
+      ]
+    },
+    {
+      "id": "hct-6",
+      "type": "multiple-choice",
+      "title": "Backpressure: buffer vs conflate vs collectLatest",
+      "difficulty": "advanced",
+      "description": "A sensor emits readings every 10ms, but your processing takes 100ms. You want to always show the <b>most recent</b> reading and skip intermediate values during processing. Which operator is correct?",
+      "options": [
+        "buffer(64) — queues readings and processes them all eventually",
+        "conflate() — skips intermediate values, always processes the latest available",
+        "collectLatest { } — cancels in-progress processing when a new value arrives",
+        "Both B and C achieve the goal, but conflate() keeps processing running while collectLatest cancels it"
+      ],
+      "correctIndex": 3,
+      "explanation": "Both <code>conflate()</code> and <code>collectLatest</code> show the latest value, but they differ: <code>conflate()</code> lets the current processing <b>finish</b> then skips to the latest — good when processing has side effects you don't want to cancel. <code>collectLatest</code> <b>cancels</b> the in-progress processing and restarts with the new value — good for search-as-you-type where stale results should be abandoned. <code>buffer()</code> would queue all readings, which is not what you want for a real-time display.",
+      "hints": [
+        "Think about what happens to the currently-processing item when a new one arrives",
+        "conflate lets the current processing finish; collectLatest cancels it"
+      ]
+    },
+    {
+      "id": "hct-7",
+      "type": "what-does-this-do",
+      "title": "Cold to Hot Conversion",
+      "difficulty": "intermediate",
+      "description": "What does <code>stateIn</code> do to this cold flow, and what value does a new collector see if it starts collecting 10 seconds later?",
+      "code": "// In ViewModel\nval currentPrice: StateFlow<Double> = tickerRepository\n    .priceUpdates()   // cold Flow<Double> that emits every 1 second\n    .stateIn(\n        scope = viewModelScope,\n        started = SharingStarted.WhileSubscribed(5000),\n        initialValue = 0.0\n    )\n\n// Fragment collects 10 seconds after ViewModel is created\nviewLifecycleOwner.lifecycleScope.launch {\n    viewModel.currentPrice.collect { price -> updatePriceLabel(price) }\n}",
+      "options": [
+        "The collector gets all prices from the last 10 seconds (replay buffer)",
+        "The collector gets 0.0 (initial value) since WhileSubscribed stopped after 5s with no collectors",
+        "The collector gets the very latest price — stateIn kept running on viewModelScope",
+        "The flow restarts from the beginning when the new collector arrives"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>SharingStarted.WhileSubscribed(5000)</code> means the upstream flow stops 5 seconds after the last collector disappears. If no one collected for 10 seconds, the upstream stopped at the 5-second mark and the StateFlow reset to its <code>initialValue</code> of <code>0.0</code>. When the Fragment starts collecting, the upstream restarts and new prices begin flowing. This is the recommended strategy — it survives configuration changes (< 5s) but cleans up when truly unused.",
+      "hints": [
+        "WhileSubscribed(5000) stops the upstream 5 seconds after the last collector goes away",
+        "What value does a StateFlow have after the upstream stops?"
+      ]
+    },
+    {
+      "id": "hct-8",
+      "type": "trivia",
+      "title": "Hot vs Cold Mental Model",
+      "difficulty": "intermediate",
+      "description": "Explain the DVD vs Live TV analogy for cold vs hot streams, and name two cold and two hot stream types from Kotlin/RxJava.",
+      "keywords": [
+        "cold",
+        "hot",
+        "DVD",
+        "live",
+        "subscriber",
+        "independent",
+        "shared",
+        "Flow",
+        "StateFlow",
+        "SharedFlow",
+        "Observable",
+        "Subject",
+        "multicast",
+        "unicast"
+      ],
+      "answer": "A cold stream is like a DVD — each subscriber starts from the beginning and gets their own independent copy of the data. The producer doesn't run until someone subscribes. Examples: Kotlin flow { } builder, RxJava Observable.create { }. A hot stream is like live TV — it broadcasts regardless of subscribers, and you tune in to whatever is currently playing. All subscribers share the same stream. Examples: StateFlow, SharedFlow, BehaviorSubject, LiveData.",
+      "explanation": "The key insight is about sharing: cold streams create a new producer per subscriber (unicast), while hot streams share one producer across all subscribers (multicast). This matters for resource usage — a cold network call flow collected by 3 fragments makes 3 network calls. Converting to hot with shareIn makes it one call shared across all.",
+      "hints": [
+        "Think about what happens when a SECOND subscriber joins",
+        "Does the producer restart or continue from where it is?"
+      ]
+    }
+  ]
+}

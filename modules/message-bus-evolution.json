@@ -1,0 +1,173 @@
+{
+  "id": "message-bus-evolution",
+  "title": "Message Bus Evolution",
+  "icon": "📨",
+  "description": "The evolution of component communication in Android: from callbacks to SharedFlow",
+  "references": [
+    {"title": "Android Developers — LiveData Overview", "url": "https://developer.android.com/topic/libraries/architecture/livedata", "type": "docs"},
+    {"title": "Android Developers — StateFlow and SharedFlow", "url": "https://developer.android.com/kotlin/flow/stateflow-and-sharedflow", "type": "docs"},
+    {"title": "greenrobot/EventBus", "url": "https://github.com/greenrobot/EventBus", "type": "docs"},
+    {"title": "Jose Alcerreca — LiveData with SnackBar, Navigation, and other events (the SingleLiveEvent post)", "url": "https://medium.com/androiddevelopers/livedata-with-snackbar-navigation-and-other-events-the-singleliveevent-case-ac2622673150", "type": "article"},
+    {"title": "Roman Elizarov — Shared flows, broadcast channels", "url": "https://elizarov.medium.com/shared-flows-broadcast-channels-899b675e805c", "type": "article"},
+    {"title": "LocalBroadcastManager Deprecation Notice", "url": "https://developer.android.com/reference/androidx/localbroadcastmanager/content/LocalBroadcastManager", "type": "docs"}
+  ],
+  "lesson": "<h3>Why This History Matters</h3>\n<p>Android has gone through at least <b>six generations</b> of component communication patterns. Legacy codebases still use older approaches, and interview questions often ask you to compare them. Understanding the progression reveals <i>why</i> each successor was invented and what trade-offs it solved.</p>\n\n<hr class=\"section-divider\">\n<h3>1. Callbacks / Interfaces (2008+)</h3>\n<p>The original pattern: define an interface, hold a reference, call back when ready.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Step 1: Define a contract</span>\ninterface OnUserLoadedListener {\n    fun onUserLoaded(user: User)\n    fun onError(error: Throwable)\n}\n\n<span class=\"cmt\">// Step 2: Producer holds a reference to the listener</span>\nclass UserRepository {\n    private var listener: OnUserLoadedListener? = null\n\n    fun setListener(l: OnUserLoadedListener) {\n        listener = l  <span class=\"cmt\">// Danger: this is a strong reference</span>\n    }\n\n    fun loadUser(id: String) {\n        thread {\n            val user = api.fetchUser(id)\n            listener?.onUserLoaded(user) <span class=\"cmt\">// Which thread are we on?</span>\n        }\n    }\n}\n\n<span class=\"cmt\">// Step 3: Activity registers itself</span>\nclass ProfileActivity : AppCompatActivity(), OnUserLoadedListener {\n    override fun onCreate(savedInstanceState: Bundle?) {\n        repository.setListener(this) <span class=\"cmt\">// Activity leaked if not cleared</span>\n    }\n\n    override fun onUserLoaded(user: User) {\n        <span class=\"cmt\">// Might crash: activity could be destroyed by now</span>\n        nameTextView.text = user.name\n    }\n\n    override fun onDestroy() {\n        super.onDestroy()\n        repository.setListener(null) <span class=\"cmt\">// Must remember to do this!</span>\n    }\n}</div>\n<div class=\"warn-box\"><b>Problems with callbacks:</b><br>\n1. <b>Reference leaks</b> — producer holds the consumer; if you forget to null it, the Activity leaks<br>\n2. <b>No lifecycle awareness</b> — callback fires on a destroyed Activity = crash<br>\n3. <b>Threading is your problem</b> — callback fires on whatever thread the producer used<br>\n4. <b>Tight coupling</b> — producer must know the listener interface; 1:1 only<br>\n5. <b>Callback hell</b> — nested callbacks for sequential async operations become unreadable</div>\n\n<hr class=\"section-divider\">\n<h3>2. LocalBroadcastManager (2011\u20132018, deprecated)</h3>\n<p>Part of the Support Library. Provided an in-process event bus using <code>Intent</code> and <code>BroadcastReceiver</code>.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Sending</span>\nval intent = Intent(\"com.example.USER_LOADED\")\nintent.putExtra(\"user_name\", user.name)\nLocalBroadcastManager.getInstance(context).sendBroadcast(intent)\n\n<span class=\"cmt\">// Receiving</span>\nval receiver = object : BroadcastReceiver() {\n    override fun onReceive(context: Context, intent: Intent) {\n        val name = intent.getStringExtra(\"user_name\")\n    }\n}\nLocalBroadcastManager.getInstance(context)\n    .registerReceiver(receiver, IntentFilter(\"com.example.USER_LOADED\"))\n\n<span class=\"cmt\">// Must unregister in onDestroy!</span>\nLocalBroadcastManager.getInstance(context).unregisterReceiver(receiver)</div>\n<div class=\"info-box\"><b>Why deprecated:</b> Google's deprecation notice says it was \"an anti-pattern\" because it combined the heavyweight Intent/BroadcastReceiver API (designed for cross-process IPC) with in-process use. It offered no lifecycle awareness, required manual unregister, used string-based actions (no type safety), and could only carry Bundle-serializable data. LiveData and reactive streams were strictly better.</div>\n\n<hr class=\"section-divider\">\n<h3>3. Otto / EventBus (greenrobot) (2012\u20132017)</h3>\n<p>Third-party publish-subscribe libraries that decoupled producers from consumers. EventBus by greenrobot became the dominant choice.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Define an event class (any POJO)</span>\ndata class UserLoadedEvent(val user: User)\n\n<span class=\"cmt\">// Post from anywhere</span>\nEventBus.getDefault().post(UserLoadedEvent(user))\n\n<span class=\"cmt\">// Subscribe in Activity/Fragment</span>\nclass ProfileActivity : AppCompatActivity() {\n    override fun onStart() {\n        super.onStart()\n        EventBus.getDefault().register(this)\n    }\n\n    override fun onStop() {\n        super.onStop()\n        EventBus.getDefault().unregister(this)\n    }\n\n    @Subscribe(threadMode = ThreadMode.MAIN)\n    fun onUserLoaded(event: UserLoadedEvent) {\n        nameTextView.text = event.user.name\n    }\n}</div>\n<p><b>ThreadMode options in greenrobot EventBus:</b></p>\n<table>\n<tr><th>ThreadMode</th><th>Behavior</th></tr>\n<tr><td><code>POSTING</code></td><td>Same thread as poster (default)</td></tr>\n<tr><td><code>MAIN</code></td><td>Always on Android main thread</td></tr>\n<tr><td><code>MAIN_ORDERED</code></td><td>Main thread, enqueued (non-blocking post)</td></tr>\n<tr><td><code>BACKGROUND</code></td><td>Background thread (if posted from main, new thread; if posted from BG, same thread)</td></tr>\n<tr><td><code>ASYNC</code></td><td>Always a separate thread from a pool</td></tr>\n</table>\n<div class=\"warn-box\"><b>Why EventBus fell out of favor:</b><br>\n1. <b>Debugging nightmare</b> — Ctrl+F for <code>post(UserLoadedEvent)</code> is the only way to find who sends it. No call hierarchy, no IDE navigation from producer to consumer<br>\n2. <b>No compile-time safety</b> — misspell the event class? No subscriber found, silent failure<br>\n3. <b>Implicit coupling</b> — everything talks to everything via a global bus; dependency graph becomes invisible<br>\n4. <b>Sticky events leak</b> — sticky events persist until manually removed, causing stale data bugs<br>\n5. <b>Still no lifecycle awareness</b> — must manually register/unregister; miss onStop = crash</div>\n\n<hr class=\"section-divider\">\n<h3>4. RxJava Subjects as Event Bus (~2015\u20132019)</h3>\n<p>As RxJava gained popularity, teams used <code>Subject</code> types as in-process event buses. This gave them the reactive operator chain they already knew.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Singleton event bus using RxJava</span>\nobject RxBus {\n    private val bus = PublishSubject.create&lt;Any&gt;()\n\n    fun post(event: Any) = bus.onNext(event)\n\n    <span class=\"cmt\">// Callers filter by type</span>\n    inline fun &lt;reified T&gt; observe(): Observable&lt;T&gt; =\n        bus.ofType(T::class.java)\n}\n\n<span class=\"cmt\">// In Activity — must dispose to avoid leaks</span>\nclass ProfileActivity : AppCompatActivity() {\n    private val disposables = CompositeDisposable()\n\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        disposables.add(\n            RxBus.observe&lt;UserLoadedEvent&gt;()\n                .observeOn(AndroidSchedulers.mainThread())\n                .subscribe { event -&gt;\n                    nameTextView.text = event.user.name\n                }\n        )\n    }\n\n    override fun onDestroy() {\n        disposables.clear() <span class=\"cmt\">// Forget this = memory leak</span>\n        super.onDestroy()\n    }\n}</div>\n<p><b>Subject types in RxJava:</b></p>\n<table>\n<tr><th>Subject</th><th>Behavior</th><th>Use Case</th></tr>\n<tr><td><code>PublishSubject</code></td><td>Only emits items after subscription</td><td>Events (clicks, navigation)</td></tr>\n<tr><td><code>BehaviorSubject</code></td><td>Replays last emitted item to new subscribers</td><td>State (current user, settings)</td></tr>\n<tr><td><code>ReplaySubject</code></td><td>Replays all items to new subscribers</td><td>Chat history, logs</td></tr>\n<tr><td><code>AsyncSubject</code></td><td>Only emits the last item, on completion</td><td>Single async result</td></tr>\n</table>\n<div class=\"info-box\"><b>Trade-offs of RxJava as event bus:</b><br>\n+ Powerful operators (debounce, flatMap, retry, combine)<br>\n+ Type-safe (generics, not Any-based reflection)<br>\n+ Thread control with <code>subscribeOn</code> / <code>observeOn</code><br>\n- Steep learning curve; error handling is complex (onError terminates the stream)<br>\n- <code>CompositeDisposable</code> is manual lifecycle management<br>\n- RxJava 2+ adds a 2.5 MB dependency; method count matters on Android<br>\n- No lifecycle awareness out of the box</div>\n\n<hr class=\"section-divider\">\n<h3>5. LiveData (2017+)</h3>\n<p>Google's first lifecycle-aware observable. Built into Architecture Components.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// ViewModel exposes LiveData</span>\nclass ProfileViewModel : ViewModel() {\n    private val _user = MutableLiveData&lt;User&gt;()\n    val user: LiveData&lt;User&gt; = _user\n\n    fun loadUser(id: String) {\n        viewModelScope.launch {\n            _user.value = repository.fetchUser(id)\n        }\n    }\n}\n\n<span class=\"cmt\">// Activity observes — automatically stops when lifecycle is DESTROYED</span>\nclass ProfileActivity : AppCompatActivity() {\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        viewModel.user.observe(this) { user ->\n            nameTextView.text = user.name\n        }\n    }\n    <span class=\"cmt\">// No onDestroy cleanup needed! LiveData respects the lifecycle.</span>\n}</div>\n<div class=\"warn-box\"><b>The Event Wrapper Hack:</b><br>\nLiveData replays the last value to new observers. This is great for <b>state</b> (\"show the current user\") but terrible for <b>events</b> (\"show a Snackbar\"). After rotation, the Snackbar shows again because LiveData re-delivers the last value.<br><br>\nThe community invented <code>SingleLiveEvent</code> and the <code>Event</code> wrapper class to work around this:</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// The famous Event wrapper (Jose Alcerreca, Google)</span>\nopen class Event&lt;out T&gt;(private val content: T) {\n    private var hasBeenHandled = false\n\n    fun getContentIfNotHandled(): T? {\n        return if (hasBeenHandled) null\n        else {\n            hasBeenHandled = true\n            content\n        }\n    }\n}\n\n<span class=\"cmt\">// Usage in ViewModel</span>\nprivate val _showSnackbar = MutableLiveData&lt;Event&lt;String&gt;&gt;()\nval showSnackbar: LiveData&lt;Event&lt;String&gt;&gt; = _showSnackbar\n\nfun onSaveClicked() {\n    save()\n    _showSnackbar.value = Event(\"Saved successfully\")\n}\n\n<span class=\"cmt\">// Usage in Activity — notice the unwrapping boilerplate</span>\nviewModel.showSnackbar.observe(this) { event ->\n    event.getContentIfNotHandled()?.let { message ->\n        Snackbar.make(root, message, Snackbar.LENGTH_SHORT).show()\n    }\n}</div>\n<p>This works but is widely considered a hack. It also breaks if there are multiple observers (only the first one gets the event).</p>\n\n<hr class=\"section-divider\">\n<h3>6. SharedFlow & StateFlow (2020+) \u2014 The Modern Answer</h3>\n<p>Kotlin coroutines introduced <code>SharedFlow</code> and <code>StateFlow</code>, which solve the state-vs-event problem cleanly.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// STATE: Use StateFlow (replays last value, like BehaviorSubject)</span>\nclass ProfileViewModel : ViewModel() {\n    private val _user = MutableStateFlow&lt;User?&gt;(null)\n    val user: StateFlow&lt;User?&gt; = _user.asStateFlow()\n\n    fun loadUser(id: String) {\n        viewModelScope.launch {\n            _user.value = repository.fetchUser(id)\n        }\n    }\n}\n\n<span class=\"cmt\">// EVENTS: Use SharedFlow with replay=0 (like PublishSubject)</span>\nclass ProfileViewModel : ViewModel() {\n    private val _events = MutableSharedFlow&lt;UiEvent&gt;()\n    val events: SharedFlow&lt;UiEvent&gt; = _events.asSharedFlow()\n\n    fun onSaveClicked() {\n        viewModelScope.launch {\n            save()\n            _events.emit(UiEvent.ShowSnackbar(\"Saved!\"))\n            <span class=\"cmt\">// No Event wrapper needed! replay=0 means no re-delivery</span>\n        }\n    }\n}\n\nsealed class UiEvent {\n    data class ShowSnackbar(val message: String) : UiEvent()\n    data class Navigate(val route: String) : UiEvent()\n}\n\n<span class=\"cmt\">// Collecting in Activity/Fragment — lifecycle-aware with repeatOnLifecycle</span>\nlifecycleScope.launch {\n    repeatOnLifecycle(Lifecycle.State.STARTED) {\n        launch {\n            viewModel.user.collect { user ->\n                user?.let { nameTextView.text = it.name }\n            }\n        }\n        launch {\n            viewModel.events.collect { event ->\n                when (event) {\n                    is UiEvent.ShowSnackbar ->\n                        Snackbar.make(root, event.message, LENGTH_SHORT).show()\n                    is UiEvent.Navigate ->\n                        navController.navigate(event.route)\n                }\n            }\n        }\n    }\n}</div>\n<div class=\"info-box\"><b>Why SharedFlow/StateFlow is the modern standard:</b><br>\n- <b>StateFlow</b> for state: always has a value, replays the latest to new collectors, conflates rapid updates<br>\n- <b>SharedFlow(replay=0)</b> for events: no re-delivery on rotation, no Event wrapper hack<br>\n- Lifecycle-safe with <code>repeatOnLifecycle</code> (auto-cancels collection when lifecycle drops below threshold)<br>\n- Coroutine scope handles cancellation automatically<br>\n- Full operator support (map, filter, combine, debounce, etc.)</div>\n\n<hr class=\"section-divider\">\n<h3>Full Comparison Table</h3>\n<table>\n<tr><th>Aspect</th><th>Callbacks</th><th>LocalBroadcast</th><th>EventBus</th><th>RxJava Subject</th><th>LiveData</th><th>SharedFlow/StateFlow</th></tr>\n<tr><td><b>Coupling</b></td><td>Tight (interface ref)</td><td>Loose (string action)</td><td>Loose (event class)</td><td>Loose (type filter)</td><td>Loose (observe)</td><td>Loose (collect)</td></tr>\n<tr><td><b>Type Safety</b></td><td>Yes</td><td>No (Intent extras)</td><td>Partial (reflection)</td><td>Yes (generics)</td><td>Yes</td><td>Yes</td></tr>\n<tr><td><b>Lifecycle Aware</b></td><td>No</td><td>No</td><td>No</td><td>No</td><td>Yes</td><td>Yes (with repeatOnLifecycle)</td></tr>\n<tr><td><b>Threading</b></td><td>Manual (runOnUiThread)</td><td>Main thread only</td><td>ThreadMode annotation</td><td>observeOn/subscribeOn</td><td>Main thread auto</td><td>Dispatcher / flowOn</td></tr>\n<tr><td><b>Cancellation</b></td><td>Manual null ref</td><td>unregisterReceiver()</td><td>unregister()</td><td>CompositeDisposable</td><td>Auto (lifecycle)</td><td>Auto (scope cancel)</td></tr>\n<tr><td><b>Events vs State</b></td><td>Events only</td><td>Events only</td><td>Both (sticky = state)</td><td>Both (Subject type)</td><td>State (events = hack)</td><td>Both (SharedFlow/StateFlow)</td></tr>\n<tr><td><b>Testability</b></td><td>Easy (mock interface)</td><td>Hard (needs Context)</td><td>Medium (post + verify)</td><td>Good (TestObserver)</td><td>Good (observeForever)</td><td>Best (Turbine library)</td></tr>\n<tr><td><b>Debugging</b></td><td>Good (stack trace)</td><td>Poor (string matching)</td><td>Poor (no call graph)</td><td>Medium (operator chain)</td><td>Good</td><td>Good (suspend stack)</td></tr>\n<tr><td><b>Status (2025)</b></td><td>Still used for simple UI callbacks</td><td>Deprecated</td><td>Legacy, avoid in new code</td><td>Being replaced by Flow</td><td>Stable, losing ground to Flow</td><td>Recommended standard</td></tr>\n</table>\n\n<hr class=\"section-divider\">\n<h3>Threading Comparison</h3>\n<p>How each approach handles \"run work on background, deliver result on main\":</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Callback — threading is completely manual</span>\nthread {\n    val user = api.fetchUser(id)\n    runOnUiThread { listener?.onUserLoaded(user) }\n}\n\n<span class=\"cmt\">// EventBus — annotation-based</span>\n@Subscribe(threadMode = ThreadMode.MAIN)\nfun onEvent(event: UserLoadedEvent) { ... }\n\n<span class=\"cmt\">// RxJava — operator-based</span>\nrepository.fetchUser(id)\n    .subscribeOn(Schedulers.io())\n    .observeOn(AndroidSchedulers.mainThread())\n    .subscribe { user -> ... }\n\n<span class=\"cmt\">// LiveData — always delivers on main, work done in coroutine</span>\nviewModelScope.launch {\n    val user = withContext(Dispatchers.IO) { api.fetchUser(id) }\n    _user.value = user <span class=\"cmt\">// Must be on main thread</span>\n}\n\n<span class=\"cmt\">// StateFlow — dispatcher controls where work runs, flowOn for upstream</span>\nflow { emit(api.fetchUser(id)) }\n    .flowOn(Dispatchers.IO)\n    .collect { user -> updateUi(user) } <span class=\"cmt\">// Collector's dispatcher</span></div>\n\n<hr class=\"section-divider\">\n<h3>Cancellation Comparison</h3>\n<p>How each approach prevents work from continuing after the consumer is gone:</p>\n<div class=\"diagram\">Callback:\n  onDestroy() { repository.setListener(null) }  // Forget = leak\n  ↳ Must manually null every reference\n\nLocalBroadcastManager:\n  onDestroy() { lbm.unregisterReceiver(receiver) }  // Forget = leak\n  ↳ Must manually unregister\n\nEventBus:\n  onStop() { EventBus.getDefault().unregister(this) }  // Forget = crash\n  ↳ Must manually unregister, usually in onStop\n\nRxJava:\n  onDestroy() { disposables.clear() }  // Forget = leak + possible crash\n  ↳ CompositeDisposable tracks all subscriptions\n  ↳ RxLifecycle / AutoDispose libraries tried to automate this\n\nLiveData:\n  // Nothing! observe(lifecycleOwner, ...) auto-removes on DESTROYED\n  ↳ First approach with built-in lifecycle cancellation\n\nSharedFlow / StateFlow:\n  // Nothing! repeatOnLifecycle auto-cancels collection\n  // viewModelScope auto-cancels when ViewModel is cleared\n  ↳ Structured concurrency = automatic cancellation hierarchy</div>\n<div class=\"info-box\"><b>The trend is clear:</b> each generation reduced the amount of manual cleanup code. Callbacks required nulling every reference. EventBus required register/unregister pairs. RxJava required CompositeDisposable. LiveData and Flow finally made cancellation automatic through lifecycle awareness and structured concurrency.</div>",
+  "questions": [
+    {
+      "id": "mbe-1",
+      "type": "multiple-choice",
+      "title": "Why LocalBroadcastManager Was Deprecated",
+      "difficulty": "intermediate",
+      "description": "Why did Google deprecate <code>LocalBroadcastManager</code>?",
+      "options": [
+        "It had a critical security vulnerability that allowed cross-app data leaks",
+        "It used the heavyweight Intent/BroadcastReceiver IPC pattern for in-process communication, lacked lifecycle awareness, had no type safety, and LiveData/reactive streams were strictly better",
+        "It was too slow due to serialization overhead",
+        "It only worked on API 21+ and Google wanted backwards compatibility"
+      ],
+      "correctIndex": 1,
+      "explanation": "Google's own deprecation notice called it \"an anti-pattern.\" LocalBroadcastManager borrowed the Intent and BroadcastReceiver API — designed for cross-process IPC — and used it within a single process. This meant no type safety (string-based actions, Bundle extras), no lifecycle awareness (manual unregister required), and all the ceremony of intents without any of the cross-process benefits. LiveData and reactive streams solved the same problem with type safety, lifecycle awareness, and cleaner APIs.",
+      "hints": [
+        "Think about what Intent and BroadcastReceiver were originally designed for",
+        "Consider type safety and lifecycle management"
+      ]
+    },
+    {
+      "id": "mbe-2",
+      "type": "what-does-this-do",
+      "title": "EventBus ThreadMode",
+      "difficulty": "intermediate",
+      "description": "What happens when this code runs? Assume <code>postEvent()</code> is called from a background thread.",
+      "code": "// Posted from a background thread:\nEventBus.getDefault().post(DataRefreshEvent(newData))\n\n// Subscriber in Activity:\n@Subscribe(threadMode = ThreadMode.POSTING)\nfun onRefresh(event: DataRefreshEvent) {\n    recyclerView.adapter?.notifyDataSetChanged()\n}",
+      "options": [
+        "The subscriber runs on the main thread and the RecyclerView updates correctly",
+        "The subscriber runs on the SAME background thread that posted, causing a CalledFromWrongThreadException crash when touching the RecyclerView",
+        "EventBus automatically switches to the main thread for UI operations",
+        "The event is silently dropped because of thread mismatch"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>ThreadMode.POSTING</code> (the default) means the subscriber method runs on the <b>same thread as the poster</b>. Since the event was posted from a background thread, the subscriber also runs on that background thread. Calling <code>notifyDataSetChanged()</code> from a background thread throws <code>CalledFromWrongThreadException</code> because only the main thread can touch Views. The fix is to use <code>ThreadMode.MAIN</code> instead.",
+      "hints": [
+        "POSTING means same thread as the poster",
+        "What happens when you touch Android Views from a background thread?"
+      ]
+    },
+    {
+      "id": "mbe-3",
+      "type": "multiple-choice",
+      "title": "The Event Wrapper Problem",
+      "difficulty": "intermediate",
+      "description": "Why does LiveData need the <code>Event</code> wrapper class for one-time events like showing a Snackbar?",
+      "options": [
+        "LiveData cannot emit null values, so the wrapper provides a nullable alternative",
+        "LiveData replays the last emitted value to new/returning observers, so after a screen rotation the Snackbar would show again without the wrapper",
+        "LiveData does not support sealed classes, so events must be wrapped",
+        "The Event wrapper provides type erasure for generic LiveData types"
+      ],
+      "correctIndex": 1,
+      "explanation": "LiveData is designed for <b>state</b> — it always holds the latest value and re-delivers it when a new observer subscribes or when the lifecycle returns to STARTED (e.g., after rotation). This is perfect for \"show the current user name\" but breaks for one-time events like Snackbar messages or navigation commands. The <code>Event</code> wrapper tracks whether the content has been consumed with a <code>hasBeenHandled</code> flag, but it's widely considered a hack. SharedFlow with <code>replay = 0</code> solves this without any wrapper.",
+      "hints": [
+        "Think about what happens to a LiveData observer after a configuration change",
+        "State vs events: state should replay, events should not"
+      ]
+    },
+    {
+      "id": "mbe-4",
+      "type": "what-does-this-do",
+      "title": "SharedFlow vs StateFlow for Events",
+      "difficulty": "advanced",
+      "description": "What is the critical difference in behavior between these two ViewModel implementations for one-time navigation events?",
+      "code": "// Implementation A:\nclass ViewModelA : ViewModel() {\n    private val _nav = MutableStateFlow<String?>(null)\n    val nav: StateFlow<String?> = _nav.asStateFlow()\n\n    fun goToDetail(id: String) {\n        _nav.value = \"detail/$id\"\n    }\n}\n\n// Implementation B:\nclass ViewModelB : ViewModel() {\n    private val _nav = MutableSharedFlow<String>()\n    val nav: SharedFlow<String> = _nav.asSharedFlow()\n\n    fun goToDetail(id: String) {\n        viewModelScope.launch { _nav.emit(\"detail/$id\") }\n    }\n}",
+      "options": [
+        "Both work the same way for navigation events",
+        "A replays the navigation after rotation (navigates again). B does not replay (replay=0 default), so navigation happens only once. B is correct for events.",
+        "B drops events if no collector is active. A is safer because it holds the value.",
+        "A is more efficient because StateFlow conflates values"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>StateFlow</code> always replays its current value to new collectors, just like LiveData. After a screen rotation, the collector re-subscribes, receives <code>\"detail/$id\"</code> again, and navigates a second time. <code>SharedFlow</code> with the default <code>replay = 0</code> does not replay — events are delivered only to currently active collectors. This makes SharedFlow the correct choice for one-time events like navigation, Snackbar, and dialog triggers. Note: if you need to guarantee delivery even when no collector is active, consider using a Channel instead.",
+      "hints": [
+        "StateFlow always has a current value and replays it",
+        "What is the default replay count for MutableSharedFlow()?"
+      ]
+    },
+    {
+      "id": "mbe-5",
+      "type": "multiple-choice",
+      "title": "RxJava CompositeDisposable",
+      "difficulty": "intermediate",
+      "description": "What happens if you forget to call <code>disposables.clear()</code> in <code>onDestroy()</code> when using an RxJava-based event bus?",
+      "code": "class ProfileActivity : AppCompatActivity() {\n    private val disposables = CompositeDisposable()\n\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        disposables.add(\n            RxBus.observe<UserEvent>()\n                .observeOn(AndroidSchedulers.mainThread())\n                .subscribe { event ->\n                    nameTextView.text = event.user.name\n                }\n        )\n    }\n\n    // Missing: override fun onDestroy() { disposables.clear() }\n}",
+      "options": [
+        "Nothing — RxJava automatically handles lifecycle cleanup",
+        "The Activity is leaked because the subscription holds a reference chain: RxBus → Observable → Observer → lambda capturing the Activity (via nameTextView). Events dispatched after destroy may also crash.",
+        "A compile-time error prevents the code from building without onDestroy",
+        "Only the Observable leaks, the Activity is garbage collected normally"
+      ],
+      "correctIndex": 1,
+      "explanation": "The RxJava subscription creates a reference chain: the global <code>RxBus</code> Subject holds the Observable, which holds the Observer (subscriber), which captures the lambda, which references <code>nameTextView</code>, which holds a reference to the Activity. Since the RxBus Subject lives as a singleton, the Activity can never be garbage collected. Additionally, if a <code>UserEvent</code> is posted after the Activity is destroyed, the subscriber tries to update <code>nameTextView</code> on a destroyed Activity, potentially causing a crash. This is exactly why lifecycle-aware solutions like LiveData and <code>repeatOnLifecycle</code> with Flow were created.",
+      "hints": [
+        "Think about the reference chain from the singleton bus to the Activity",
+        "What happens when an event fires after the Activity is destroyed?"
+      ]
+    },
+    {
+      "id": "mbe-6",
+      "type": "multiple-choice",
+      "title": "Debugging EventBus vs Direct Calls",
+      "difficulty": "intermediate",
+      "description": "A teammate is tracking down a bug where a <code>CartUpdatedEvent</code> is causing the wrong UI update. They're using greenrobot EventBus. What makes this harder to debug than a direct method call?",
+      "options": [
+        "EventBus encrypts events in transit, making them unreadable in the debugger",
+        "There is no direct call graph from poster to subscriber — you must search the entire codebase for @Subscribe methods accepting CartUpdatedEvent, and any class could be posting it. The IDE cannot show 'Find Usages' from post to subscriber.",
+        "EventBus runs subscribers in random order, making the bug non-reproducible",
+        "EventBus events are asynchronous by default and cannot be stepped through"
+      ],
+      "correctIndex": 1,
+      "explanation": "With a direct method call like <code>cartManager.updateCart()</code>, you can Ctrl+click to the implementation, see all callers via \"Find Usages,\" and trace the full call stack. With EventBus, the producer calls <code>EventBus.post(CartUpdatedEvent(...))</code> and the consumer has <code>@Subscribe fun onCartUpdated(event: CartUpdatedEvent)</code> — there is no compile-time link between them. You must manually search the codebase for all <code>post(CartUpdatedEvent</code> calls and all <code>@Subscribe</code> methods with that parameter type. As the codebase grows, this becomes a major maintenance burden and is one of the primary reasons EventBus fell out of favor.",
+      "hints": [
+        "Think about what happens when you try to Ctrl+click from a post() call to find who handles it",
+        "How many classes could potentially subscribe to the same event?"
+      ]
+    },
+    {
+      "id": "mbe-7",
+      "type": "what-does-this-do",
+      "title": "Cancellation Across Generations",
+      "difficulty": "advanced",
+      "description": "A developer is migrating from EventBus to SharedFlow. Which statement about the cancellation behavior is correct?",
+      "code": "// OLD: EventBus approach\nclass OldFragment : Fragment() {\n    override fun onStart() {\n        super.onStart()\n        EventBus.getDefault().register(this)\n    }\n    override fun onStop() {\n        super.onStop()\n        EventBus.getDefault().unregister(this)\n    }\n    @Subscribe(threadMode = ThreadMode.MAIN)\n    fun onData(event: DataEvent) { updateUi(event) }\n}\n\n// NEW: SharedFlow approach\nclass NewFragment : Fragment() {\n    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n        viewLifecycleOwner.lifecycleScope.launch {\n            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {\n                viewModel.dataEvents.collect { event -> updateUi(event) }\n            }\n        }\n    }\n}",
+      "options": [
+        "Both require manual cleanup in onStop/onDestroy",
+        "The EventBus version is safer because it uses symmetric register/unregister",
+        "The SharedFlow version automatically cancels collection when the lifecycle drops below STARTED and restarts when it returns — no manual cleanup. The EventBus version crashes if you forget unregister().",
+        "The SharedFlow version leaks because there is no explicit cancel() call"
+      ],
+      "correctIndex": 2,
+      "explanation": "<code>repeatOnLifecycle(Lifecycle.State.STARTED)</code> automatically cancels the collecting coroutine when the lifecycle drops below STARTED (e.g., fragment goes to background) and restarts it when the lifecycle returns to STARTED (fragment comes back to foreground). There is no manual cleanup code needed. The EventBus version relies on the developer correctly pairing <code>register()</code> in <code>onStart</code> with <code>unregister()</code> in <code>onStop</code>. Forgetting <code>unregister()</code> means the fragment receives events while in a stopped state, which can cause crashes when accessing views that have been destroyed.",
+      "hints": [
+        "What does repeatOnLifecycle actually do under the hood?",
+        "Consider what happens if you forget the manual cleanup in each version"
+      ]
+    },
+    {
+      "id": "mbe-8",
+      "type": "multiple-choice",
+      "title": "PublishSubject vs BehaviorSubject",
+      "difficulty": "advanced",
+      "description": "You have a global theme manager that should immediately tell new subscribers the current theme, and a notification system that should only deliver notifications going forward. Which RxJava Subject types would you use?",
+      "options": [
+        "PublishSubject for both — subscribers should only get future events",
+        "BehaviorSubject for the theme manager (replays last value to new subscribers), PublishSubject for notifications (only future events)",
+        "ReplaySubject for the theme manager, AsyncSubject for notifications",
+        "BehaviorSubject for both — new subscribers always need the latest state"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>BehaviorSubject</code> replays the most recent value to every new subscriber, making it perfect for state like the current theme — a new screen immediately knows whether to render light or dark. <code>PublishSubject</code> only emits items that arrive <i>after</i> subscription, making it correct for events like notifications — you don't want a new subscriber to receive an old notification they already missed. This maps directly to the modern Kotlin equivalents: <code>StateFlow</code> (always has a value, replays latest) = BehaviorSubject, <code>SharedFlow(replay=0)</code> (no replay) = PublishSubject.",
+      "hints": [
+        "Does a new screen need to know the current theme immediately, or only future theme changes?",
+        "Should a newly opened screen show old notifications?"
+      ]
+    }
+  ]
+}

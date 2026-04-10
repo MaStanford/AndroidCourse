@@ -1,0 +1,212 @@
+{
+  "id": "themes-styles",
+  "title": "Themes, Styles & Dark Mode",
+  "icon": "🎨",
+  "description": "View system theming, Compose MaterialTheme, custom design systems, dark mode, and Material You dynamic colors",
+  "references": [
+    {"title": "Android Developers — Styles and Themes", "url": "https://developer.android.com/develop/ui/views/theming/themes", "type": "docs"},
+    {"title": "Material Design 3 — Theming", "url": "https://m3.material.io/develop/android/mdc-android", "type": "docs"},
+    {"title": "Jetpack Compose — Design Systems", "url": "https://developer.android.com/develop/ui/compose/designsystems", "type": "docs"},
+    {"title": "Android Developers — Dark Theme", "url": "https://developer.android.com/develop/ui/views/theming/darktheme", "type": "docs"},
+    {"title": "Material Design 3 — Dynamic Color", "url": "https://m3.material.io/styles/color/dynamic/overview", "type": "docs"}
+  ],
+  "lesson": "<h3>View System: Styles vs Themes</h3>\n<p>In the View system, a <b>style</b> and a <b>theme</b> are both defined with <code>&lt;style&gt;</code> in <code>styles.xml</code>, but they serve different purposes:</p>\n<table>\n<tr><th></th><th>Style</th><th>Theme</th></tr>\n<tr><td>Applied to</td><td>A <b>single View</b> via <code>style=&quot;@style/...&quot;</code></td><td>An <b>Activity or Application</b> via <code>android:theme=&quot;@style/...&quot;</code></td></tr>\n<tr><td>Scope</td><td>Only that view's attributes</td><td>Entire subtree — all child views inherit it</td></tr>\n<tr><td>Defines</td><td>Concrete values: <code>textSize=16sp</code></td><td>Abstract attributes: <code>colorPrimary=#6200EE</code></td></tr>\n<tr><td>Example</td><td><code>&lt;style name=&quot;CardTitle&quot;&gt;</code></td><td><code>&lt;style name=&quot;AppTheme&quot; parent=&quot;Theme.Material3.DayNight&quot;&gt;</code></td></tr>\n</table>\n<div class=\"lesson-code\"><span class=\"cmt\">&lt;!-- Style: applied to a single view --&gt;</span>\n&lt;style name=&quot;Widget.MyApp.Title&quot;&gt;\n    &lt;item name=&quot;android:textSize&quot;&gt;20sp&lt;/item&gt;\n    &lt;item name=&quot;android:textColor&quot;&gt;?attr/colorOnSurface&lt;/item&gt;\n&lt;/style&gt;\n\n<span class=\"cmt\">&lt;!-- Theme: applied to Activity or Application --&gt;</span>\n&lt;style name=&quot;Theme.MyApp&quot; parent=&quot;Theme.Material3.DayNight.NoActionBar&quot;&gt;\n    &lt;item name=&quot;colorPrimary&quot;&gt;@color/purple_500&lt;/item&gt;\n    &lt;item name=&quot;colorSecondary&quot;&gt;@color/teal_200&lt;/item&gt;\n    &lt;item name=&quot;colorSurface&quot;&gt;@color/white&lt;/item&gt;\n&lt;/style&gt;</div>\n<div class=\"info-box\"><b>Key insight:</b> A style says \"this button looks like X.\" A theme says \"in this part of the app, primary color means purple, surface means white.\" Styles <i>consume</i> theme attributes; themes <i>define</i> them.</div>\n\n<hr class=\"section-divider\">\n<h3>Theme Inheritance Chain</h3>\n<p>Android themes follow a clear inheritance chain. Each generation adds Material Design features:</p>\n<div class=\"diagram\">Theme.AppCompat (v7)\n  │  Basic Material Design backport, Toolbar, etc.\n  │\n  ▼\nTheme.MaterialComponents (MDC 1.x)\n  │  Material Design 2: FAB, BottomNav, Snackbar,\n  │  shape theming, type scales\n  │\n  ▼\nTheme.Material3 (MDC 1.5+)\n  │  Material Design 3 / Material You:\n  │  Dynamic Color, tonal palettes, updated components\n  │\n  └── Your App Theme\n      &lt;style name=\"Theme.MyApp\" parent=\"Theme.Material3.DayNight.NoActionBar\"&gt;</div>\n<p>Always extend the latest generation you can support. <code>Theme.Material3.DayNight</code> gives you automatic light/dark switching and access to all M3 color roles (primary, secondary, tertiary, surface, error, and their on/container variants).</p>\n\n<hr class=\"section-divider\">\n<h3>Theme Attributes: <code>?attr/</code> References</h3>\n<p>The <code>?attr/</code> syntax is how XML layouts reference the <b>current theme's values</b> instead of hardcoding colors. This is the backbone of themeable UI:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">&lt;!-- WRONG: hardcoded color — breaks in dark mode --&gt;</span>\n&lt;TextView android:textColor=&quot;#000000&quot; /&gt;\n\n<span class=\"cmt\">&lt;!-- RIGHT: resolves from current theme --&gt;</span>\n&lt;TextView android:textColor=&quot;?attr/colorOnSurface&quot; /&gt;\n\n<span class=\"cmt\">&lt;!-- Common theme attributes: --&gt;</span>\n<span class=\"cmt\">?attr/colorPrimary        — brand color</span>\n<span class=\"cmt\">?attr/colorOnPrimary      — text/icon on primary</span>\n<span class=\"cmt\">?attr/colorSurface        — background of cards, sheets</span>\n<span class=\"cmt\">?attr/colorOnSurface      — text/icon on surface</span>\n<span class=\"cmt\">?attr/colorError          — error states</span>\n<span class=\"cmt\">?attr/colorSurfaceVariant — secondary surfaces</span></div>\n<div class=\"warn-box\"><b>Never hardcode colors in layouts.</b> Always use <code>?attr/</code> references. This is what makes dark mode, dynamic color, and per-Activity theming work — the same layout resolves to different colors depending on the active theme.</div>\n\n<hr class=\"section-divider\">\n<h3>Compose Theming: MaterialTheme</h3>\n<p>In Compose, theming replaces XML with Kotlin. <code>MaterialTheme</code> is a composable that provides three pillars via <code>CompositionLocal</code>:</p>\n<table>\n<tr><th>Pillar</th><th>Type</th><th>Access Via</th></tr>\n<tr><td>Colors</td><td><code>ColorScheme</code></td><td><code>MaterialTheme.colorScheme</code></td></tr>\n<tr><td>Typography</td><td><code>Typography</code></td><td><code>MaterialTheme.typography</code></td></tr>\n<tr><td>Shapes</td><td><code>Shapes</code></td><td><code>MaterialTheme.shapes</code></td></tr>\n</table>\n<div class=\"lesson-code\"><span class=\"cmt\">// MaterialTheme wraps your app content</span>\nMaterialTheme(\n    colorScheme = LightColorScheme,\n    typography = AppTypography,\n    shapes = AppShapes\n) {\n    <span class=\"cmt\">// All children can access theme values</span>\n    Surface(color = MaterialTheme.colorScheme.background) {\n        Text(\n            text = \"Hello\",\n            style = MaterialTheme.typography.headlineMedium,\n            color = MaterialTheme.colorScheme.onBackground\n        )\n    }\n}</div>\n\n<hr class=\"section-divider\">\n<h3>Creating a Custom Compose Theme</h3>\n<p>The standard pattern: define light and dark <code>ColorScheme</code>s, detect system dark mode, and wrap in a theme composable:</p>\n<div class=\"lesson-code\">private val LightColors = lightColorScheme(\n    primary = Color(0xFF6200EE),\n    onPrimary = Color.White,\n    secondary = Color(0xFF03DAC6),\n    surface = Color.White,\n    onSurface = Color.Black,\n    background = Color(0xFFFFFBFE),\n    onBackground = Color.Black\n)\n\nprivate val DarkColors = darkColorScheme(\n    primary = Color(0xFFBB86FC),\n    onPrimary = Color.Black,\n    secondary = Color(0xFF03DAC6),\n    surface = Color(0xFF1C1B1F),\n    onSurface = Color.White,\n    background = Color(0xFF1C1B1F),\n    onBackground = Color.White\n)\n\n@Composable\nfun MyAppTheme(\n    darkTheme: Boolean = isSystemInDarkTheme(),\n    content: @Composable () -> Unit\n) {\n    val colorScheme = if (darkTheme) DarkColors else LightColors\n\n    MaterialTheme(\n        colorScheme = colorScheme,\n        typography = AppTypography,\n        shapes = AppShapes,\n        content = content\n    )\n}</div>\n<p><code>isSystemInDarkTheme()</code> reads the system setting. When the user toggles dark mode, Compose recomposes with the new color scheme — no Activity restart needed.</p>\n\n<hr class=\"section-divider\">\n<h3>Accessing Theme Values in Compose</h3>\n<p>The Compose equivalent of <code>?attr/</code> is accessing properties on the <code>MaterialTheme</code> object:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Colors</span>\nval primary = MaterialTheme.colorScheme.primary\nval onSurface = MaterialTheme.colorScheme.onSurface\nval errorColor = MaterialTheme.colorScheme.error\n\n<span class=\"cmt\">// Typography</span>\nval headlineStyle = MaterialTheme.typography.headlineLarge\nval bodyStyle = MaterialTheme.typography.bodyMedium\nval labelStyle = MaterialTheme.typography.labelSmall\n\n<span class=\"cmt\">// Shapes</span>\nval cardShape = MaterialTheme.shapes.medium  <span class=\"cmt\">// RoundedCornerShape(12.dp)</span>\nval chipShape = MaterialTheme.shapes.small   <span class=\"cmt\">// RoundedCornerShape(8.dp)</span>\n\n<span class=\"cmt\">// Usage in a composable</span>\nCard(\n    colors = CardDefaults.cardColors(\n        containerColor = MaterialTheme.colorScheme.surfaceVariant\n    ),\n    shape = MaterialTheme.shapes.medium\n) {\n    Text(\n        text = \"Card Title\",\n        style = MaterialTheme.typography.titleLarge,\n        color = MaterialTheme.colorScheme.onSurfaceVariant\n    )\n}</div>\n\n<hr class=\"section-divider\">\n<h3>Custom Design Systems with CompositionLocal</h3>\n<p>When Material3's color roles don't fit your brand, you can extend the theme with <b>custom properties</b> using <code>CompositionLocal</code>. This is how production apps implement design systems:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// 1. Define your custom color properties</span>\ndata class BrandColors(\n    val accent: Color = Color.Unspecified,\n    val warning: Color = Color.Unspecified,\n    val gradient: List&lt;Color&gt; = emptyList(),\n    val cardHighlight: Color = Color.Unspecified\n)\n\n<span class=\"cmt\">// 2. Create a CompositionLocal to hold them</span>\nval LocalBrandColors = staticCompositionLocalOf { BrandColors() }\n\n<span class=\"cmt\">// 3. Provide values in your theme</span>\n@Composable\nfun MyAppTheme(\n    darkTheme: Boolean = isSystemInDarkTheme(),\n    content: @Composable () -> Unit\n) {\n    val brandColors = if (darkTheme) {\n        BrandColors(\n            accent = Color(0xFFFF6B6B),\n            warning = Color(0xFFFFD93D),\n            cardHighlight = Color(0xFF2D2D3F)\n        )\n    } else {\n        BrandColors(\n            accent = Color(0xFFE63946),\n            warning = Color(0xFFF4A261),\n            cardHighlight = Color(0xFFF1FAEE)\n        )\n    }\n\n    CompositionLocalProvider(LocalBrandColors provides brandColors) {\n        MaterialTheme(\n            colorScheme = if (darkTheme) DarkColors else LightColors,\n            content = content\n        )\n    }\n}\n\n<span class=\"cmt\">// 4. Access via extension property</span>\nobject MyAppTheme {\n    val brandColors: BrandColors\n        @Composable get() = LocalBrandColors.current\n}\n\n<span class=\"cmt\">// 5. Use in composables</span>\nBox(Modifier.background(MyAppTheme.brandColors.accent))</div>\n<div class=\"info-box\"><b>Pattern:</b> Material3 is the <i>base</i> — you extend it with CompositionLocals for brand-specific tokens. You still get all Material3 components and can override their defaults. This is how large apps like Twitter/X and Spotify implement design systems in Compose.</div>\n\n<hr class=\"section-divider\">\n<h3>Dark Mode Implementation</h3>\n<h4>View System: DayNight Theme</h4>\n<p>For the View system, dark mode is built on <b>resource qualifiers</b>:</p>\n<div class=\"diagram\">res/\n├── values/\n│   ├── colors.xml          <span class=\"cmt\">← light mode colors</span>\n│   └── themes.xml           <span class=\"cmt\">← parent: Theme.Material3.DayNight</span>\n└── values-night/\n    └── colors.xml            <span class=\"cmt\">← dark mode overrides</span>\n\n<span class=\"cmt\">When system is in dark mode, Android loads values-night/ resources</span>\n<span class=\"cmt\">automatically — no code changes needed (if you used ?attr/ everywhere)</span></div>\n<div class=\"lesson-code\"><span class=\"cmt\">&lt;!-- res/values/colors.xml (light) --&gt;</span>\n&lt;color name=&quot;surface&quot;&gt;#FFFBFE&lt;/color&gt;\n&lt;color name=&quot;on_surface&quot;&gt;#1C1B1F&lt;/color&gt;\n\n<span class=\"cmt\">&lt;!-- res/values-night/colors.xml (dark) --&gt;</span>\n&lt;color name=&quot;surface&quot;&gt;#1C1B1F&lt;/color&gt;\n&lt;color name=&quot;on_surface&quot;&gt;#E6E1E5&lt;/color&gt;</div>\n\n<h4>Forcing Dark Mode Programmatically</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// Force dark mode regardless of system setting</span>\nAppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)\n\n<span class=\"cmt\">// Force light mode</span>\nAppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)\n\n<span class=\"cmt\">// Follow system (default behavior)</span>\nAppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)\n\n<span class=\"cmt\">// Typically called in Application.onCreate() or Settings screen</span>\n<span class=\"cmt\">// This recreates all Activities to apply the new theme</span></div>\n\n<h4>Compose: isSystemInDarkTheme()</h4>\n<p>In Compose, dark mode is just a branch in your theme composable — no resource qualifiers needed:</p>\n<div class=\"lesson-code\">@Composable\nfun MyAppTheme(content: @Composable () -> Unit) {\n    val colorScheme = when {\n        <span class=\"cmt\">// API 31+ dynamic color from wallpaper</span>\n        Build.VERSION.SDK_INT >= 31 -> {\n            val context = LocalContext.current\n            if (isSystemInDarkTheme()) dynamicDarkColorScheme(context)\n            else dynamicLightColorScheme(context)\n        }\n        <span class=\"cmt\">// Fallback: static color schemes</span>\n        isSystemInDarkTheme() -> DarkColors\n        else -> LightColors\n    }\n    MaterialTheme(colorScheme = colorScheme, content = content)\n}</div>\n\n<hr class=\"section-divider\">\n<h3>Material You / Dynamic Colors (API 31+)</h3>\n<p>Starting with Android 12, <b>Material You</b> generates a color scheme from the user's wallpaper. The system extracts seed colors and generates tonal palettes:</p>\n<div class=\"diagram\">User's Wallpaper\n       │\n       ▼\n  Color Extraction (system)\n       │\n       ▼\n  Seed Color (dominant hue)\n       │\n       ├── Primary tonal palette    (13 shades)\n       ├── Secondary tonal palette  (13 shades)\n       ├── Tertiary tonal palette   (13 shades)\n       ├── Neutral tonal palette    (13 shades)\n       └── Neutral variant palette  (13 shades)\n       │\n       ▼\n  dynamicLightColorScheme(context) / dynamicDarkColorScheme(context)\n  Maps tonal palette shades → Material3 color roles</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// Dynamic color in Compose (API 31+)</span>\nval dynamicColor = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S\n\nval colorScheme = when {\n    dynamicColor && darkTheme -> dynamicDarkColorScheme(context)\n    dynamicColor && !darkTheme -> dynamicLightColorScheme(context)\n    darkTheme -> DarkColors\n    else -> LightColors\n}\n\n<span class=\"cmt\">// For View system: apply in theme</span>\n<span class=\"cmt\">// DynamicColors.applyToActivitiesIfAvailable(application)</span></div>\n<div class=\"warn-box\"><b>Gotcha:</b> Dynamic color is only available on API 31+ (Pixel, Samsung One UI 4+, most OEMs). Always provide a fallback static color scheme for older devices. Also note: some OEMs (Xiaomi, Oppo) may not expose wallpaper colors the same way — test on real devices.</div>\n\n<hr class=\"section-divider\">\n<h3>DataBinding vs ViewBinding in Theme Context</h3>\n<table>\n<tr><th></th><th>ViewBinding</th><th>DataBinding</th></tr>\n<tr><td>What it does</td><td>Type-safe access to views (replaces <code>findViewById</code>)</td><td>Binds data directly in XML with <code>&lt;layout&gt;</code> + expressions</td></tr>\n<tr><td>Theme relevance</td><td>None — just view references</td><td>Can reference theme attrs in binding expressions</td></tr>\n<tr><td>Compose equivalent</td><td>Not needed — composables ARE the views</td><td>Not needed — state hoisting replaces data binding</td></tr>\n<tr><td>Current status</td><td>Still useful in View-based code</td><td><b>Effectively dead</b> — Compose state + recomposition replaced it</td></tr>\n</table>\n<div class=\"info-box\"><b>Interview tip:</b> DataBinding had XML expressions like <code>@{viewModel.name}</code> and two-way binding with <code>@={}</code>. It was powerful but added build complexity (annotation processing, generated binding classes). In Compose, <code>State</code> + recomposition gives you the same reactive UI without any codegen. DataBinding is not recommended for new projects.</div>",
+  "questions": [
+    {
+      "id": "ts-1",
+      "type": "multiple-choice",
+      "title": "Style vs Theme",
+      "difficulty": "beginner",
+      "description": "What is the fundamental difference between a <b>style</b> and a <b>theme</b> in the Android View system?",
+      "options": [
+        "A style uses XML, a theme uses Kotlin code",
+        "A style is applied to a single View; a theme is applied to an Activity or Application and affects all child views",
+        "A theme can only define colors, a style can define any attribute",
+        "There is no difference — they are interchangeable"
+      ],
+      "correctIndex": 1,
+      "explanation": "Both are defined with <code>&lt;style&gt;</code> in XML, but a <b>style</b> is applied to a single view via <code>style=\"@style/...\"</code> and sets concrete attributes. A <b>theme</b> is applied to an Activity or Application via <code>android:theme=\"@style/...\"</code> and defines abstract attributes (like <code>colorPrimary</code>) that all descendant views can reference with <code>?attr/</code>.",
+      "hints": [
+        "Think about scope — how many views does each affect?",
+        "Consider how you apply each one in XML"
+      ]
+    },
+    {
+      "id": "ts-2",
+      "type": "multiple-choice",
+      "title": "Theme Attribute References",
+      "difficulty": "intermediate",
+      "description": "In a View-based layout XML, what does <code>android:textColor=\"?attr/colorOnSurface\"</code> do?",
+      "options": [
+        "Sets the text color to a hardcoded value named colorOnSurface",
+        "Looks up the value of colorOnSurface from the currently applied theme at runtime",
+        "References a color resource file named colorOnSurface.xml",
+        "Applies the colorOnSurface style to the text view"
+      ],
+      "correctIndex": 1,
+      "explanation": "The <code>?attr/</code> prefix tells Android to resolve the value from the <b>current theme</b> at runtime. If the theme defines <code>colorOnSurface</code> as black (light mode) or white (dark mode), the same layout automatically adapts. This indirection is what makes theming, dark mode, and per-Activity theme overrides possible without duplicating layouts.",
+      "hints": [
+        "The ? prefix means something is resolved dynamically, not statically",
+        "What changes when the user switches between light and dark mode?"
+      ]
+    },
+    {
+      "id": "ts-3",
+      "type": "what-does-this-do",
+      "title": "Compose Theme Selection",
+      "difficulty": "intermediate",
+      "description": "What does this theme composable do, and what color scheme will be used on a Pixel 7 running Android 14 in dark mode?",
+      "code": "@Composable\nfun AppTheme(content: @Composable () -> Unit) {\n    val context = LocalContext.current\n    val darkTheme = isSystemInDarkTheme()\n\n    val colorScheme = when {\n        Build.VERSION.SDK_INT >= 31 -> {\n            if (darkTheme) dynamicDarkColorScheme(context)\n            else dynamicLightColorScheme(context)\n        }\n        darkTheme -> DarkColors\n        else -> LightColors\n    }\n\n    MaterialTheme(colorScheme = colorScheme, content = content)\n}",
+      "options": [
+        "Always uses static DarkColors because darkTheme is true",
+        "Uses dynamicDarkColorScheme — wallpaper-derived dark colors — because Pixel 7 is API 33 (>= 31) and system is in dark mode",
+        "Crashes because dynamicDarkColorScheme is not available on API 33",
+        "Uses dynamicLightColorScheme because light is the default"
+      ],
+      "correctIndex": 1,
+      "explanation": "Pixel 7 runs Android 13 (API 33), which is >= 31, so the first branch matches. Since <code>isSystemInDarkTheme()</code> returns true (dark mode), it uses <code>dynamicDarkColorScheme(context)</code>. This extracts the user's wallpaper colors and generates a dark tonal palette — the colors are personalized to each user's wallpaper. The static DarkColors are only used as a fallback for API < 31.",
+      "hints": [
+        "Check the API level of the Pixel 7 — is it >= 31?",
+        "Two conditions are checked: API level first, then dark mode"
+      ]
+    },
+    {
+      "id": "ts-4",
+      "type": "fill-blank",
+      "title": "Custom CompositionLocal Theme Extension",
+      "difficulty": "advanced",
+      "description": "Fill in the blanks to create a custom spacing system that extends MaterialTheme using CompositionLocal.",
+      "code": "data class AppSpacing(\n    val small: Dp = 4.dp,\n    val medium: Dp = 8.dp,\n    val large: Dp = 16.dp\n)\n\nval LocalAppSpacing = ___1___ { AppSpacing() }\n\n@Composable\nfun MyAppTheme(content: @Composable () -> Unit) {\n    ___2___(LocalAppSpacing provides AppSpacing()) {\n        MaterialTheme(content = content)\n    }\n}\n\n// Usage:\nPadding(___3___.current.large)",
+      "blanks": [
+        {
+          "answer": [
+            "staticCompositionLocalOf"
+          ],
+          "hint": "Creates a CompositionLocal that rarely changes (more efficient than dynamic)"
+        },
+        {
+          "answer": [
+            "CompositionLocalProvider"
+          ],
+          "hint": "The composable that provides values to CompositionLocals"
+        },
+        {
+          "answer": [
+            "LocalAppSpacing"
+          ],
+          "hint": "The CompositionLocal you defined above"
+        }
+      ],
+      "explanation": "<code>staticCompositionLocalOf</code> creates a CompositionLocal optimized for values that rarely change (theme values typically don't change during a session). <code>CompositionLocalProvider</code> is the composable that injects the value into the composition tree. Any descendant composable reads it via <code>LocalAppSpacing.current</code>. This pattern lets you extend MaterialTheme with any custom design tokens your app needs.",
+      "hints": [
+        "There are two kinds of CompositionLocal: static (rarely changes) and dynamic (changes often)",
+        "The Provider composable wraps the subtree that needs access"
+      ]
+    },
+    {
+      "id": "ts-5",
+      "type": "fix-bug",
+      "title": "Dark Mode Not Working in Views",
+      "difficulty": "intermediate",
+      "description": "This app has a dark mode toggle in settings, but changing it has no effect. The theme never actually switches. Fix the implementation.",
+      "starterCode": "// SettingsFragment.kt\nfun onDarkModeToggled(enabled: Boolean) {\n    // BUG: Dark mode toggle does nothing!\n    if (enabled) {\n        activity?.setTheme(R.style.Theme_MyApp_Dark)\n    } else {\n        activity?.setTheme(R.style.Theme_MyApp_Light)\n    }\n}\n\n// styles.xml has Theme.MyApp.Dark and Theme.MyApp.Light\n// but they don't extend DayNight",
+      "checks": [
+        {
+          "pattern": "AppCompatDelegate\\.setDefaultNightMode",
+          "message": "Use AppCompatDelegate.setDefaultNightMode() to switch dark mode",
+          "required": true
+        },
+        {
+          "pattern": "MODE_NIGHT_YES|MODE_NIGHT_NO",
+          "message": "Use MODE_NIGHT_YES / MODE_NIGHT_NO constants",
+          "required": true
+        }
+      ],
+      "solution": "// SettingsFragment.kt\nfun onDarkModeToggled(enabled: Boolean) {\n    AppCompatDelegate.setDefaultNightMode(\n        if (enabled) AppCompatDelegate.MODE_NIGHT_YES\n        else AppCompatDelegate.MODE_NIGHT_NO\n    )\n    // Activity auto-recreates to apply the new mode\n}\n\n// styles.xml — use DayNight as parent:\n// <style name=\"Theme.MyApp\" parent=\"Theme.Material3.DayNight.NoActionBar\">\n// Then provide overrides in res/values-night/",
+      "explanation": "Calling <code>setTheme()</code> on an Activity does NOT trigger a configuration change — it only affects newly inflated views. The correct API is <code>AppCompatDelegate.setDefaultNightMode()</code>, which triggers a configuration change and causes all Activities to recreate. The theme must extend <code>DayNight</code> so Android automatically loads <code>values-night/</code> resources when night mode is active. You provide dark overrides in <code>res/values-night/colors.xml</code> rather than maintaining separate theme definitions.",
+      "hints": [
+        "setTheme() only affects views inflated AFTER the call — existing views don't update",
+        "There's an AppCompat API specifically designed for switching between day and night modes"
+      ]
+    },
+    {
+      "id": "ts-6",
+      "type": "trivia",
+      "title": "MaterialTheme Pillars in Compose",
+      "difficulty": "intermediate",
+      "description": "Name the three pillars of <code>MaterialTheme</code> in Compose and explain how you access each one's values inside a composable.",
+      "keywords": [
+        "colorScheme",
+        "typography",
+        "shapes",
+        "MaterialTheme",
+        "primary",
+        "bodyMedium",
+        "medium",
+        "CompositionLocal"
+      ],
+      "answer": "The three pillars are: (1) ColorScheme — accessed via MaterialTheme.colorScheme (e.g., MaterialTheme.colorScheme.primary, .onSurface, .surfaceVariant). (2) Typography — accessed via MaterialTheme.typography (e.g., MaterialTheme.typography.headlineLarge, .bodyMedium, .labelSmall). (3) Shapes — accessed via MaterialTheme.shapes (e.g., MaterialTheme.shapes.small, .medium, .large). Under the hood, each pillar is provided via a CompositionLocal, and MaterialTheme is just a convenience composable that sets all three at once.",
+      "explanation": "These three pillars map to Material Design 3's core design tokens: color, type, and shape. By accessing them through <code>MaterialTheme</code> rather than hardcoding values, your composables automatically adapt when the theme changes (dark mode, dynamic color, or per-screen theming). The composable reads the nearest provided value from the composition tree, just like <code>?attr/</code> in the View system.",
+      "hints": [
+        "Think about the three visual aspects that define how a UI looks",
+        "Each pillar has its own accessor on the MaterialTheme object"
+      ]
+    },
+    {
+      "id": "ts-7",
+      "type": "multiple-choice",
+      "title": "Theme Inheritance",
+      "difficulty": "beginner",
+      "description": "Your app uses <code>Theme.MaterialComponents.DayNight</code> and you want to adopt Material Design 3 with dynamic color support. What should you change the parent theme to?",
+      "options": [
+        "Theme.AppCompat.DayNight — it has the widest device compatibility",
+        "Theme.Material3.DayNight — the M3 successor that supports dynamic color",
+        "Theme.MaterialComponents.DayNight.DynamicColor — just add DynamicColor suffix",
+        "No change needed — MaterialComponents already supports Material 3"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>Theme.Material3.DayNight</code> is the correct parent for Material Design 3 apps. It extends MaterialComponents with M3 color roles (primary, secondary, tertiary, surface, and their on/container variants), updated component styles, and support for dynamic color via <code>DynamicColors.applyToActivitiesIfAvailable()</code>. There is no <code>DynamicColor</code> suffix — dynamic color is applied programmatically, not via theme inheritance.",
+      "hints": [
+        "Material Design versions map to theme parent names: M2 → MaterialComponents, M3 → Material3",
+        "Dynamic color is an API call, not a theme variant"
+      ]
+    },
+    {
+      "id": "ts-8",
+      "type": "write-code",
+      "title": "Complete Compose Theme with Dark Mode + Dynamic Color",
+      "difficulty": "advanced",
+      "description": "Write a complete <code>MyAppTheme</code> composable that: (1) uses dynamic color on API 31+, (2) falls back to static light/dark color schemes on older APIs, (3) respects system dark mode setting. Assume <code>LightColors</code> and <code>DarkColors</code> are already defined.",
+      "starterCode": "@Composable\nfun MyAppTheme(\n    darkTheme: Boolean = isSystemInDarkTheme(),\n    dynamicColor: Boolean = true,\n    content: @Composable () -> Unit\n) {\n    // TODO: Select the right color scheme based on:\n    // 1. Dynamic color availability (API 31+ AND dynamicColor param)\n    // 2. Dark mode setting\n    // Then apply MaterialTheme\n}",
+      "checks": [
+        {
+          "pattern": "Build\\.VERSION\\.SDK_INT|Build\\.VERSION_CODES",
+          "message": "Check API level for dynamic color support",
+          "required": true
+        },
+        {
+          "pattern": "dynamicDarkColorScheme|dynamicLightColorScheme",
+          "message": "Use dynamic color scheme functions for API 31+",
+          "required": true
+        },
+        {
+          "pattern": "MaterialTheme",
+          "message": "Apply the selected color scheme via MaterialTheme",
+          "required": true
+        },
+        {
+          "pattern": "isSystemInDarkTheme|darkTheme",
+          "message": "Handle dark mode selection",
+          "required": true
+        }
+      ],
+      "solution": "@Composable\nfun MyAppTheme(\n    darkTheme: Boolean = isSystemInDarkTheme(),\n    dynamicColor: Boolean = true,\n    content: @Composable () -> Unit\n) {\n    val colorScheme = when {\n        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {\n            val context = LocalContext.current\n            if (darkTheme) dynamicDarkColorScheme(context)\n            else dynamicLightColorScheme(context)\n        }\n        darkTheme -> DarkColors\n        else -> LightColors\n    }\n\n    MaterialTheme(\n        colorScheme = colorScheme,\n        typography = AppTypography,\n        shapes = AppShapes,\n        content = content\n    )\n}",
+      "explanation": "This is the standard Compose theme pattern used by the official Android project templates. The <code>when</code> block first checks if dynamic color is both enabled and available (API 31+), then falls back to static schemes. <code>LocalContext.current</code> provides the Context needed by the dynamic color scheme functions to read wallpaper colors. The <code>darkTheme</code> parameter defaults to <code>isSystemInDarkTheme()</code> but can be overridden — useful for in-app dark mode toggles or previews.",
+      "hints": [
+        "Dynamic color needs two conditions: the feature flag AND API level",
+        "You need a Context to extract wallpaper colors — use LocalContext.current",
+        "The else branches handle devices that don't support dynamic color"
+      ]
+    }
+  ]
+}
