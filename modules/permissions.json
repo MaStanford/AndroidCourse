@@ -1,0 +1,228 @@
+{
+  "id": "permissions",
+  "title": "Permissions Deep Dive",
+  "icon": "🔑",
+  "description": "App-level runtime permissions, custom permission definitions, and system/OEM privileged permission infrastructure",
+  "references": [
+    {"title": "Android Developers — Permissions Overview", "url": "https://developer.android.com/guide/topics/permissions/overview", "type": "docs"},
+    {"title": "Android Developers — Request Runtime Permissions", "url": "https://developer.android.com/training/permissions/requesting", "type": "docs"},
+    {"title": "Android Developers — Define Custom Permissions", "url": "https://developer.android.com/guide/topics/permissions/defining", "type": "docs"},
+    {"title": "AOSP — Privileged Permission Allowlisting", "url": "https://source.android.com/docs/core/permissions/perms-allowlist", "type": "docs"},
+    {"title": "AOSP — SELinux Concepts", "url": "https://source.android.com/docs/security/features/selinux/concepts", "type": "docs"},
+    {"title": "Android Developers — ActivityResultContracts", "url": "https://developer.android.com/reference/androidx/activity/result/contract/ActivityResultContracts", "type": "docs"}
+  ],
+  "lesson": "<h2>Part 1: App Permissions (Basic / Intermediate)</h2>\n\n<h3>Permission Types</h3>\n<p>Android groups permissions into four protection levels. The protection level determines how (and whether) the user is involved in granting:</p>\n<table>\n<tr><th>Protection Level</th><th>Grant Mechanism</th><th>User Prompt?</th><th>Example</th></tr>\n<tr><td><code>normal</code></td><td>Auto-granted at install</td><td>No</td><td><code>INTERNET</code>, <code>VIBRATE</code>, <code>BLUETOOTH</code></td></tr>\n<tr><td><code>dangerous</code></td><td>Runtime prompt (API 23+)</td><td>Yes</td><td><code>CAMERA</code>, <code>READ_CONTACTS</code>, <code>ACCESS_FINE_LOCATION</code></td></tr>\n<tr><td><code>signature</code></td><td>Same signing key as declaring app</td><td>No</td><td><code>BIND_NOTIFICATION_LISTENER_SERVICE</code></td></tr>\n<tr><td><code>special</code></td><td>Must redirect to Settings</td><td>Yes (Settings UI)</td><td><code>SYSTEM_ALERT_WINDOW</code>, <code>MANAGE_EXTERNAL_STORAGE</code></td></tr>\n</table>\n<div class=\"info-box\"><b>Key insight:</b> <code>normal</code> permissions are declared in the manifest and silently granted — users never see a dialog. <code>dangerous</code> permissions require an explicit runtime request starting with API 23 (Marshmallow). Below API 23, all manifest permissions were granted at install time.</div>\n\n<hr class=\"section-divider\">\n<h3>Declaring Permissions in AndroidManifest.xml</h3>\n<p>Two distinct tags serve different purposes:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">&lt;!-- REQUEST an existing permission (most common) --&gt;</span>\n&lt;uses-permission android:name=\"android.permission.CAMERA\" /&gt;\n&lt;uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" /&gt;\n\n<span class=\"cmt\">&lt;!-- DEFINE a new custom permission (for your own apps/components) --&gt;</span>\n&lt;permission\n    android:name=\"com.example.myapp.OPEN_SETTINGS\"\n    android:label=\"Open App Settings\"\n    android:description=\"@string/perm_open_settings_desc\"\n    android:protectionLevel=\"signature\" /&gt;</div>\n<div class=\"warn-box\"><b>&lt;uses-permission&gt;</b> = \"My app needs this permission.\"<br><b>&lt;permission&gt;</b> = \"I am creating this permission for others to request.\"<br>Confusing these is a common mistake.</div>\n\n<hr class=\"section-divider\">\n<h3>Runtime Permissions Flow (API 23+)</h3>\n<p>The canonical flow has four steps: check, rationale, request, handle.</p>\n<div class=\"diagram\">App needs CAMERA\n       │\n       ▼\n┌──────────────────────────┐\n│ checkSelfPermission()    │\n│ == PERMISSION_GRANTED?   │\n└──────────┬───────────────┘\n      YES  │  NO\n       │   │\n       │   ▼\n       │  ┌──────────────────────────────┐\n       │  │ shouldShowRequestPermission  │\n       │  │ Rationale() == true?         │\n       │  └──────────┬───────────────────┘\n       │        YES  │  NO\n       │         │   │\n       │         ▼   │\n       │   Show rationale UI   │\n       │   (explain WHY)       │\n       │         │             │\n       │         ▼             ▼\n       │  ┌─────────────────────────┐\n       │  │ requestPermissions()    │\n       │  │ → system dialog appears │\n       │  └──────────┬──────────────┘\n       │             │\n       │             ▼\n       │  ┌────────────────────────────┐\n       │  │ onRequestPermissionsResult │\n       │  │ GRANTED or DENIED          │\n       │  └────────────────────────────┘\n       │             │\n       ▼             ▼\n    Use feature   Degrade gracefully</div>\n\n<hr class=\"section-divider\">\n<h3>Modern API: ActivityResultContracts</h3>\n<p>The old <code>requestPermissions()</code> / <code>onRequestPermissionsResult()</code> pattern is deprecated. Use <code>registerForActivityResult()</code> with the permission contracts:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Single permission</span>\nval cameraLauncher = registerForActivityResult(\n    ActivityResultContracts.RequestPermission()\n) { isGranted: Boolean ->\n    if (isGranted) {\n        openCamera()\n    } else {\n        showPermissionDeniedUI()\n    }\n}\n\n<span class=\"cmt\">// Usage: launch with the permission string</span>\ncameraLauncher.launch(Manifest.permission.CAMERA)\n\n<span class=\"cmt\">// Multiple permissions at once</span>\nval multiLauncher = registerForActivityResult(\n    ActivityResultContracts.RequestMultiplePermissions()\n) { permissions: Map&lt;String, Boolean&gt; ->\n    val cameraGranted = permissions[Manifest.permission.CAMERA] ?: false\n    val micGranted = permissions[Manifest.permission.RECORD_AUDIO] ?: false\n    when {\n        cameraGranted && micGranted -> startVideoRecording()\n        cameraGranted -> startPhotoCapture() <span class=\"cmt\">// degrade: no mic</span>\n        else -> showDeniedState()\n    }\n}\n\nmultiLauncher.launch(arrayOf(\n    Manifest.permission.CAMERA,\n    Manifest.permission.RECORD_AUDIO\n))</div>\n\n<h4>Compose: rememberLauncherForActivityResult</h4>\n<div class=\"lesson-code\">@Composable\nfun CameraScreen() {\n    val context = LocalContext.current\n    var hasPermission by remember {\n        mutableStateOf(\n            ContextCompat.checkSelfPermission(\n                context, Manifest.permission.CAMERA\n            ) == PackageManager.PERMISSION_GRANTED\n        )\n    }\n\n    val launcher = rememberLauncherForActivityResult(\n        ActivityResultContracts.RequestPermission()\n    ) { granted ->\n        hasPermission = granted\n    }\n\n    if (hasPermission) {\n        CameraPreview()\n    } else {\n        Button(onClick = { launcher.launch(Manifest.permission.CAMERA) }) {\n            Text(\"Grant Camera Access\")\n        }\n    }\n}</div>\n\n<hr class=\"section-divider\">\n<h3>shouldShowRequestPermissionRationale — The Tricky State Machine</h3>\n<p>This method returns different values depending on the user's history with the permission. Understanding it is critical for handling all edge cases:</p>\n<div class=\"diagram\">┌─────────────────────────────────────────────────────────────────────┐\n│              shouldShowRequestPermissionRationale()                  │\n├─────────────────────────────┬──────────────┬────────────────────────┤\n│ Scenario                    │ Returns      │ What to do             │\n├─────────────────────────────┼──────────────┼────────────────────────┤\n│ Never asked before          │ false        │ Just request it        │\n│ Denied once (no checkbox)   │ true         │ Show rationale, then   │\n│                             │              │ request again          │\n│ Denied + \"Don't ask again\" │ false        │ Cannot request again!  │\n│   (or denied twice on 11+) │              │ Redirect to Settings   │\n│ Already granted             │ false        │ Use the permission     │\n└─────────────────────────────┴──────────────┴────────────────────────┘\n\nState Transitions:\n\n  ┌──────────┐   request()   ┌──────────────┐   request()   ┌──────────────────┐\n  │ VIRGIN   │ ──────────→   │ DENIED ONCE  │ ──────────→   │ PERMANENTLY      │\n  │ (false)  │   deny        │ (true)       │   deny+check  │ DENIED (false)   │\n  └──────────┘               └──────────────┘               └──────────────────┘\n       │                           │                              │\n       │ grant                     │ grant                        │ user goes to\n       ▼                           ▼                              │ Settings\n  ┌──────────┐               ┌──────────┐                         ▼\n  │ GRANTED  │               │ GRANTED  │                   ┌──────────┐\n  │ (false)  │               │ (false)  │                   │ GRANTED  │\n  └──────────┘               └──────────┘                   └──────────┘</div>\n<div class=\"warn-box\"><b>The \"Don't ask again\" trap:</b> Once the user checks \"Don't ask again\" (or on Android 11+ after two denials), <code>shouldShowRationale</code> returns <code>false</code> AND calling <code>requestPermissions()</code> immediately returns DENIED without showing a dialog. The ONLY way to recover is to send the user to app Settings with <code>ACTION_APPLICATION_DETAILS_SETTINGS</code>.</div>\n<div class=\"lesson-code\"><span class=\"cmt\">// Detecting the \"permanently denied\" state</span>\nval launcher = registerForActivityResult(\n    ActivityResultContracts.RequestPermission()\n) { isGranted ->\n    if (!isGranted) {\n        <span class=\"cmt\">// After denial, check rationale again</span>\n        val shouldShowRationale = shouldShowRequestPermissionRationale(\n            Manifest.permission.CAMERA\n        )\n        if (!shouldShowRationale) {\n            <span class=\"cmt\">// \"Don't ask again\" was checked — redirect to Settings</span>\n            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {\n                data = Uri.fromParts(\"package\", packageName, null)\n            }\n            startActivity(intent)\n        }\n    }\n}</div>\n\n<hr class=\"section-divider\">\n<h3>Permission Groups</h3>\n<p>Dangerous permissions belong to groups (e.g., <code>LOCATION</code> group contains <code>ACCESS_FINE_LOCATION</code> and <code>ACCESS_COARSE_LOCATION</code>). Historically, granting one permission in a group auto-granted the rest. Since Android 12 (API 31), each permission must be requested individually.</p>\n<div class=\"warn-box\"><b>Never rely on group grants.</b> Google can change group membership or behavior across versions. Always check and request each specific permission you need.</div>\n\n<hr class=\"section-divider\">\n<h3>Special Permissions</h3>\n<p>Some permissions cannot be granted via the standard runtime dialog. You must redirect the user to the system Settings app:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// SYSTEM_ALERT_WINDOW — draw over other apps</span>\nif (!Settings.canDrawOverlays(context)) {\n    val intent = Intent(\n        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,\n        Uri.parse(\"package:${context.packageName}\")\n    )\n    startActivity(intent)\n}\n\n<span class=\"cmt\">// MANAGE_EXTERNAL_STORAGE (API 30+) — access all files</span>\nif (!Environment.isExternalStorageManager()) {\n    val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)\n    startActivity(intent)\n}\n\n<span class=\"cmt\">// REQUEST_INSTALL_PACKAGES — sideload APKs</span>\nif (!packageManager.canRequestPackageInstalls()) {\n    val intent = Intent(\n        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,\n        Uri.parse(\"package:${context.packageName}\")\n    )\n    startActivity(intent)\n}</div>\n\n<hr class=\"section-divider\">\n<h3>Version-Specific Permission Changes</h3>\n<table>\n<tr><th>API</th><th>Change</th><th>Impact</th></tr>\n<tr><td>23 (M)</td><td>Runtime permissions introduced</td><td>All dangerous permissions require runtime request</td></tr>\n<tr><td>26 (O)</td><td>Background location limits</td><td>Background apps cannot access location continuously</td></tr>\n<tr><td>29 (Q)</td><td><code>ACCESS_BACKGROUND_LOCATION</code></td><td>Separate permission required for background location; must request it alone, not with foreground location</td></tr>\n<tr><td>30 (R)</td><td>One-time permissions, auto-reset</td><td>Camera/mic/location can be granted once; unused apps lose permissions</td></tr>\n<tr><td>31 (S)</td><td>Camera/mic indicators, <code>BLUETOOTH_CONNECT</code></td><td>Green dot in status bar; Bluetooth requires new runtime permissions</td></tr>\n<tr><td>33 (T)</td><td><code>POST_NOTIFICATIONS</code></td><td>Notifications now require runtime permission</td></tr>\n<tr><td>34 (U)</td><td>Photo/video partial access</td><td>Users can grant access to selected photos only</td></tr>\n</table>\n<div class=\"info-box\"><b>Background location (API 29+):</b> You must request <code>ACCESS_FINE_LOCATION</code> or <code>ACCESS_COARSE_LOCATION</code> first, get it granted, then request <code>ACCESS_BACKGROUND_LOCATION</code> separately. Requesting them together causes the system to ignore the background request.</div>\n\n<hr class=\"section-divider\">\n<h3>Best Practices</h3>\n<div class=\"info-box\"><b>Permission Request Best Practices:</b><br>\n1. <b>Ask in context</b> — request when the user taps the camera button, not at app launch<br>\n2. <b>Explain before asking</b> — show a rationale UI before the system dialog<br>\n3. <b>Handle denial gracefully</b> — never crash or show a blank screen<br>\n4. <b>Degrade features</b> — if location is denied, still show manual city entry<br>\n5. <b>Minimize permissions</b> — only request what you actually need<br>\n6. <b>Use coarse before fine</b> — on API 31+, let users choose approximate location first<br>\n7. <b>Never ask repeatedly in a loop</b> — respect the user's decision</div>\n\n<hr class=\"section-divider\">\n<h2>Part 2: Defining Custom Permissions</h2>\n\n<h3>Creating a Custom Permission</h3>\n<p>You define a custom permission when you want to restrict access to your app's exported components. Any app that wants to interact with your component must hold this permission.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">&lt;!-- In the DECLARING app's manifest (the one that owns the component) --&gt;</span>\n&lt;manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"&gt;\n\n    <span class=\"cmt\">&lt;!-- Define the permission --&gt;</span>\n    &lt;permission\n        android:name=\"com.example.provider.READ_DATA\"\n        android:label=\"Read Provider Data\"\n        android:description=\"@string/perm_read_data_desc\"\n        android:protectionLevel=\"signature\" /&gt;\n\n    <span class=\"cmt\">&lt;!-- Enforce it on a ContentProvider --&gt;</span>\n    &lt;provider\n        android:name=\".MyContentProvider\"\n        android:authorities=\"com.example.provider\"\n        android:readPermission=\"com.example.provider.READ_DATA\"\n        android:writePermission=\"com.example.provider.WRITE_DATA\"\n        android:exported=\"true\" /&gt;\n\n&lt;/manifest&gt;\n\n<span class=\"cmt\">&lt;!-- In the REQUESTING app's manifest (the client) --&gt;</span>\n&lt;uses-permission android:name=\"com.example.provider.READ_DATA\" /&gt;</div>\n\n<h3>protectionLevel Values</h3>\n<table>\n<tr><th>protectionLevel</th><th>Meaning</th><th>Who Can Get It</th></tr>\n<tr><td><code>normal</code></td><td>Low-risk, auto-granted</td><td>Any app that declares <code>&lt;uses-permission&gt;</code></td></tr>\n<tr><td><code>dangerous</code></td><td>Runtime prompt</td><td>Any app, but user must approve</td></tr>\n<tr><td><code>signature</code></td><td>Same signing certificate</td><td>Only apps signed with the SAME key as the declaring app</td></tr>\n<tr><td><code>signatureOrSystem</code></td><td><i>Deprecated</i> (API 23)</td><td>Same key OR pre-installed system app. Use <code>signature|privileged</code> instead</td></tr>\n<tr><td><code>signature|privileged</code></td><td>Signature OR privileged</td><td>Same key, or a privileged system app allowlisted in privapp-permissions.xml</td></tr>\n<tr><td><code>internal</code></td><td>Platform-internal (API 28+)</td><td>Only requestable by system processes or apps on the system image</td></tr>\n</table>\n<div class=\"info-box\"><b>Signature permissions</b> are the workhorse for inter-app trust between apps you control. If you publish App A and App B signed with the same key, App B can use App A's signature-level components without any user prompt. This is how OEMs link their pre-installed apps.</div>\n\n<h3>Enforcing Permissions on Components</h3>\n<div class=\"lesson-code\"><span class=\"cmt\">&lt;!-- Activity: only apps holding MY_PERMISSION can launch this --&gt;</span>\n&lt;activity\n    android:name=\".AdminActivity\"\n    android:permission=\"com.example.MY_PERMISSION\"\n    android:exported=\"true\" /&gt;\n\n<span class=\"cmt\">&lt;!-- Service: only permitted apps can bind --&gt;</span>\n&lt;service\n    android:name=\".SyncService\"\n    android:permission=\"com.example.SYNC_PERMISSION\"\n    android:exported=\"true\" /&gt;\n\n<span class=\"cmt\">&lt;!-- BroadcastReceiver: only permitted apps' broadcasts are delivered --&gt;</span>\n&lt;receiver\n    android:name=\".SecureReceiver\"\n    android:permission=\"com.example.SEND_UPDATES\"\n    android:exported=\"true\"&gt;\n    &lt;intent-filter&gt;\n        &lt;action android:name=\"com.example.ACTION_UPDATE\" /&gt;\n    &lt;/intent-filter&gt;\n&lt;/receiver&gt;\n\n<span class=\"cmt\">&lt;!-- ContentProvider: separate read/write permissions --&gt;</span>\n&lt;provider\n    android:name=\".DataProvider\"\n    android:authorities=\"com.example.data\"\n    android:readPermission=\"com.example.READ\"\n    android:writePermission=\"com.example.WRITE\"\n    android:exported=\"true\" /&gt;</div>\n\n<hr class=\"section-divider\">\n<h2>Part 3: System / OEM Permissions (Advanced)</h2>\n\n<h3>Privileged App Permissions (priv-app)</h3>\n<p>Android distinguishes between regular pre-installed apps (<code>/system/app/</code>) and <b>privileged</b> pre-installed apps (<code>/system/priv-app/</code> or <code>/product/priv-app/</code>). Privileged apps can be granted permissions with <code>signature|privileged</code> protection level — even without sharing the platform signing key.</p>\n<div class=\"diagram\">Android System Partitions &amp; App Locations:\n\n/system/\n├── app/              <span class=\"cmt\">← Regular pre-installed apps (no special privileges)</span>\n│   └── Calculator/\n├── priv-app/         <span class=\"cmt\">← Privileged system apps (can get privileged permissions)</span>\n│   ├── Settings/\n│   ├── SystemUI/\n│   └── Launcher3/\n├── etc/\n│   └── permissions/  <span class=\"cmt\">← Permission allowlist XMLs</span>\n│       ├── privapp-permissions-platform.xml\n│       └── com.example.oem.xml\n└── framework/\n\n/product/\n├── priv-app/         <span class=\"cmt\">← OEM privileged apps (same privileges as /system/priv-app)</span>\n│   └── OEMSettings/\n└── etc/\n    └── permissions/\n        └── privapp-permissions-product.xml\n\n/vendor/\n├── priv-app/         <span class=\"cmt\">← Vendor-specific privileged apps</span>\n└── etc/\n    └── permissions/\n        └── privapp-permissions-vendor.xml</div>\n\n<h3>privapp-permissions.xml</h3>\n<p>Even if an app is in <code>/system/priv-app/</code>, it still must be <b>explicitly allowlisted</b> in a <code>privapp-permissions.xml</code> file to receive privileged permissions. This was introduced in Android 8.0 (Oreo) to reduce the attack surface of pre-installed apps.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">&lt;!-- /etc/permissions/privapp-permissions-platform.xml --&gt;</span>\n&lt;permissions&gt;\n\n    <span class=\"cmt\">&lt;!-- Grant specific privileged permissions to Settings app --&gt;</span>\n    &lt;privapp-permissions package=\"com.android.settings\"&gt;\n        &lt;permission name=\"android.permission.WRITE_SECURE_SETTINGS\" /&gt;\n        &lt;permission name=\"android.permission.MANAGE_USERS\" /&gt;\n        &lt;permission name=\"android.permission.STATUS_BAR_SERVICE\" /&gt;\n        &lt;permission name=\"android.permission.CHANGE_CONFIGURATION\" /&gt;\n    &lt;/privapp-permissions&gt;\n\n    <span class=\"cmt\">&lt;!-- SystemUI gets a different set --&gt;</span>\n    &lt;privapp-permissions package=\"com.android.systemui\"&gt;\n        &lt;permission name=\"android.permission.STATUS_BAR\" /&gt;\n        &lt;permission name=\"android.permission.BIND_NOTIFICATION_LISTENER_SERVICE\" /&gt;\n        &lt;permission name=\"android.permission.MEDIA_CONTENT_CONTROL\" /&gt;\n    &lt;/privapp-permissions&gt;\n\n    <span class=\"cmt\">&lt;!-- Explicitly DENY a permission to a priv-app --&gt;</span>\n    &lt;privapp-permissions package=\"com.example.bloatware\"&gt;\n        &lt;deny-permission name=\"android.permission.READ_CALL_LOG\" /&gt;\n    &lt;/privapp-permissions&gt;\n\n&lt;/permissions&gt;</div>\n<div class=\"warn-box\"><b>Enforcement:</b> Starting with Android 9 (Pie), the system <b>crashes on boot</b> if a privileged app tries to use a permission that is not allowlisted. During development, you can set <code>ro.control_privapp_permissions=log</code> to log violations instead of crashing, but production builds enforce strictly.</div>\n\n<h3>default-permissions.xml</h3>\n<p>This file pre-grants <b>runtime (dangerous) permissions</b> to specified apps without requiring user interaction. OEMs use it to ensure their pre-installed camera, dialer, and messaging apps work out of the box.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">&lt;!-- /etc/default-permissions/default-permissions-oem.xml --&gt;</span>\n&lt;exceptions&gt;\n\n    <span class=\"cmt\">&lt;!-- Pre-grant camera and storage to the OEM camera app --&gt;</span>\n    &lt;exception package=\"com.oem.camera\"&gt;\n        &lt;permission name=\"android.permission.CAMERA\" fixed=\"true\" /&gt;\n        &lt;permission name=\"android.permission.RECORD_AUDIO\" fixed=\"true\" /&gt;\n        &lt;permission name=\"android.permission.READ_MEDIA_IMAGES\" fixed=\"true\" /&gt;\n    &lt;/exception&gt;\n\n    <span class=\"cmt\">&lt;!-- Pre-grant phone permissions to the dialer --&gt;</span>\n    &lt;exception package=\"com.oem.dialer\"&gt;\n        &lt;permission name=\"android.permission.CALL_PHONE\" fixed=\"true\" /&gt;\n        &lt;permission name=\"android.permission.READ_CALL_LOG\" fixed=\"true\" /&gt;\n        &lt;permission name=\"android.permission.READ_CONTACTS\" fixed=\"true\" /&gt;\n    &lt;/exception&gt;\n\n&lt;/exceptions&gt;</div>\n<div class=\"info-box\"><b><code>fixed=\"true\"</code></b> means the user cannot revoke the permission from Settings. Without <code>fixed</code>, the user can revoke it after first boot — the pre-grant just skips the initial prompt.</div>\n\n<h3>Platform Signing</h3>\n<p>Apps signed with the <b>platform key</b> (the key used to sign the Android system image itself) automatically receive all permissions with <code>signature</code> protection level defined by the platform. This is the highest level of trust in Android:</p>\n<div class=\"diagram\">Permission Grant Hierarchy:\n\n┌───────────────────────────────────────────────────────────────┐\n│ Platform-signed apps (signed with the platform .pk8/.x509)   │\n│ → Get ALL signature-level platform permissions automatically │\n│ → Can access ANY system API                                  │\n│ → Examples: Settings, SystemUI, Phone                        │\n├───────────────────────────────────────────────────────────────┤\n│ Privileged apps (/system/priv-app or /product/priv-app)      │\n│ → Get signature|privileged permissions IF allowlisted        │\n│ → Cannot get pure signature permissions (need platform key)  │\n│ → Examples: OEM Launcher, pre-installed apps                 │\n├───────────────────────────────────────────────────────────────┤\n│ System apps (/system/app)                                    │\n│ → Pre-installed but no extra privileges                      │\n│ → Can get default-permissions pre-grants for runtime perms   │\n│ → Cannot get privileged or signature permissions             │\n├───────────────────────────────────────────────────────────────┤\n│ Third-party apps (/data/app)                                 │\n│ → Standard runtime permission model only                    │\n│ → No access to privileged or signature permissions           │\n└───────────────────────────────────────────────────────────────┘</div>\n\n<h3>Vendor / OEM Custom Permissions</h3>\n<p>OEMs can define their own permission hierarchy to control access to proprietary features (custom hardware APIs, device management, enterprise features):</p>\n<div class=\"lesson-code\"><span class=\"cmt\">&lt;!-- OEM defines a custom permission in their framework overlay --&gt;</span>\n<span class=\"cmt\">&lt;!-- frameworks/base/core/res/AndroidManifest.xml (OEM fork) --&gt;</span>\n&lt;permission\n    android:name=\"com.oem.permission.ACCESS_CUSTOM_SENSOR\"\n    android:protectionLevel=\"signature|privileged\"\n    android:label=\"Access Custom Sensor\" /&gt;\n\n<span class=\"cmt\">&lt;!-- OEM's HAL service enforces the permission --&gt;</span>\n<span class=\"cmt\">&lt;!-- Only OEM's own apps (signed with OEM key) or allowlisted --&gt;</span>\n<span class=\"cmt\">&lt;!-- priv-apps can use this sensor --&gt;</span>\n\n<span class=\"cmt\">&lt;!-- Allowlist in /vendor/etc/permissions/privapp-permissions-oem.xml --&gt;</span>\n&lt;permissions&gt;\n    &lt;privapp-permissions package=\"com.oem.sensorapp\"&gt;\n        &lt;permission name=\"com.oem.permission.ACCESS_CUSTOM_SENSOR\" /&gt;\n    &lt;/privapp-permissions&gt;\n&lt;/permissions&gt;</div>\n\n<h3>SELinux and Permissions</h3>\n<p>Android's permission system (DAC — Discretionary Access Control) is only one layer. <b>SELinux</b> adds <b>Mandatory Access Control (MAC)</b> — a kernel-level enforcement that even <code>root</code> cannot bypass:</p>\n<div class=\"diagram\">Two-Layer Security Model:\n\n┌──────────────────────────────────────────────────────────┐\n│ Layer 1: Android Permissions (DAC)                       │\n│ \"Does the app have android.permission.CAMERA?\"           │\n│ → Enforced by system_server (PackageManagerService)      │\n│ → Apps can check/request at runtime                      │\n│ → User-visible permission dialogs                        │\n├──────────────────────────────────────────────────────────┤\n│ Layer 2: SELinux (MAC)                                   │\n│ \"Is this process ALLOWED to open /dev/video0?\"           │\n│ → Enforced by the Linux kernel                           │\n│ → Based on security labels, NOT user identity            │\n│ → Cannot be overridden by the app or even root           │\n│ → Defined in .te policy files compiled into the system   │\n└──────────────────────────────────────────────────────────┘\n\nBOTH must allow access. Having the Android permission is\nnecessary but not sufficient — the SELinux policy must\nalso grant access to the underlying resource.\n\nExample: Camera access requires:\n  1. android.permission.CAMERA   (Android permission check)\n  2. SELinux allow rule:          (Kernel-level check)\n     allow untrusted_app camera_device:chr_file { read write };</div>\n<div class=\"info-box\"><b>Why this matters for OEM development:</b> When adding a new hardware feature or system service, you must:<br>\n1. Define an Android permission in the manifest<br>\n2. Write SELinux policy (.te files) granting the appropriate process domains access to the device nodes or service labels<br>\n3. Allowlist any privileged apps that need the permission<br>\nForgetting the SELinux policy is the #1 reason a permission-granted feature still returns \"Permission denied\" in logcat — look for <code>avc: denied</code> in <code>dmesg</code>.</div>",
+  "questions": [
+    {
+      "id": "perm-1",
+      "type": "multiple-choice",
+      "title": "Permission Types",
+      "difficulty": "basic",
+      "description": "Which permission type requires the user to explicitly approve at runtime via a system dialog?",
+      "options": [
+        "normal — all permissions show a dialog since Android 6.0",
+        "dangerous — requires a runtime prompt on API 23+",
+        "signature — prompts only if the signing keys differ",
+        "special — requires a dialog managed by the app itself"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>dangerous</code> permissions are the only type that triggers the standard runtime permission dialog. <code>normal</code> permissions are auto-granted at install. <code>signature</code> permissions are silently granted if the requesting app shares the same signing key. <code>special</code> permissions (like <code>SYSTEM_ALERT_WINDOW</code>) require a redirect to Settings, not a standard dialog.",
+      "hints": [
+        "Think about what changed in Android 6.0 (Marshmallow, API 23)"
+      ]
+    },
+    {
+      "id": "perm-2",
+      "type": "multiple-choice",
+      "title": "shouldShowRationale States",
+      "difficulty": "intermediate",
+      "description": "A user opens your app for the first time. You have never requested <code>CAMERA</code> permission. What does <code>shouldShowRequestPermissionRationale(CAMERA)</code> return?",
+      "options": [
+        "true — you should always show a rationale before the first request",
+        "false — the user has never denied it, so no rationale is needed yet",
+        "Throws an exception because the permission has not been requested",
+        "true on Android 11+, false on older versions"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>shouldShowRequestPermissionRationale()</code> returns <code>false</code> when the permission has never been requested. It only returns <code>true</code> after the user has denied the permission at least once (without checking \"Don't ask again\"). This is unintuitive because <code>false</code> can mean three things: never asked, already granted, or permanently denied.",
+      "hints": [
+        "This method returns false in MORE cases than you might expect"
+      ]
+    },
+    {
+      "id": "perm-3",
+      "type": "what-does-this-do",
+      "title": "The \"Don't Ask Again\" Edge Case",
+      "difficulty": "advanced",
+      "description": "The user has denied CAMERA permission twice on Android 11 (which auto-applies \"Don't ask again\" after two denials). What happens when this code runs?",
+      "code": "val launcher = registerForActivityResult(\n    ActivityResultContracts.RequestPermission()\n) { isGranted ->\n    Log.d(\"TAG\", \"Result: $isGranted\")\n}\n\nlauncher.launch(Manifest.permission.CAMERA)",
+      "options": [
+        "The system shows the permission dialog normally",
+        "The callback fires immediately with isGranted = false, no dialog is shown",
+        "The system redirects to Settings automatically",
+        "The app crashes with a SecurityException"
+      ],
+      "correctIndex": 1,
+      "explanation": "Once a permission is permanently denied (user checked \"Don't ask again\" or denied twice on Android 11+), calling <code>launch()</code> or <code>requestPermissions()</code> does NOT show any dialog. The callback fires immediately with <code>false</code>. The app must detect this state (using <code>shouldShowRequestPermissionRationale</code> returning <code>false</code> after a denial) and redirect the user to <code>Settings.ACTION_APPLICATION_DETAILS_SETTINGS</code> instead.",
+      "hints": [
+        "Think about what \"Don't ask again\" means literally — the system will NOT ask again",
+        "The callback still fires, but the user never sees a dialog"
+      ]
+    },
+    {
+      "id": "perm-4",
+      "type": "multiple-choice",
+      "title": "protectionLevel Differences",
+      "difficulty": "intermediate",
+      "description": "Your company publishes two apps: App A (defines a <code>signature</code>-level permission) and App B (requests it). Both are signed with the same company key and installed from the Play Store. What happens?",
+      "options": [
+        "App B gets the permission automatically — no user prompt, no Settings redirect",
+        "App B must request the permission at runtime like a dangerous permission",
+        "The user must approve both apps in Settings",
+        "This only works for pre-installed system apps, not Play Store apps"
+      ],
+      "correctIndex": 0,
+      "explanation": "<code>signature</code>-level permissions are granted automatically and silently when the requesting app shares the same signing certificate as the app that defined the permission. No user interaction required. This works for any app — Play Store or pre-installed. It's the mechanism for establishing trust between your own apps without involving the user.",
+      "hints": [
+        "The whole point of signature permissions is trust between apps from the same developer"
+      ]
+    },
+    {
+      "id": "perm-5",
+      "type": "multiple-choice",
+      "title": "privapp-permissions.xml Purpose",
+      "difficulty": "advanced",
+      "description": "An OEM places their custom app in <code>/system/priv-app/</code>. The app requests <code>android.permission.WRITE_SECURE_SETTINGS</code> (a <code>signature|privileged</code> permission). What happens if the permission is NOT listed in any <code>privapp-permissions.xml</code>?",
+      "options": [
+        "The permission is granted anyway because the app is in priv-app",
+        "The permission is silently denied at runtime",
+        "The system logs a warning but still grants the permission",
+        "On Android 9+, the device fails to boot (or the app is disabled)"
+      ],
+      "correctIndex": 3,
+      "explanation": "Starting with Android 9 (Pie), the system strictly enforces the privapp-permissions allowlist. If a privileged app requests a <code>signature|privileged</code> permission that is NOT in any <code>privapp-permissions.xml</code> file, the system will crash during boot in production builds. During development, setting <code>ro.control_privapp_permissions=log</code> downgrades this to a logcat warning. Being in <code>/system/priv-app/</code> is necessary but not sufficient — you MUST be allowlisted.",
+      "hints": [
+        "Android 9 introduced strict enforcement for security",
+        "Think about what happens at boot time, not at runtime"
+      ]
+    },
+    {
+      "id": "perm-6",
+      "type": "fill-blank",
+      "title": "Runtime Permission Check",
+      "difficulty": "basic",
+      "description": "Fill in the blanks to check if camera permission is granted and request it if not.",
+      "code": "val hasPermission = ___1___.checkSelfPermission(\n    context,\n    Manifest.permission.CAMERA\n) == PackageManager.___2___\n\nif (!hasPermission) {\n    cameraLauncher.launch(Manifest.permission.___3___)\n}",
+      "blanks": [
+        {
+          "answer": ["ContextCompat"],
+          "hint": "The AndroidX compat class for permission checks"
+        },
+        {
+          "answer": ["PERMISSION_GRANTED"],
+          "hint": "The constant representing a granted permission"
+        },
+        {
+          "answer": ["CAMERA"],
+          "hint": "The camera permission constant"
+        }
+      ],
+      "explanation": "<code>ContextCompat.checkSelfPermission()</code> is the recommended way to check permissions — it handles API-level differences internally. The result is compared against <code>PackageManager.PERMISSION_GRANTED</code> (value 0). If not granted, launch the permission request. Always check before using a protected API.",
+      "hints": [
+        "Use the AndroidX compat wrapper, not the raw Context method",
+        "The result constant lives in PackageManager"
+      ]
+    },
+    {
+      "id": "perm-7",
+      "type": "trivia",
+      "title": "SELinux vs Android Permissions",
+      "difficulty": "advanced",
+      "description": "Explain the relationship between Android permissions and SELinux. Why might an app that holds <code>android.permission.CAMERA</code> still get a \"Permission denied\" error?",
+      "keywords": [
+        "SELinux",
+        "MAC",
+        "DAC",
+        "avc",
+        "denied",
+        "policy",
+        "kernel",
+        "two layers",
+        "security context",
+        "label"
+      ],
+      "answer": "Android has two layers of access control: Android permissions (DAC — Discretionary Access Control) checked by system_server, and SELinux (MAC — Mandatory Access Control) enforced by the Linux kernel. Both must allow access. An app can hold android.permission.CAMERA and still fail if the SELinux policy does not include an 'allow' rule for that app's security domain to access the camera device node. Look for 'avc: denied' in dmesg to diagnose. This is especially common when OEMs add new hardware features and forget to write the corresponding .te policy rules.",
+      "explanation": "SELinux operates independently from Android's permission framework. Even root processes can be blocked by SELinux. When debugging permission issues on system/OEM apps, always check both layers: <code>logcat</code> for Android permission denials and <code>dmesg</code> for SELinux (AVC) denials.",
+      "hints": [
+        "Android has TWO independent security layers",
+        "One is checked by system_server, one is checked by the kernel",
+        "What log message would you look for if SELinux blocked something?"
+      ]
+    },
+    {
+      "id": "perm-8",
+      "type": "fix-bug",
+      "title": "Background Location Request",
+      "difficulty": "intermediate",
+      "description": "This code tries to request foreground and background location together. On Android 11+ it fails silently — background location is never granted. Fix it.",
+      "starterCode": "val locationLauncher = registerForActivityResult(\n    ActivityResultContracts.RequestMultiplePermissions()\n) { permissions ->\n    val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false\n    val bgGranted = permissions[Manifest.permission.ACCESS_BACKGROUND_LOCATION] ?: false\n    if (fineGranted && bgGranted) {\n        startLocationTracking()\n    }\n}\n\n// BUG: requesting both at once!\nlocationLauncher.launch(arrayOf(\n    Manifest.permission.ACCESS_FINE_LOCATION,\n    Manifest.permission.ACCESS_BACKGROUND_LOCATION\n))",
+      "checks": [
+        {
+          "pattern": "ACCESS_FINE_LOCATION|ACCESS_COARSE_LOCATION",
+          "message": "Request foreground location first",
+          "required": true
+        },
+        {
+          "pattern": "ACCESS_BACKGROUND_LOCATION",
+          "message": "Request background location separately after foreground is granted",
+          "required": true
+        }
+      ],
+      "solution": "val bgLocationLauncher = registerForActivityResult(\n    ActivityResultContracts.RequestPermission()\n) { bgGranted ->\n    if (bgGranted) {\n        startLocationTracking()\n    } else {\n        startForegroundOnlyTracking()\n    }\n}\n\nval fgLocationLauncher = registerForActivityResult(\n    ActivityResultContracts.RequestPermission()\n) { fgGranted ->\n    if (fgGranted) {\n        // Foreground granted — NOW request background separately\n        bgLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)\n    } else {\n        showLocationDeniedUI()\n    }\n}\n\n// Step 1: request foreground location first\nfgLocationLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)",
+      "explanation": "On Android 11+ (API 30), requesting <code>ACCESS_BACKGROUND_LOCATION</code> together with foreground location causes the system to silently ignore the background request. You must first obtain foreground location, then request background location in a <b>separate</b> request. The background request redirects the user to a Settings-like page where they choose \"Allow all the time.\"",
+      "hints": [
+        "Android 11 changed how background location requests work",
+        "Think about the order: which permission must be granted FIRST?"
+      ]
+    },
+    {
+      "id": "perm-9",
+      "type": "multiple-choice",
+      "title": "default-permissions.xml",
+      "difficulty": "advanced",
+      "description": "What is the purpose of <code>default-permissions.xml</code> on an Android system image?",
+      "options": [
+        "It defines which permissions exist in the system",
+        "It pre-grants runtime (dangerous) permissions to specified apps without user interaction",
+        "It replaces privapp-permissions.xml on Android 12+",
+        "It configures the default permission dialog appearance"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>default-permissions.xml</code> (located in <code>/etc/default-permissions/</code>) allows OEMs to pre-grant runtime permissions to pre-installed apps so they work out of the box. For example, the OEM Camera app gets <code>CAMERA</code> and <code>RECORD_AUDIO</code> pre-granted. With <code>fixed=\"true\"</code>, the user cannot even revoke these permissions from Settings. This is separate from <code>privapp-permissions.xml</code>, which handles privileged (not runtime) permissions.",
+      "hints": [
+        "Think about what an OEM needs for their pre-installed Camera app",
+        "This is about runtime/dangerous permissions, not privileged permissions"
+      ]
+    },
+    {
+      "id": "perm-10",
+      "type": "what-does-this-do",
+      "title": "Component Permission Enforcement",
+      "difficulty": "intermediate",
+      "description": "App A defines and exports a ContentProvider with this manifest entry. App B (signed with a different key) tries to query it. What happens?",
+      "code": "<!-- App A's manifest -->\n<permission\n    android:name=\"com.a.READ_SECRETS\"\n    android:protectionLevel=\"signature\" />\n\n<provider\n    android:name=\".SecretsProvider\"\n    android:authorities=\"com.a.secrets\"\n    android:readPermission=\"com.a.READ_SECRETS\"\n    android:exported=\"true\" />\n\n<!-- App B's manifest -->\n<uses-permission android:name=\"com.a.READ_SECRETS\" />",
+      "options": [
+        "App B can read the provider because it declared <uses-permission>",
+        "App B gets a SecurityException — different signing key means signature permission is denied",
+        "App B is prompted at runtime to approve the permission",
+        "The system ignores the readPermission attribute because the provider is exported"
+      ],
+      "correctIndex": 1,
+      "explanation": "A <code>signature</code>-level permission is only granted to apps signed with the <b>same certificate</b> as the app that defined the permission. Declaring <code>&lt;uses-permission&gt;</code> is necessary but not sufficient — the signing key must match. App B, signed with a different key, will receive a <code>SecurityException</code> when attempting to query the ContentProvider. This is by design — signature permissions create a trust boundary between apps from the same developer.",
+      "hints": [
+        "What does 'signature' protection level actually check?",
+        "Declaring <uses-permission> alone is not enough for signature-level permissions"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,231 @@
+{
+  "id": "android-manifest",
+  "title": "The Android Manifest",
+  "icon": "📋",
+  "description": "AndroidManifest.xml: component declarations, intent filters, permissions, manifest merging, and advanced features",
+  "references": [
+    {"title": "Android Developers — App Manifest Overview", "url": "https://developer.android.com/guide/topics/manifest/manifest-intro", "type": "docs"},
+    {"title": "Android Developers — <intent-filter>", "url": "https://developer.android.com/guide/components/intents-filters", "type": "docs"},
+    {"title": "Android Developers — Manifest Merge", "url": "https://developer.android.com/build/manage-manifests", "type": "docs"},
+    {"title": "Android Developers — App Links", "url": "https://developer.android.com/training/app-links", "type": "docs"},
+    {"title": "Android Developers — Package Visibility (API 30+)", "url": "https://developer.android.com/training/package-visibility", "type": "docs"},
+    {"title": "Android Developers — Permissions Overview", "url": "https://developer.android.com/guide/topics/permissions/overview", "type": "docs"}
+  ],
+  "lesson": "<h3>Part 1: Manifest Fundamentals</h3>\n<p>The <code>AndroidManifest.xml</code> is the <b>contract between your app and the Android system</b>. It is parsed at install time by <code>PackageManager</code>, which extracts everything the system needs to know about your app: its components, required permissions, hardware features, minimum API level, and more. The system never reads your Kotlin/Java source code to discover these things — it relies entirely on the manifest.</p>\n<div class=\"info-box\"><b>When is the manifest read?</b><br>\n1. <b>Install time</b> — PackageManager parses it, stores component info in the package database<br>\n2. <b>Intent resolution</b> — AMS queries PackageManager to match intents to components<br>\n3. <b>Permission checks</b> — system enforces declared permissions at runtime<br>\n4. <b>Play Store filtering</b> — uses-feature and uses-sdk filter device compatibility</div>\n\n<h4>Top-Level Structure</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// Every AndroidManifest.xml has this structure:</span>\n&lt;?xml version=\"1.0\" encoding=\"utf-8\"?&gt;\n&lt;manifest\n    xmlns:android=\"http://schemas.android.com/apk/res/android\"\n    xmlns:tools=\"http://schemas.android.com/tools\"&gt;\n\n    &lt;uses-permission .../&gt;\n    &lt;uses-feature .../&gt;\n    &lt;uses-sdk .../&gt;\n    &lt;queries&gt;...&lt;/queries&gt;\n\n    &lt;application\n        android:name=\".MyApplication\"\n        android:icon=\"@mipmap/ic_launcher\"\n        android:label=\"@string/app_name\"\n        android:theme=\"@style/AppTheme\"&gt;\n\n        &lt;activity .../&gt;\n        &lt;service .../&gt;\n        &lt;receiver .../&gt;\n        &lt;provider .../&gt;\n        &lt;meta-data .../&gt;\n    &lt;/application&gt;\n&lt;/manifest&gt;</div>\n\n<h4>The &lt;manifest&gt; Tag</h4>\n<p>The root element. The <code>package</code> attribute used to serve double duty: it was both the application ID and the R class namespace. Since AGP 7.0+, the <b>application ID</b> is set in <code>build.gradle</code> via <code>applicationId</code>, and the manifest <code>package</code> attribute is only used as the <b>namespace for the generated R class</b>. In AGP 8.0+, even that moved to the <code>namespace</code> property in build.gradle, so the package attribute is no longer required.</p>\n\n<h4>&lt;uses-sdk&gt; — minSdk, targetSdk, compileSdk</h4>\n<p>These three values control different things and are commonly confused:</p>\n<table>\n<tr><th>Property</th><th>Set In</th><th>What It Means</th></tr>\n<tr><td><code>minSdk</code></td><td>build.gradle</td><td>Lowest API level your app will install on. Play Store uses this for filtering. Code below this API must use compat libraries.</td></tr>\n<tr><td><code>targetSdk</code></td><td>build.gradle</td><td>The API level you have <b>tested against</b>. The system uses this to enable/disable <b>behavior changes</b>. If targetSdk=33, you get API 34 behavior changes only after you bump it.</td></tr>\n<tr><td><code>compileSdk</code></td><td>build.gradle only</td><td>The API level the compiler can see. Determines which APIs you can call in source code. Does NOT appear in the manifest. Does NOT affect runtime behavior.</td></tr>\n</table>\n<div class=\"warn-box\"><b>Key insight:</b> <code>compileSdk</code> is compile-time only. <code>targetSdk</code> is a <b>runtime compatibility flag</b> — the system changes behavior based on it. For example, targeting API 31+ requires you to set <code>exported</code> on all components with intent filters. Targeting API 33+ requires runtime permission for notifications (<code>POST_NOTIFICATIONS</code>).</div>\n\n<h4>The &lt;application&gt; Tag</h4>\n<p>Wraps all four component types and sets app-wide defaults:</p>\n<table>\n<tr><th>Attribute</th><th>Purpose</th></tr>\n<tr><td><code>android:name</code></td><td>Custom <code>Application</code> subclass (e.g., <code>.MyApp</code>). Created before any component. Used by Hilt (<code>@HiltAndroidApp</code>), crash reporters, analytics init.</td></tr>\n<tr><td><code>android:icon</code></td><td>Launcher icon (usually <code>@mipmap/ic_launcher</code>). Components can override.</td></tr>\n<tr><td><code>android:label</code></td><td>User-visible app name.</td></tr>\n<tr><td><code>android:theme</code></td><td>Default theme for all activities.</td></tr>\n<tr><td><code>android:allowBackup</code></td><td>Whether the system can back up app data. Default <code>true</code>. Set to <code>false</code> for sensitive apps.</td></tr>\n<tr><td><code>android:supportsRtl</code></td><td>Enable right-to-left layout mirroring.</td></tr>\n<tr><td><code>android:networkSecurityConfig</code></td><td>Points to XML defining trusted CAs, cleartext traffic rules, certificate pinning.</td></tr>\n<tr><td><code>android:dataExtractionRules</code></td><td>API 31+ replacement for <code>fullBackupContent</code>. Controls cloud vs device-to-device backup rules.</td></tr>\n<tr><td><code>android:fullBackupContent</code></td><td>Pre-API 31 backup rules. Points to XML specifying include/exclude paths.</td></tr>\n</table>\n\n<hr class=\"section-divider\">\n<h3>Part 2: Component Declarations</h3>\n<p>Every component your app uses <b>must</b> be declared in the manifest (or merged from a library manifest). The system cannot start a component it doesn't know about.</p>\n\n<h4>&lt;activity&gt;</h4>\n<div class=\"lesson-code\">&lt;activity\n    android:name=\".ui.MainActivity\"\n    android:exported=\"true\"\n    android:launchMode=\"singleTop\"\n    android:configChanges=\"orientation|screenSize\"\n    android:screenOrientation=\"portrait\"\n    android:windowSoftInputMode=\"adjustResize\"&gt;\n    &lt;intent-filter&gt;\n        &lt;action android:name=\"android.intent.action.MAIN\" /&gt;\n        &lt;category android:name=\"android.intent.category.LAUNCHER\" /&gt;\n    &lt;/intent-filter&gt;\n&lt;/activity&gt;</div>\n<p>Key attributes:</p>\n<table>\n<tr><th>Attribute</th><th>Purpose</th></tr>\n<tr><td><code>name</code></td><td>Fully qualified class name (<code>.ui.MainActivity</code> is shorthand for <code>com.example.app.ui.MainActivity</code>).</td></tr>\n<tr><td><code>exported</code></td><td>Whether other apps can start this activity. <b>Required</b> if intent filters are present (API 31+).</td></tr>\n<tr><td><code>launchMode</code></td><td>Controls task/back-stack behavior (see below).</td></tr>\n<tr><td><code>taskAffinity</code></td><td>Which task this activity \"prefers.\" Default = app's package name. Used with <code>singleTask</code>.</td></tr>\n<tr><td><code>configChanges</code></td><td>Config changes the activity handles itself (no recreate). Common: <code>orientation|screenSize|uiMode</code>.</td></tr>\n<tr><td><code>screenOrientation</code></td><td>Lock to portrait/landscape. Avoid unless necessary (bad for tablets/foldables).</td></tr>\n<tr><td><code>windowSoftInputMode</code></td><td>How the window adjusts when the soft keyboard appears: <code>adjustResize</code>, <code>adjustPan</code>, <code>adjustNothing</code>.</td></tr>\n</table>\n\n<h4>Launch Modes</h4>\n<div class=\"diagram\">launchMode        Behavior                           Use Case\n─────────────────────────────────────────────────────────────────────────\nstandard          New instance every time.             Default. Most activities.\n                  A → B → B → B (3 B instances)\n\nsingleTop         If already on TOP of stack,          Notification targets,\n                  reuse via onNewIntent().             search results.\n                  A → B → (launch B) → onNewIntent()\n\nsingleTask        Only one instance in the task.       Main/home activities.\n                  Clears everything above it.\n                  A → B → C → (launch A) → A (B,C popped)\n\nsingleInstance    Sole activity in its own task.       Call screens, maps.\n                  No other activities share its task.\n\nsingleInstancePerTask  Like singleInstance but         Multi-window scenarios\n(API 31+)         one per task (allows multiple        (different tasks can each\n                  tasks to each have one).             have one instance).</div>\n\n<h4>&lt;service&gt;</h4>\n<div class=\"lesson-code\">&lt;service\n    android:name=\".sync.SyncService\"\n    android:exported=\"false\"\n    android:foregroundServiceType=\"dataSync\"\n    android:permission=\"com.example.BIND_SYNC\"\n    android:process=\":sync\" /&gt;</div>\n<table>\n<tr><th>Attribute</th><th>Purpose</th></tr>\n<tr><td><code>exported</code></td><td><code>false</code> = only your app can bind/start. <code>true</code> = other apps can too.</td></tr>\n<tr><td><code>foregroundServiceType</code></td><td><b>Required for API 34+</b> when running foreground services. Values: <code>camera</code>, <code>dataSync</code>, <code>location</code>, <code>mediaPlayback</code>, <code>microphone</code>, etc. Must also declare matching <code>uses-permission</code>.</td></tr>\n<tr><td><code>permission</code></td><td>A permission callers must hold to bind/start this service.</td></tr>\n<tr><td><code>process</code></td><td>Run in a separate process. <code>:sync</code> creates a private process named <code>com.example.app:sync</code>.</td></tr>\n</table>\n\n<h4>&lt;receiver&gt;</h4>\n<div class=\"lesson-code\">&lt;receiver\n    android:name=\".BootReceiver\"\n    android:exported=\"true\"\n    android:enabled=\"true\"\n    android:permission=\"android.permission.RECEIVE_BOOT_COMPLETED\"&gt;\n    &lt;intent-filter&gt;\n        &lt;action android:name=\"android.intent.action.BOOT_COMPLETED\" /&gt;\n    &lt;/intent-filter&gt;\n&lt;/receiver&gt;</div>\n<div class=\"warn-box\"><b>API 31+ change:</b> If a receiver has intent filters, you <b>must</b> explicitly set <code>exported=\"true\"</code> or <code>exported=\"false\"</code>. Before API 31, receivers with intent filters defaulted to exported=true. This was a security risk — apps could inadvertently expose receivers. Now the system enforces explicitness. For dynamically registered receivers (in code), use <code>Context.RECEIVER_EXPORTED</code> or <code>Context.RECEIVER_NOT_EXPORTED</code> flags.</div>\n\n<h4>&lt;provider&gt;</h4>\n<div class=\"lesson-code\">&lt;provider\n    android:name=\".data.AppContentProvider\"\n    android:authorities=\"com.example.app.provider\"\n    android:exported=\"false\"\n    android:grantUriPermissions=\"true\"\n    android:readPermission=\"com.example.READ_DATA\"\n    android:writePermission=\"com.example.WRITE_DATA\" /&gt;</div>\n<table>\n<tr><th>Attribute</th><th>Purpose</th></tr>\n<tr><td><code>authorities</code></td><td>Unique URI authority (like a domain). Used in <code>content://com.example.app.provider/items</code>.</td></tr>\n<tr><td><code>exported</code></td><td>Whether other apps can query this provider.</td></tr>\n<tr><td><code>grantUriPermissions</code></td><td>Allow temporary per-URI access grants via Intent flags (used by FileProvider for sharing files).</td></tr>\n<tr><td><code>readPermission / writePermission</code></td><td>Fine-grained access control. Callers must hold these permissions.</td></tr>\n</table>\n\n<h4>How PackageManager Resolves Components</h4>\n<div class=\"diagram\">App Install (APK → PackageManager)\n│\n├─ Parse AndroidManifest.xml\n│  ├─ Extract package name, version, SDK requirements\n│  ├─ Register all 4 component types in package database\n│  ├─ Index all intent filters for resolution\n│  └─ Record permissions (requested + defined)\n│\n├─ Store in /data/system/packages.xml\n│\n└─ At Runtime:\n   │\n   ├─ startActivity(intent) → AMS → PackageManager.resolveActivity()\n   │    └─ Scans all registered activities' intent filters\n   │\n   ├─ startService(intent) → AMS → PackageManager.resolveService()\n   │\n   ├─ sendBroadcast(intent) → AMS → PackageManager.queryBroadcastReceivers()\n   │    └─ Returns ALL matching receivers (broadcasts are 1-to-many)\n   │\n   └─ getContentResolver().query(uri) → PackageManager.resolveContentProvider()\n        └─ Matches by authority string (exact match, not filters)</div>\n\n<hr class=\"section-divider\">\n<h3>Part 3: Intent Filters</h3>\n<p>Intent filters declare what implicit intents a component can handle. They are the mechanism that makes Android's inter-app communication work — any app can say \"I can handle sharing images\" and the system will include it in the chooser.</p>\n\n<h4>&lt;intent-filter&gt; Structure</h4>\n<div class=\"lesson-code\">&lt;intent-filter&gt;\n    &lt;action android:name=\"android.intent.action.VIEW\" /&gt;\n    &lt;category android:name=\"android.intent.category.DEFAULT\" /&gt;\n    &lt;category android:name=\"android.intent.category.BROWSABLE\" /&gt;\n    &lt;data\n        android:scheme=\"https\"\n        android:host=\"example.com\"\n        android:pathPrefix=\"/product\" /&gt;\n&lt;/intent-filter&gt;</div>\n\n<h4>Intent Resolution: Three Tests</h4>\n<p>For an implicit intent to match a component's filter, it must pass <b>all three tests</b>:</p>\n<div class=\"diagram\">Implicit Intent\n│\n├─ 1. ACTION TEST\n│    Intent's action must match at least one &lt;action&gt; in the filter.\n│    Filter with no actions → nothing matches.\n│    Intent with no action → matches any filter (rare).\n│\n├─ 2. CATEGORY TEST\n│    Every category in the Intent must exist in the filter.\n│    IMPORTANT: startActivity() auto-adds CATEGORY_DEFAULT!\n│    So your filter almost always needs:\n│      &lt;category android:name=\"android.intent.category.DEFAULT\" /&gt;\n│\n└─ 3. DATA TEST\n     Matches scheme, host, port, path, and/or mimeType.\n     Rules are complex:\n     ├─ Intent has URI only → filter must match URI parts\n     ├─ Intent has MIME only → filter must match MIME\n     ├─ Intent has both → filter must match both\n     └─ Intent has neither → filter must have neither\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nALL THREE must pass. If any test fails, no match.</div>\n\n<h4>MAIN + LAUNCHER</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// This intent filter makes an activity appear in the launcher</span>\n&lt;intent-filter&gt;\n    &lt;action android:name=\"android.intent.action.MAIN\" /&gt;\n    &lt;category android:name=\"android.intent.category.LAUNCHER\" /&gt;\n&lt;/intent-filter&gt;\n\n<span class=\"cmt\">// MAIN = entry point (no data expected)</span>\n<span class=\"cmt\">// LAUNCHER = show in launcher grid</span>\n<span class=\"cmt\">// Note: this filter does NOT need DEFAULT because</span>\n<span class=\"cmt\">// the launcher starts it with an explicit intent</span></div>\n\n<h4>Deep Links, App Links & Custom Schemes</h4>\n<table>\n<tr><th></th><th>Custom URL Scheme</th><th>Web Links (Deep Links)</th><th>App Links (Verified)</th></tr>\n<tr><td><b>Scheme</b></td><td><code>myapp://</code></td><td><code>http://</code> or <code>https://</code></td><td><code>https://</code> only</td></tr>\n<tr><td><b>Disambiguation</b></td><td>No chooser (your scheme)</td><td>User sees chooser dialog</td><td>Opens directly (no chooser)</td></tr>\n<tr><td><b>Verification</b></td><td>None</td><td>None</td><td>System verifies via <code>/.well-known/assetlinks.json</code> on your server</td></tr>\n<tr><td><b>autoVerify</b></td><td>N/A</td><td>Not set</td><td><code>android:autoVerify=\"true\"</code></td></tr>\n<tr><td><b>Fallback</b></td><td>Error if no handler</td><td>Opens in browser if user picks it</td><td>Opens in browser if verification fails</td></tr>\n<tr><td><b>Security</b></td><td>Any app can register same scheme</td><td>Any app can register same URL</td><td>Only verified domain owner</td></tr>\n</table>\n\n<div class=\"lesson-code\"><span class=\"cmt\">// App Link (verified HTTPS deep link)</span>\n&lt;intent-filter android:autoVerify=\"true\"&gt;\n    &lt;action android:name=\"android.intent.action.VIEW\" /&gt;\n    &lt;category android:name=\"android.intent.category.DEFAULT\" /&gt;\n    &lt;category android:name=\"android.intent.category.BROWSABLE\" /&gt;\n    &lt;data\n        android:scheme=\"https\"\n        android:host=\"www.example.com\"\n        android:pathPrefix=\"/product\" /&gt;\n&lt;/intent-filter&gt;\n\n<span class=\"cmt\">// Server must host:</span>\n<span class=\"cmt\">// https://www.example.com/.well-known/assetlinks.json</span>\n<span class=\"cmt\">// containing your app's signing certificate fingerprint</span></div>\n<div class=\"info-box\"><b>Best practice:</b> Prefer App Links (verified HTTPS) over custom URL schemes. Custom schemes like <code>myapp://</code> have no ownership verification — any app can register the same scheme and intercept your links. App Links are cryptographically verified.</div>\n\n<hr class=\"section-divider\">\n<h3>Part 4: Permissions in the Manifest</h3>\n\n<h4>&lt;uses-permission&gt; — Requesting Permissions</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// Request permissions your app needs</span>\n&lt;uses-permission android:name=\"android.permission.INTERNET\" /&gt;\n&lt;uses-permission android:name=\"android.permission.CAMERA\" /&gt;\n&lt;uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" /&gt;\n\n<span class=\"cmt\">// Conditional permission (only on API 33+)</span>\n&lt;uses-permission\n    android:name=\"android.permission.POST_NOTIFICATIONS\"\n    android:maxSdkVersion=\"99\" /&gt;\n\n<span class=\"cmt\">// Foreground service permissions (API 34+)</span>\n&lt;uses-permission android:name=\"android.permission.FOREGROUND_SERVICE\" /&gt;\n&lt;uses-permission android:name=\"android.permission.FOREGROUND_SERVICE_LOCATION\" /&gt;</div>\n<p>Permissions fall into protection levels: <b>normal</b> (auto-granted at install, e.g., INTERNET), <b>dangerous</b> (requires runtime prompt, e.g., CAMERA), and <b>signature</b> (granted only if signed with same cert as the defining app).</p>\n\n<h4>&lt;permission&gt; — Defining Custom Permissions</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// Define a custom permission in your manifest</span>\n&lt;permission\n    android:name=\"com.example.app.permission.READ_SETTINGS\"\n    android:label=\"Read App Settings\"\n    android:description=\"@string/perm_read_settings_desc\"\n    android:protectionLevel=\"signature\" /&gt;\n\n<span class=\"cmt\">// Then guard a component with it:</span>\n&lt;provider\n    android:name=\".SettingsProvider\"\n    android:authorities=\"com.example.app.settings\"\n    android:readPermission=\"com.example.app.permission.READ_SETTINGS\" /&gt;\n\n<span class=\"cmt\">// protectionLevel values:</span>\n<span class=\"cmt\">//   normal    — auto-granted, no prompt</span>\n<span class=\"cmt\">//   dangerous — requires runtime permission dialog</span>\n<span class=\"cmt\">//   signature — only apps signed with same key can use</span></div>\n\n<h4>&lt;uses-feature&gt; — Hardware/Software Requirements</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// Required feature: app won't install without camera</span>\n&lt;uses-feature\n    android:name=\"android.hardware.camera\"\n    android:required=\"true\" /&gt;\n\n<span class=\"cmt\">// Optional feature: app works without GPS but uses it if available</span>\n&lt;uses-feature\n    android:name=\"android.hardware.location.gps\"\n    android:required=\"false\" /&gt;</div>\n<div class=\"warn-box\"><b>Google Play filtering:</b> The Play Store reads <code>&lt;uses-feature&gt;</code> to hide your app from incompatible devices. If <code>required=\"true\"</code> (the default!), devices without that feature won't even see your app. Additionally, some permissions <b>imply</b> features — e.g., <code>CAMERA</code> permission implies <code>android.hardware.camera</code>. If your app can work without a camera, you must explicitly declare <code>required=\"false\"</code> to override the implication.</div>\n\n<hr class=\"section-divider\">\n<h3>Part 5: Manifest Merging</h3>\n<p>Your final APK has a <b>single merged manifest</b>. But it's built from multiple sources:</p>\n<div class=\"diagram\">Merge Priority (highest wins):\n\n1. Build variant manifest (e.g., src/debug/AndroidManifest.xml)\n       │\n       ▼ merges into\n2. App module main manifest (src/main/AndroidManifest.xml)\n       │\n       ▼ merges with\n3. Library module manifests (each library's AndroidManifest.xml)\n       │\n       ▼ merges with\n4. AAR dependency manifests (from Maven/local AARs)\n       │\n       ▼\n   MERGED MANIFEST (in build/intermediates/merged_manifests/)</div>\n\n<h4>Merge Conflict Resolution with tools: Namespace</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// A library sets allowBackup=\"true\", you want \"false\"</span>\n<span class=\"cmt\">// Without tools:replace, the merger throws an error</span>\n\n&lt;application\n    android:allowBackup=\"false\"\n    tools:replace=\"android:allowBackup\"&gt;\n\n<span class=\"cmt\">// tools:remove — remove an attribute set by a library</span>\n&lt;application\n    tools:remove=\"android:supportsRtl\"&gt;\n\n<span class=\"cmt\">// tools:node=\"remove\" — remove an entire element from a library</span>\n&lt;activity\n    android:name=\"com.library.UnwantedActivity\"\n    tools:node=\"remove\" /&gt;\n\n<span class=\"cmt\">// tools:node=\"replace\" — replace library's entire element with yours</span>\n&lt;activity\n    android:name=\"com.library.SomeActivity\"\n    android:exported=\"false\"\n    tools:node=\"replace\" /&gt;\n\n<span class=\"cmt\">// tools:node=\"removeAll\" — remove ALL elements of that type from libs</span>\n&lt;uses-permission tools:node=\"removeAll\" /&gt;</div>\n<div class=\"info-box\"><b>Common merge conflict:</b> A library declares <code>exported=\"true\"</code> on a receiver, but you want it <code>false</code>. Solution:<br>\n<code>&lt;receiver android:name=\"com.library.SomeReceiver\" android:exported=\"false\" tools:node=\"replace\" /&gt;</code><br><br>\n<b>Viewing the merged manifest:</b> In Android Studio, open any <code>AndroidManifest.xml</code> and click the <b>\"Merged Manifest\"</b> tab at the bottom. It shows the final result with color-coded sources.</div>\n\n<h4>Placeholder Injection</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// In build.gradle.kts:</span>\nandroid {\n    defaultConfig {\n        manifestPlaceholders[\"appAuthRedirectScheme\"] = \"com.example.app\"\n        manifestPlaceholders[\"mapsApiKey\"] = localProperties[\"MAPS_KEY\"] ?: \"\"\n    }\n}\n\n<span class=\"cmt\">// In AndroidManifest.xml:</span>\n&lt;activity android:name=\".auth.RedirectActivity\"&gt;\n    &lt;intent-filter&gt;\n        &lt;data android:scheme=\"${appAuthRedirectScheme}\" /&gt;\n    &lt;/intent-filter&gt;\n&lt;/activity&gt;\n\n&lt;meta-data\n    android:name=\"com.google.android.geo.API_KEY\"\n    android:value=\"${mapsApiKey}\" /&gt;\n\n<span class=\"cmt\">// ${applicationId} is always available — replaced with the app's applicationId</span>\n&lt;provider\n    android:name=\"androidx.core.content.FileProvider\"\n    android:authorities=\"${applicationId}.fileprovider\" /&gt;</div>\n\n<hr class=\"section-divider\">\n<h3>Part 6: Advanced Manifest Features</h3>\n\n<h4>&lt;queries&gt; — Package Visibility (API 30+)</h4>\n<p>Starting with API 30, apps can no longer see all installed apps by default. You must declare which apps or intent patterns you need to interact with:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Declare specific packages you need to query</span>\n&lt;queries&gt;\n    <span class=\"cmt\">&lt;!-- Specific app --&gt;</span>\n    &lt;package android:name=\"com.whatsapp\" /&gt;\n\n    <span class=\"cmt\">&lt;!-- Any app that handles this intent --&gt;</span>\n    &lt;intent&gt;\n        &lt;action android:name=\"android.intent.action.SEND\" /&gt;\n        &lt;data android:mimeType=\"image/*\" /&gt;\n    &lt;/intent&gt;\n\n    <span class=\"cmt\">&lt;!-- Any app with a content provider at this authority --&gt;</span>\n    &lt;provider android:authorities=\"com.example.other.provider\" /&gt;\n&lt;/queries&gt;\n\n<span class=\"cmt\">// Without &lt;queries&gt;, packageManager.getInstalledPackages()</span>\n<span class=\"cmt\">// returns empty or filtered results on API 30+</span></div>\n\n<h4>&lt;meta-data&gt; — Library Configuration</h4>\n<div class=\"lesson-code\"><span class=\"cmt\">// Pass configuration to libraries via meta-data</span>\n\n<span class=\"cmt\">// Firebase Cloud Messaging: default notification channel</span>\n&lt;meta-data\n    android:name=\"com.google.firebase.messaging.default_notification_channel_id\"\n    android:value=\"@string/default_channel_id\" /&gt;\n\n<span class=\"cmt\">// Google Maps API key</span>\n&lt;meta-data\n    android:name=\"com.google.android.geo.API_KEY\"\n    android:value=\"${mapsApiKey}\" /&gt;\n\n<span class=\"cmt\">// Disable auto-init for Firebase Analytics</span>\n&lt;meta-data\n    android:name=\"firebase_analytics_collection_enabled\"\n    android:value=\"false\" /&gt;\n\n<span class=\"cmt\">// Libraries read these at runtime via:</span>\n<span class=\"cmt\">// appInfo.metaData.getString(\"com.google.android.geo.API_KEY\")</span></div>\n\n<h4>Process Attributes</h4>\n<p>By default, all components run in the app's main process. You can isolate components into separate processes:</p>\n<div class=\"lesson-code\">&lt;service\n    android:name=\".WebViewService\"\n    android:process=\":webview\" /&gt;\n<span class=\"cmt\">// \":webview\" = private process (com.example.app:webview)</span>\n<span class=\"cmt\">// \"com.example.shared\" = global process (other apps can share it)</span>\n\n<span class=\"cmt\">// Each process gets its own Application instance!</span>\n<span class=\"cmt\">// Your Application.onCreate() runs once PER PROCESS.</span>\n<span class=\"cmt\">// Static state is NOT shared across processes.</span>\n<span class=\"cmt\">// Use IPC (Binder/AIDL, ContentProvider) to communicate.</span></div>\n<div class=\"warn-box\"><b>Multi-process pitfall:</b> If you run a <code>Service</code> in <code>:sync</code> process and your <code>Application.onCreate()</code> initializes heavy libraries (Firebase, Hilt), those libraries initialize again in the second process, wasting memory and time. Guard init code with a process name check.</div>\n\n<h4>Multi-Module and Dynamic Feature Manifests</h4>\n<p>In a multi-module project, each module has its own <code>AndroidManifest.xml</code>:</p>\n<div class=\"diagram\">:app module\n└── AndroidManifest.xml (main manifest, highest priority)\n\n:feature:auth module\n└── AndroidManifest.xml\n    └── Declares LoginActivity, AuthService\n\n:feature:payments module\n└── AndroidManifest.xml\n    └── Declares PaymentActivity, BillingProvider\n\n:core:network module (library module)\n└── AndroidManifest.xml\n    └── Declares INTERNET permission, NetworkSecurityConfig\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nAll merged at build time into one manifest.\nLibrary permissions propagate up to :app.\nComponents in feature modules are included in the APK.</div>\n<p>For <b>Dynamic Feature modules</b> (delivered on demand via Play Feature Delivery), components are declared in the feature's manifest and installed at runtime via <code>SplitInstallManager</code>. The system discovers them only after the feature is installed. Activities in dynamic features must be launched via an explicit intent using their fully qualified class name.</p>",
+  "questions": [
+    {
+      "id": "am-1",
+      "type": "multiple-choice",
+      "title": "minSdk vs targetSdk vs compileSdk",
+      "difficulty": "intermediate",
+      "description": "Your app has <code>minSdk = 26</code>, <code>targetSdk = 33</code>, <code>compileSdk = 34</code>. Which statement is true?",
+      "options": [
+        "The app can use API 34 features at runtime without checks",
+        "The app won't install on devices running API 25 or below, the compiler can see API 34 APIs, but runtime behavior changes for API 34 are NOT applied since targetSdk is 33",
+        "compileSdk 34 means the app runs API 34 behavior on all devices",
+        "targetSdk 33 means the app cannot install on API 34 devices"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>minSdk</code> is the install floor — API 25 and below are blocked. <code>compileSdk</code> controls which APIs the compiler can see, so you can reference API 34 classes (with runtime version checks). <code>targetSdk</code> is a runtime compatibility flag — the system only enables behavior changes for API levels up to targetSdk. Since targetSdk is 33, API 34 behavior changes (like further background restrictions) are NOT enforced yet. The app still installs and runs on API 34 devices — it just gets legacy behavior for 34-specific changes.",
+      "hints": [
+        "compileSdk is compile-time only, it doesn't ship in the APK",
+        "targetSdk tells the system which behavior changes to apply"
+      ]
+    },
+    {
+      "id": "am-2",
+      "type": "multiple-choice",
+      "title": "Exported Requirement (API 31+)",
+      "difficulty": "intermediate",
+      "description": "You add an intent filter to a <code>&lt;receiver&gt;</code> in your manifest but forget to set <code>exported</code>. What happens on a device running API 31+?",
+      "options": [
+        "The receiver defaults to exported=\"true\" and works fine",
+        "The receiver defaults to exported=\"false\" and silently ignores external broadcasts",
+        "The app fails to install with an error about the missing exported attribute",
+        "The app installs but crashes at runtime when a broadcast is received"
+      ],
+      "correctIndex": 2,
+      "explanation": "Starting with API 31 (Android 12), any component with an <code>&lt;intent-filter&gt;</code> <b>must</b> explicitly declare <code>android:exported</code>. If you omit it, the app <b>fails to install</b> — the installer (PackageManager) rejects the APK. This was a security change to prevent accidentally exporting components. Before API 31, components with intent filters defaulted to exported=true, which was a common source of security vulnerabilities.",
+      "hints": [
+        "API 31 made this a hard requirement, not just a warning",
+        "Think about what PackageManager does at install time"
+      ]
+    },
+    {
+      "id": "am-3",
+      "type": "what-does-this-do",
+      "title": "Intent Filter Matching",
+      "difficulty": "advanced",
+      "description": "An activity has this intent filter. Which of the following intents will match?",
+      "code": "<intent-filter>\n    <action android:name=\"android.intent.action.VIEW\" />\n    <category android:name=\"android.intent.category.DEFAULT\" />\n    <category android:name=\"android.intent.category.BROWSABLE\" />\n    <data\n        android:scheme=\"https\"\n        android:host=\"example.com\"\n        android:pathPrefix=\"/products\" />\n</intent-filter>\n\n// Intent A: action=VIEW, data=https://example.com/products/123\n// Intent B: action=VIEW, data=https://example.com/about\n// Intent C: action=SEND, data=https://example.com/products/456\n// Intent D: action=VIEW, data=http://example.com/products/789",
+      "options": [
+        "All four intents match",
+        "Only Intent A matches — correct action, scheme, host, and pathPrefix",
+        "Intents A and D match — both have action VIEW and the right host/path",
+        "Intents A and B match — both have action VIEW and correct scheme/host"
+      ],
+      "correctIndex": 1,
+      "explanation": "Intent resolution requires ALL three tests to pass:<br><b>Intent A:</b> Action=VIEW (matches), categories include DEFAULT (auto-added by startActivity) and BROWSABLE (matches), data scheme=https + host=example.com + path starts with /products (matches). <b>PASSES</b>.<br><b>Intent B:</b> Path is /about, not /products*. Data test <b>fails</b>.<br><b>Intent C:</b> Action is SEND, not VIEW. Action test <b>fails</b>.<br><b>Intent D:</b> Scheme is http, filter requires https. Data test <b>fails</b>.",
+      "hints": [
+        "All three tests (action, category, data) must pass",
+        "pathPrefix=\"/products\" matches /products, /products/123, /products/abc — but not /about"
+      ]
+    },
+    {
+      "id": "am-4",
+      "type": "multiple-choice",
+      "title": "Launch Mode Behavior",
+      "difficulty": "advanced",
+      "description": "Activity A starts Activity B (launchMode=\"singleTask\", taskAffinity=default). Then B starts C, then C starts D. Now D starts B again. What is the back stack?",
+      "options": [
+        "A → B → C → D → B (new instance of B on top)",
+        "A → B (C and D are popped, B receives onNewIntent)",
+        "A → B → C → D (B is brought to front, D stays)",
+        "B only (everything else is destroyed)"
+      ],
+      "correctIndex": 1,
+      "explanation": "With <code>singleTask</code>, the system looks for an existing instance of B in its preferred task. It finds B already in the stack. Rather than creating a new instance, it <b>clears everything above B</b> (C and D are destroyed) and delivers the intent to B via <code>onNewIntent()</code>. The final stack is A → B. This is why singleTask is used for main/home screens — returning to them always clears the stack above.",
+      "hints": [
+        "singleTask means only one instance in the task",
+        "What happens to activities above the existing instance?"
+      ]
+    },
+    {
+      "id": "am-5",
+      "type": "multiple-choice",
+      "title": "Manifest Merging Conflict",
+      "difficulty": "intermediate",
+      "description": "A library dependency sets <code>android:allowBackup=\"true\"</code> in its manifest. Your app sets <code>android:allowBackup=\"false\"</code>. What happens during the build?",
+      "options": [
+        "Your app's value wins automatically since it has higher priority",
+        "The library's value wins since it was added first",
+        "The build fails with a manifest merge error — you must use tools:replace to resolve it",
+        "Both values are kept and the system picks one at runtime"
+      ],
+      "correctIndex": 2,
+      "explanation": "When the same attribute is set to different values in manifests at different priority levels, the manifest merger reports a <b>conflict error</b> and the build fails. Unlike some merge rules, attribute conflicts are not silently resolved. You must explicitly tell the merger what to do:<br><code>&lt;application android:allowBackup=\"false\" tools:replace=\"android:allowBackup\"&gt;</code><br>This tells the merger: \"I know the library sets this differently. Use my value.\"",
+      "hints": [
+        "The merger is conservative — it won't silently override library values",
+        "The tools: namespace provides merge directives"
+      ]
+    },
+    {
+      "id": "am-6",
+      "type": "multiple-choice",
+      "title": "Deep Links vs App Links",
+      "difficulty": "intermediate",
+      "description": "What is the key difference between a regular deep link and an App Link?",
+      "options": [
+        "Deep links use HTTP, App Links use HTTPS",
+        "App Links require android:autoVerify=\"true\" and server-side assetlinks.json verification, which allows the system to open your app directly without a disambiguation dialog",
+        "Deep links work only on API 23+, App Links work on all versions",
+        "App Links require a custom URL scheme like myapp://"
+      ],
+      "correctIndex": 1,
+      "explanation": "App Links are verified HTTPS deep links. When you set <code>android:autoVerify=\"true\"</code>, the system fetches <code>/.well-known/assetlinks.json</code> from your domain at install time and checks that it contains your app's signing certificate. If verified, your app opens directly when users click matching URLs — no disambiguation dialog. Regular deep links (without verification) show a chooser if multiple apps can handle the URL. App Links give you <b>guaranteed ownership</b> of your URLs.",
+      "hints": [
+        "Think about what prevents another app from claiming your URLs",
+        "The key word is 'verified'"
+      ]
+    },
+    {
+      "id": "am-7",
+      "type": "fix-bug",
+      "title": "uses-feature Filtering Problem",
+      "difficulty": "intermediate",
+      "description": "This app optionally uses the camera for scanning QR codes, but many users report the app is not visible on the Play Store for tablets without cameras. Find and fix the issue.",
+      "starterCode": "<manifest ...>\n    <uses-permission android:name=\"android.permission.CAMERA\" />\n    \n    <application ...>\n        <activity android:name=\".QRScanActivity\" />\n    </application>\n</manifest>",
+      "checks": [
+        {
+          "pattern": "uses-feature",
+          "message": "Add a <uses-feature> declaration for the camera",
+          "required": true
+        },
+        {
+          "pattern": "required.*false|false.*required",
+          "message": "Set required=\"false\" since the camera is optional",
+          "required": true
+        }
+      ],
+      "solution": "<manifest ...>\n    <uses-permission android:name=\"android.permission.CAMERA\" />\n    <uses-feature\n        android:name=\"android.hardware.camera\"\n        android:required=\"false\" />\n    \n    <application ...>\n        <activity android:name=\".QRScanActivity\" />\n    </application>\n</manifest>",
+      "explanation": "The <code>CAMERA</code> permission <b>implicitly</b> adds <code>&lt;uses-feature android:name=\"android.hardware.camera\" android:required=\"true\"&gt;</code>. This tells the Play Store to hide the app from devices without cameras. Since the camera is optional (QR scanning is a bonus feature), you must explicitly declare <code>&lt;uses-feature&gt;</code> with <code>required=\"false\"</code> to override the implied requirement. Always check implied features when adding hardware-related permissions.",
+      "hints": [
+        "Some permissions imply hardware features",
+        "What does the Play Store assume when it sees the CAMERA permission?"
+      ]
+    },
+    {
+      "id": "am-8",
+      "type": "trivia",
+      "title": "Package Visibility (API 30+)",
+      "difficulty": "advanced",
+      "description": "Explain what <code>&lt;queries&gt;</code> does in the manifest and why it was introduced in API 30.",
+      "keywords": [
+        "queries",
+        "visibility",
+        "package",
+        "API 30",
+        "privacy",
+        "installed",
+        "apps",
+        "intent",
+        "filter",
+        "resolve"
+      ],
+      "answer": "The <queries> element declares which other apps your app needs to interact with. Introduced in API 30 for privacy: before API 30, any app could enumerate all installed apps via PackageManager, which was a fingerprinting/privacy risk. Now apps can only see a filtered set. You declare visibility needs via: specific package names, intent filter patterns, or provider authorities. Without proper <queries> declarations, calls like resolveActivity(), getInstalledPackages(), and queryIntentActivities() return empty/filtered results.",
+      "explanation": "Package visibility was a major privacy improvement. Apps like shopping apps were scanning installed apps to build user profiles. By requiring explicit <code>&lt;queries&gt;</code> declarations, Android limits each app's view to only the packages it legitimately needs to interact with. The QUERY_ALL_PACKAGES permission exists as an escape hatch but is heavily restricted on the Play Store.",
+      "hints": [
+        "Think about why an app might want to see all installed apps — and why that's a privacy concern",
+        "What happens to PackageManager queries without proper declarations?"
+      ]
+    },
+    {
+      "id": "am-9",
+      "type": "what-does-this-do",
+      "title": "Foreground Service Type (API 34+)",
+      "difficulty": "advanced",
+      "description": "This app targets API 34. What happens when it tries to start the foreground service?",
+      "code": "<!-- In AndroidManifest.xml -->\n<uses-permission android:name=\"android.permission.FOREGROUND_SERVICE\" />\n\n<service\n    android:name=\".LocationTrackingService\"\n    android:exported=\"false\" />\n\n// In Kotlin code:\nval intent = Intent(this, LocationTrackingService::class.java)\nstartForegroundService(intent)\n\n// Inside LocationTrackingService:\noverride fun onStartCommand(...): Int {\n    val notification = buildNotification()\n    startForeground(1, notification, FOREGROUND_SERVICE_TYPE_LOCATION)\n    return START_STICKY\n}",
+      "options": [
+        "The service starts normally with a notification",
+        "The service crashes with MissingForegroundServiceTypeException because the manifest does not declare foregroundServiceType",
+        "The service starts but the notification is not shown",
+        "The app fails to compile because FOREGROUND_SERVICE_TYPE_LOCATION is not a valid constant"
+      ],
+      "correctIndex": 1,
+      "explanation": "On API 34+, foreground services <b>must</b> declare their type in the manifest via <code>android:foregroundServiceType</code>. Additionally, you need the type-specific permission (<code>FOREGROUND_SERVICE_LOCATION</code>). This manifest is missing both: no <code>foregroundServiceType=\"location\"</code> on the <code>&lt;service&gt;</code> tag, and no <code>FOREGROUND_SERVICE_LOCATION</code> permission. The call to <code>startForeground()</code> with a type that wasn't declared in the manifest throws <code>MissingForegroundServiceTypeException</code>.",
+      "hints": [
+        "API 34 added strict requirements for foreground service types",
+        "Check what's missing from the <service> declaration"
+      ]
+    },
+    {
+      "id": "am-10",
+      "type": "fill-blank",
+      "title": "Manifest Merge Resolution",
+      "difficulty": "intermediate",
+      "description": "Fill in the blanks to override a library's manifest settings. The library sets <code>exported=\"true\"</code> on its activity, but you want it <code>false</code>. The library also adds an unwanted permission.",
+      "code": "<manifest\n    xmlns:android=\"http://schemas.android.com/apk/res/android\"\n    xmlns:tools=\"http://schemas.android.com/tools\">\n\n    <!-- Remove the unwanted permission from library -->\n    <uses-permission\n        android:name=\"com.library.UNWANTED_PERMISSION\"\n        ___1___ />\n\n    <application ...>\n        <!-- Override library's activity to be not exported -->\n        <activity\n            android:name=\"com.library.SomeActivity\"\n            android:exported=\"false\"\n            ___2___ />\n    </application>\n</manifest>",
+      "blanks": [
+        {
+          "answer": [
+            "tools:node=\"remove\""
+          ],
+          "hint": "Which tools: directive completely removes an element from the merge?"
+        },
+        {
+          "answer": [
+            "tools:node=\"replace\"",
+            "tools:replace=\"android:exported\""
+          ],
+          "hint": "Which tools: directive replaces the library's element/attribute with yours?"
+        }
+      ],
+      "explanation": "<code>tools:node=\"remove\"</code> tells the manifest merger to completely remove that element (the unwanted permission) from the merged result. For the activity, you can use either <code>tools:node=\"replace\"</code> (replaces the entire element) or <code>tools:replace=\"android:exported\"</code> (replaces just that attribute). Both work, but <code>tools:replace</code> is more surgical — it keeps the library's other attributes intact while only overriding the ones you specify.",
+      "hints": [
+        "The tools: namespace provides merge directives",
+        "One directive removes elements, another replaces them"
+      ]
+    }
+  ]
+}
