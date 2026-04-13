@@ -1,0 +1,303 @@
+{
+  "id": "mock-interview-lifecycle-coroutines",
+  "title": "Mock Interview: Lifecycle & Coroutines",
+  "icon": "\ud83c\udfaf",
+  "description": "Simulated L6 Android interview covering lifecycle awareness, coroutine mastery, and architecture design",
+  "references": [
+    {
+      "title": "Kotlin Coroutines Guide",
+      "url": "https://kotlinlang.org/docs/coroutines-guide.html",
+      "type": "docs"
+    },
+    {
+      "title": "Android Lifecycle Documentation",
+      "url": "https://developer.android.com/topic/libraries/architecture/lifecycle",
+      "type": "docs"
+    },
+    {
+      "title": "Coroutines on Android",
+      "url": "https://developer.android.com/kotlin/coroutines",
+      "type": "docs"
+    },
+    {
+      "title": "repeatOnLifecycle API Design",
+      "url": "https://medium.com/androiddevelopers/repeatonlifecycle-api-design-story-8670d1a7d333",
+      "type": "article"
+    },
+    {
+      "title": "Testing Kotlin Coroutines",
+      "url": "https://developer.android.com/kotlin/coroutines/test",
+      "type": "docs"
+    }
+  ],
+  "lesson": "<h3>Interview Context</h3>\n<div class=\"info-box\">You're interviewing for <b>L6 on the Gemini Enterprise Android team</b>. This round focuses on <b>Android lifecycle awareness</b> and <b>coroutine mastery</b>. You'll be given code to fix, patterns to implement, and architecture to design. The interviewer expects you to identify subtle bugs, reason about threading and cancellation, and design production-quality async solutions.</div>\n\n<hr class=\"section-divider\">\n<h3>Problem 1: Fix the Buggy ViewModel</h3>\n<p>The candidate receives this code for a chat streaming feature and is asked: <b>\"Find ALL the bugs.\"</b></p>\n<div class=\"lesson-code\"><span class=\"cmt\">// ViewModel</span>\nclass ChatViewModel : ViewModel() {\n    private val _messages = MutableLiveData&lt;List&lt;Message&gt;&gt;()\n    val messages: LiveData&lt;List&lt;Message&gt;&gt; = _messages\n\n    fun streamResponse(prompt: String) {\n        GlobalScope.launch {\n            val response = api.streamChat(prompt)\n            response.collect { chunk ->\n                val current = _messages.value ?: emptyList()\n                _messages.value = current + Message(chunk.text)\n            }\n        }\n    }\n}\n\n<span class=\"cmt\">// In Fragment:</span>\noverride fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n    lifecycleScope.launch {\n        viewModel.messages.asFlow().collect { messages ->\n            adapter.submitList(messages)\n        }\n    }\n    viewModel.streamResponse(args.prompt)\n}</div>\n\n<h4>Bug Analysis (5 bugs):</h4>\n<div class=\"warn-box\"><b>Bug 1: GlobalScope \u2014 no lifecycle, leaks.</b><br>\n<code>GlobalScope</code> is never cancelled. If the user leaves the screen, the coroutine keeps running, holding references to the ViewModel and API response. This is a coroutine leak. <b>Fix:</b> Use <code>viewModelScope.launch</code>.</div>\n<div class=\"warn-box\"><b>Bug 2: LiveData.value set from background thread \u2014 crash.</b><br>\n<code>_messages.value = ...</code> is called from whatever thread <code>GlobalScope.launch</code> runs on (Dispatchers.Default by default). <code>LiveData.setValue()</code> MUST be called from the main thread or it throws <code>IllegalStateException</code>. <b>Fix:</b> Use <code>_messages.postValue()</code> or switch to <code>withContext(Dispatchers.Main)</code>.</div>\n<div class=\"warn-box\"><b>Bug 3: No cancellation of previous stream on new request.</b><br>\nIf <code>streamResponse()</code> is called twice (user sends another prompt), both streams run simultaneously and interleave messages into the same list. <b>Fix:</b> Track the Job and cancel the previous one, or use a <code>MutableSharedFlow</code> with <code>flatMapLatest</code>.</div>\n<div class=\"warn-box\"><b>Bug 4: Flow collection not lifecycle-aware \u2014 wastes resources.</b><br>\n<code>lifecycleScope.launch { ... collect }</code> keeps collecting even when the Fragment is in the background (STOPPED state). It should only collect when the UI is visible. <b>Fix:</b> Use <code>repeatOnLifecycle(Lifecycle.State.STARTED)</code>.</div>\n<div class=\"warn-box\"><b>Bug 5: streamResponse called every onViewCreated \u2014 double load on rotation.</b><br>\n<code>onViewCreated</code> is called again after configuration change (rotation). This re-triggers the API call even though the ViewModel already has data. <b>Fix:</b> Guard with a flag in the ViewModel, or trigger from <code>init {}</code>, or use <code>SavedStateHandle</code> to track if already loaded.</div>\n\n<h4>Corrected Code:</h4>\n<div class=\"lesson-code\">class ChatViewModel : ViewModel() {\n    private val _messages = MutableStateFlow&lt;List&lt;Message&gt;&gt;(emptyList())\n    val messages: StateFlow&lt;List&lt;Message&gt;&gt; = _messages.asStateFlow()\n\n    private var streamJob: Job? = null\n\n    fun streamResponse(prompt: String) {\n        streamJob?.cancel() <span class=\"cmt\">// Cancel previous stream</span>\n        streamJob = viewModelScope.launch { <span class=\"cmt\">// Lifecycle-bound</span>\n            val response = api.streamChat(prompt)\n            response.collect { chunk ->\n                _messages.update { current ->\n                    current + Message(chunk.text) <span class=\"cmt\">// Thread-safe</span>\n                }\n            }\n        }\n    }\n}\n\n<span class=\"cmt\">// In Fragment:</span>\noverride fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n    viewLifecycleOwner.lifecycleScope.launch {\n        viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {\n            viewModel.messages.collect { messages ->\n                adapter.submitList(messages)\n            }\n        }\n    }\n    <span class=\"cmt\">// Don't re-trigger on rotation — ViewModel already has state</span>\n    if (savedInstanceState == null) {\n        viewModel.streamResponse(args.prompt)\n    }\n}</div>\n\n<hr class=\"section-divider\">\n<h3>Problem 2: Implement Retry with Exponential Backoff</h3>\n<p>The interviewer asks: <b>\"Implement a retryWithBackoff suspend function that retries up to N times with exponential delay (1s, 2s, 4s...), reports attempt progress via callback, and properly handles CancellationException.\"</b></p>\n\n<h4>Key Insight: CancellationException</h4>\n<div class=\"warn-box\"><b>NEVER catch CancellationException.</b> Catching it breaks structured concurrency \u2014 the coroutine won't stop when its scope is cancelled. The coroutine framework throws <code>CancellationException</code> at suspension points (like <code>delay()</code>) to signal cancellation. If you swallow it, the coroutine becomes a zombie.</div>\n\n<h4>Why delay() Is the Cancellation Point</h4>\n<p><code>delay()</code> is a suspend function that checks for cancellation. When the scope is cancelled, <code>delay()</code> throws <code>CancellationException</code>, unwinding the coroutine. If you used <code>Thread.sleep()</code> instead, the coroutine could never be cancelled during the wait.</p>\n\n<div class=\"lesson-code\">suspend fun &lt;T&gt; retryWithBackoff(\n    maxRetries: Int = 3,\n    initialDelayMs: Long = 1000,\n    onAttempt: (attempt: Int, maxAttempts: Int) -> Unit = { _, _ -> },\n    block: suspend () -> T\n): T {\n    var currentDelay = initialDelayMs\n    repeat(maxRetries - 1) { attempt ->\n        onAttempt(attempt + 1, maxRetries)\n        try {\n            return block()\n        } catch (e: CancellationException) {\n            throw e <span class=\"cmt\">// NEVER swallow cancellation!</span>\n        } catch (e: Exception) {\n            delay(currentDelay) <span class=\"cmt\">// Cancellation-aware wait</span>\n            currentDelay *= 2\n        }\n    }\n    onAttempt(maxRetries, maxRetries)\n    return block() <span class=\"cmt\">// Final attempt — let it throw</span>\n}</div>\n\n<h4>Full ViewModel Using It with StateFlow Progress</h4>\n<div class=\"lesson-code\">class ApiViewModel : ViewModel() {\n    sealed class UiState {\n        object Idle : UiState()\n        data class Loading(val attempt: Int, val maxAttempts: Int) : UiState()\n        data class Success(val data: String) : UiState()\n        data class Error(val message: String) : UiState()\n    }\n\n    private val _uiState = MutableStateFlow&lt;UiState&gt;(UiState.Idle)\n    val uiState: StateFlow&lt;UiState&gt; = _uiState.asStateFlow()\n\n    fun fetchData() {\n        viewModelScope.launch {\n            _uiState.value = UiState.Loading(1, 3)\n            try {\n                val result = retryWithBackoff(\n                    maxRetries = 3,\n                    initialDelayMs = 1000,\n                    onAttempt = { attempt, max ->\n                        _uiState.value = UiState.Loading(attempt, max)\n                    }\n                ) {\n                    api.getData() <span class=\"cmt\">// May throw IOException</span>\n                }\n                _uiState.value = UiState.Success(result)\n            } catch (e: Exception) {\n                _uiState.value = UiState.Error(e.message ?: \"Unknown error\")\n            }\n        }\n    }\n}</div>\n\n<h4>Testing with TestDispatcher (delay skipped instantly)</h4>\n<div class=\"lesson-code\">@Test\nfun `retry succeeds on third attempt`() = runTest {\n    var callCount = 0\n    val result = retryWithBackoff(\n        maxRetries = 3,\n        initialDelayMs = 1000\n    ) {\n        callCount++\n        if (callCount < 3) throw IOException(\"Fail\")\n        \"success\"\n    }\n    assertEquals(\"success\", result)\n    assertEquals(3, callCount)\n    <span class=\"cmt\">// delay(1000) + delay(2000) = 3000ms virtual time</span>\n    <span class=\"cmt\">// But runTest skips delays — test completes instantly!</span>\n}\n\n@Test\nfun `retry respects cancellation`() = runTest {\n    val job = launch {\n        retryWithBackoff(maxRetries = 5, initialDelayMs = 10_000) {\n            throw IOException(\"Always fails\")\n        }\n    }\n    advanceTimeBy(5000)\n    job.cancel() <span class=\"cmt\">// Cancel during a delay</span>\n    assertTrue(job.isCancelled)\n}</div>\n\n<hr class=\"section-divider\">\n<h3>Problem 3: Configuration Change Survival</h3>\n<p>The interviewer shows this code and asks: <b>\"What survives rotation? What's lost? What survives process death?\"</b></p>\n<div class=\"lesson-code\">class NoteViewModel(\n    private val savedStateHandle: SavedStateHandle\n) : ViewModel() {\n    var draftText = \"\"                                  <span class=\"cmt\">// A</span>\n    val notes = MutableStateFlow(emptyList&lt;Note&gt;())      <span class=\"cmt\">// B</span>\n    val savedId: String? = savedStateHandle[\"noteId\"]    <span class=\"cmt\">// C</span>\n}\n\n@Composable\nfun NoteScreen(vm: NoteViewModel) {\n    var localDraft by remember { mutableStateOf(\"\") }            <span class=\"cmt\">// D</span>\n    var savedDraft by rememberSaveable { mutableStateOf(\"\") }   <span class=\"cmt\">// E</span>\n    val notes by vm.notes.collectAsState()                       <span class=\"cmt\">// F</span>\n}</div>\n\n<h4>Complete Analysis:</h4>\n<table>\n<tr><th>Variable</th><th>Storage</th><th>Rotation</th><th>Process Death</th><th>Why</th></tr>\n<tr><td><b>A</b> draftText</td><td>ViewModel field</td><td>\u2705 Survives</td><td>\u274c Lost</td><td>ViewModel outlives config changes but not process death</td></tr>\n<tr><td><b>B</b> notes</td><td>ViewModel StateFlow</td><td>\u2705 Survives</td><td>\u274c Lost</td><td>Same as A \u2014 ViewModel memory only</td></tr>\n<tr><td><b>C</b> savedId</td><td>SavedStateHandle</td><td>\u2705 Survives</td><td>\u2705 Survives</td><td>SavedStateHandle writes to Bundle, restored by framework</td></tr>\n<tr><td><b>D</b> localDraft</td><td>remember { }</td><td>\u274c <b>LOST</b></td><td>\u274c Lost</td><td>remember is Composition-scoped \u2014 destroyed on recomposition from scratch</td></tr>\n<tr><td><b>E</b> savedDraft</td><td>rememberSaveable { }</td><td>\u2705 Survives</td><td>\u2705 Survives</td><td>rememberSaveable uses the saved instance state Bundle</td></tr>\n<tr><td><b>F</b> notes (collected)</td><td>Backed by ViewModel StateFlow</td><td>\u2705 Survives</td><td>\u274c Lost</td><td>collectAsState resubscribes; StateFlow in ViewModel still has data</td></tr>\n</table>\n\n<div class=\"diagram\">Survival Hierarchy:\n\nremember { }           \u2192 Composition only (lost on rotation)\n   \u2502\nViewModel fields       \u2192 Survives rotation (lost on process death)\n   \u2502\nrememberSaveable { }   \u2192 Survives rotation + process death (Bundle, max ~512KB)\nSavedStateHandle       \u2192 Survives rotation + process death (Bundle, max ~512KB)\n   \u2502\nRoom / DataStore       \u2192 Survives everything (persistent storage)</div>\n\n<hr class=\"section-divider\">\n<h3>Problem 4: Design a Chunked File Download with Progress</h3>\n<p>The interviewer asks: <b>\"Design the coroutine architecture for: download a large file in chunks, process each chunk, show progress to the user, and allow cancellation at any point.\"</b></p>\n\n<h4>Architecture Solution:</h4>\n<div class=\"lesson-code\">class DownloadViewModel : ViewModel() {\n    sealed class DownloadState {\n        object Idle : DownloadState()\n        data class Downloading(val progress: Float) : DownloadState()\n        data class Processing(val progress: Float) : DownloadState()\n        object Complete : DownloadState()\n        data class Error(val message: String) : DownloadState()\n    }\n\n    private val _state = MutableStateFlow&lt;DownloadState&gt;(DownloadState.Idle)\n    val state: StateFlow&lt;DownloadState&gt; = _state.asStateFlow()\n\n    private var downloadJob: Job? = null\n\n    fun startDownload(url: String) {\n        downloadJob?.cancel() <span class=\"cmt\">// Cancel any existing download</span>\n        downloadJob = viewModelScope.launch { <span class=\"cmt\">// Lifecycle-bound</span>\n            try {\n                downloadAndProcess(url)\n                    .collect { state -> _state.value = state }\n            } catch (e: CancellationException) {\n                _state.value = DownloadState.Idle\n                throw e <span class=\"cmt\">// Re-throw to cooperate with structured concurrency</span>\n            } catch (e: Exception) {\n                _state.value = DownloadState.Error(e.message ?: \"Download failed\")\n            }\n        }\n    }\n\n    fun cancel() { downloadJob?.cancel() }\n\n    private fun downloadAndProcess(url: String): Flow&lt;DownloadState&gt; = flow {\n        <span class=\"cmt\">// Download phase — IO dispatcher for network</span>\n        val chunks = withContext(Dispatchers.IO) {\n            val connection = URL(url).openConnection()\n            val totalBytes = connection.contentLengthLong\n            val inputStream = connection.getInputStream()\n            val chunks = mutableListOf&lt;ByteArray&gt;()\n            val buffer = ByteArray(8192)\n            var bytesRead = 0L\n\n            while (true) {\n                ensureActive() <span class=\"cmt\">// Cooperative cancellation check</span>\n                val read = inputStream.read(buffer)\n                if (read == -1) break\n                chunks.add(buffer.copyOf(read))\n                bytesRead += read\n                <span class=\"cmt\">// Emit progress from IO context — Flow handles thread switching</span>\n            }\n            chunks\n        }\n\n        <span class=\"cmt\">// Emit download progress</span>\n        chunks.forEachIndexed { index, chunk ->\n            ensureActive() <span class=\"cmt\">// Check cancellation between chunks</span>\n            emit(DownloadState.Downloading(\n                (index + 1).toFloat() / chunks.size\n            ))\n        }\n\n        <span class=\"cmt\">// Process phase — Default dispatcher for CPU work</span>\n        withContext(Dispatchers.Default) {\n            chunks.forEachIndexed { index, chunk ->\n                ensureActive() <span class=\"cmt\">// Cancellation between processing</span>\n                processChunk(chunk)\n                <span class=\"cmt\">// Progress emitted after processing</span>\n            }\n        }\n\n        emit(DownloadState.Complete)\n    }\n}</div>\n\n<h4>Key Architecture Decisions:</h4>\n<div class=\"info-box\">\n<b>1. viewModelScope</b> \u2014 Automatic cancellation when ViewModel is cleared (user leaves screen).<br>\n<b>2. Flow for progress</b> \u2014 Cold stream that emits progress updates; collector controls the lifecycle.<br>\n<b>3. withContext(IO)</b> \u2014 Network I/O on the IO dispatcher (up to 64 threads).<br>\n<b>4. withContext(Default)</b> \u2014 CPU-intensive chunk processing on the Default dispatcher (= CPU cores).<br>\n<b>5. ensureActive()</b> \u2014 Cooperative cancellation check at each iteration. Without this, a tight loop won't respond to cancellation between suspension points.<br>\n<b>6. Separate Job tracking</b> \u2014 Allows explicit cancellation via cancel button.</div>\n\n<hr class=\"section-divider\">\n<h3>Coroutines vs Java Threads: Deep Comparison</h3>\n<p>An L6 candidate should understand <i>why</i> coroutines are lightweight, not just that they are.</p>\n\n<h4>Memory: ~1MB/thread vs ~few hundred bytes/coroutine</h4>\n<div class=\"diagram\">Java Thread (OS thread):\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502  Stack: ~512KB\u20131MB (OS-allocated)       \u2502\n\u2502  Kernel thread descriptor               \u2502\n\u2502  Register file (saved on context switch) \u2502\n\u2502  Signal mask, scheduling state           \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\nCost: ~1MB per thread. 1000 threads = ~1GB!\n\nKotlin Coroutine (user-space object):\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502  Continuation object: ~200\u2013400 bytes     \u2502\n\u2502  (state label + captured variables)      \u2502\n\u2502  No OS resources until it runs           \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\nCost: ~few hundred bytes. 100,000 coroutines = ~40MB.</div>\n\n<h4>Suspension vs Blocking</h4>\n<div class=\"diagram\">Thread.sleep(5000) \u2014 BLOCKING:\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502  Thread is HELD by the OS                \u2502\n\u2502  Stack stays in memory (1MB)             \u2502\n\u2502  CPU registers saved in kernel           \u2502\n\u2502  Thread can do NOTHING for 5 seconds     \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n\ndelay(5000) \u2014 SUSPENDING:\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502  State saved to HEAP (label + locals)     \u2502\n\u2502  Thread RELEASED to pool                 \u2502\n\u2502  Thread runs OTHER coroutines            \u2502\n\u2502  After 5s: scheduler resumes on any      \u2502\n\u2502  available thread from the pool          \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518</div>\n\n<h4>Context Switching: Kernel Mode (Heavy) vs Userspace Swap (Light)</h4>\n<table>\n<tr><th></th><th>Java Thread Switch</th><th>Coroutine \"Switch\"</th></tr>\n<tr><td><b>Mechanism</b></td><td>OS kernel scheduler</td><td>Userspace: save label + locals to heap object</td></tr>\n<tr><td><b>Cost</b></td><td>~1\u201310\u00b5s (kernel trap, TLB flush, cache invalidation)</td><td>~100ns (object field writes, function call)</td></tr>\n<tr><td><b>What's saved</b></td><td>All CPU registers, stack pointer, program counter, FPU state</td><td>Just the state label (Int) and captured local variables</td></tr>\n<tr><td><b>Preemptive?</b></td><td>Yes \u2014 OS can interrupt at any point</td><td>No \u2014 cooperative. Must hit a suspension point.</td></tr>\n</table>\n\n<h4>withContext: When Does an Actual Thread Switch Happen?</h4>\n<div class=\"info-box\"><code>withContext</code> only causes a <b>real thread switch</b> when you change dispatchers. If you're already on the right dispatcher, it's a no-op (no switch).</div>\n<div class=\"lesson-code\">viewModelScope.launch(Dispatchers.Main) {\n    <span class=\"cmt\">// Already on Main</span>\n    withContext(Dispatchers.Main) {\n        <span class=\"cmt\">// NO thread switch \u2014 same dispatcher, just runs inline</span>\n    }\n\n    withContext(Dispatchers.IO) {\n        <span class=\"cmt\">// REAL thread switch: Main \u2192 IO pool thread</span>\n        val data = api.fetch()\n    }\n    <span class=\"cmt\">// REAL thread switch back: IO \u2192 Main</span>\n\n    withContext(Dispatchers.Default) {\n        <span class=\"cmt\">// REAL switch: Main \u2192 Default pool thread</span>\n        parseJson(data)\n    }\n    <span class=\"cmt\">// REAL switch back: Default \u2192 Main</span>\n}</div>\n\n<h4>Mutex vs ReentrantLock</h4>\n<table>\n<tr><th></th><th>kotlinx.coroutines.sync.Mutex</th><th>java.util.concurrent.locks.ReentrantLock</th></tr>\n<tr><td><b>Waiting</b></td><td><b>Suspends</b> the coroutine (thread released)</td><td><b>Blocks</b> the thread (thread held)</td></tr>\n<tr><td><b>Reentrant?</b></td><td><b>NO</b> \u2014 same coroutine locking twice = deadlock</td><td>Yes \u2014 same thread can re-enter</td></tr>\n<tr><td><b>Use with</b></td><td>Coroutines only</td><td>Any Java/Kotlin threads</td></tr>\n<tr><td><b>Dispatcher-safe?</b></td><td>Yes \u2014 suspension allows other coroutines to run</td><td>Dangerous with limited dispatchers \u2014 can starve threads</td></tr>\n</table>\n<div class=\"warn-box\"><b>Mutex is NOT reentrant.</b> This is a common interview trap. If a coroutine already holds a Mutex and tries to lock it again (e.g., calling a function that also locks), it deadlocks. ReentrantLock allows this because it tracks the owning thread.</div>\n\n<h4>Thread Pinning: newSingleThreadContext</h4>\n<p>Some work requires <b>thread affinity</b> \u2014 always running on the same thread. Examples: audio processing, OpenGL rendering, or native libraries that use thread-local storage.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Dispatchers.Default can migrate coroutines between threads</span>\nwithContext(Dispatchers.Default) {\n    <span class=\"cmt\">// May run on thread-1, suspend, resume on thread-3!</span>\n    processAudio() <span class=\"cmt\">// BAD if audio lib uses thread-locals</span>\n}\n\n<span class=\"cmt\">// newSingleThreadContext pins to ONE dedicated thread</span>\nval audioDispatcher = newSingleThreadContext(\"AudioThread\")\nwithContext(audioDispatcher) {\n    <span class=\"cmt\">// ALWAYS runs on \"AudioThread\" \u2014 guaranteed affinity</span>\n    processAudio() <span class=\"cmt\">// Safe for thread-local storage</span>\n}\n<span class=\"cmt\">// Don't forget: audioDispatcher.close() when done (it owns a thread)</span></div>\n\n<h4>What the Compiler Generates: State Machine</h4>\n<p>The Kotlin compiler transforms every <code>suspend fun</code> into a <b>state machine</b>. Each suspension point becomes a label, and local variables are saved to fields on the Continuation object.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// What you write:</span>\nsuspend fun loadData(): String {\n    val user = fetchUser()       <span class=\"cmt\">// suspension point 1</span>\n    val posts = fetchPosts(user) <span class=\"cmt\">// suspension point 2</span>\n    return \"$user: $posts\"\n}\n\n<span class=\"cmt\">// What the compiler generates (simplified):</span>\nfun loadData(continuation: Continuation&lt;String&gt;): Any? {\n    <span class=\"cmt\">// The continuation IS the state machine</span>\n    val sm = continuation as? LoadDataContinuation\n        ?: LoadDataContinuation(continuation)\n\n    when (sm.label) {\n        0 -> {\n            sm.label = 1 <span class=\"cmt\">// Next state after resuming</span>\n            val result = fetchUser(sm) <span class=\"cmt\">// Pass self as callback</span>\n            if (result == COROUTINE_SUSPENDED) return COROUTINE_SUSPENDED\n            <span class=\"cmt\">// If fetchUser completed synchronously, fall through</span>\n        }\n        1 -> {\n            sm.user = sm.result as User <span class=\"cmt\">// Restore result from callback</span>\n            sm.label = 2\n            val result = fetchPosts(sm.user, sm)\n            if (result == COROUTINE_SUSPENDED) return COROUTINE_SUSPENDED\n        }\n        2 -> {\n            sm.posts = sm.result as List&lt;Post&gt;\n            return \"${sm.user}: ${sm.posts}\" <span class=\"cmt\">// Final result</span>\n        }\n    }\n}\n\n<span class=\"cmt\">// The Continuation class stores state between suspensions:</span>\nclass LoadDataContinuation(\n    val completion: Continuation&lt;String&gt;\n) : Continuation&lt;Any?&gt; {\n    var label = 0    <span class=\"cmt\">// Current state in the state machine</span>\n    var result: Any? = null\n    var user: User? = null    <span class=\"cmt\">// Local variables become fields</span>\n    var posts: List&lt;Post&gt;? = null\n\n    override val context: CoroutineContext = completion.context\n\n    override fun resumeWith(result: Result&lt;Any?&gt;) {\n        this.result = result.getOrThrow()\n        loadData(this) <span class=\"cmt\">// Re-enter the state machine</span>\n    }\n}</div>\n<div class=\"info-box\"><b>Key takeaway:</b> There's no magic. The compiler converts sequential-looking suspend code into a callback-based state machine. The <code>Continuation</code> interface is just a callback with context. Each <code>suspend</code> call passes the continuation as its last parameter (CPS \u2014 Continuation Passing Style). The \"lightweight\" nature comes from this: no OS thread needed during suspension, just a heap object holding a label and a few fields.</div>",
+  "questions": [
+    {
+      "id": "milc-1",
+      "type": "fix-bug",
+      "title": "Fix the Buggy Chat ViewModel",
+      "difficulty": "advanced",
+      "description": "This ViewModel and Fragment code for a chat streaming feature has <b>5 bugs</b>. Find and fix ALL of them.",
+      "starterCode": "class ChatViewModel : ViewModel() {\n    private val _messages = MutableLiveData<List<Message>>()\n    val messages: LiveData<List<Message>> = _messages\n\n    fun streamResponse(prompt: String) {\n        GlobalScope.launch {\n            val response = api.streamChat(prompt)\n            response.collect { chunk ->\n                val current = _messages.value ?: emptyList()\n                _messages.value = current + Message(chunk.text)\n            }\n        }\n    }\n}\n\n// In Fragment:\noverride fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n    lifecycleScope.launch {\n        viewModel.messages.asFlow().collect { messages ->\n            adapter.submitList(messages)\n        }\n    }\n    viewModel.streamResponse(args.prompt)\n}",
+      "checks": [
+        {
+          "pattern": "viewModelScope",
+          "message": "Replace GlobalScope with viewModelScope for lifecycle-bound coroutines",
+          "required": true
+        },
+        {
+          "pattern": "postValue|StateFlow|MutableStateFlow|withContext.*Main",
+          "message": "Fix the threading issue — LiveData.value must be set on Main thread, or use StateFlow/postValue",
+          "required": true
+        },
+        {
+          "pattern": "cancel|flatMapLatest|Job",
+          "message": "Handle cancellation of previous stream when a new one starts",
+          "required": true
+        },
+        {
+          "pattern": "repeatOnLifecycle|flowWithLifecycle",
+          "message": "Collection should be lifecycle-aware using repeatOnLifecycle",
+          "required": true
+        },
+        {
+          "pattern": "savedInstanceState|init \\{|hasLoaded|_isLoaded",
+          "message": "Guard against re-triggering the API call on configuration change",
+          "required": true
+        }
+      ],
+      "solution": "class ChatViewModel : ViewModel() {\n    private val _messages = MutableStateFlow<List<Message>>(emptyList())\n    val messages: StateFlow<List<Message>> = _messages.asStateFlow()\n\n    private var streamJob: Job? = null\n\n    fun streamResponse(prompt: String) {\n        streamJob?.cancel()\n        streamJob = viewModelScope.launch {\n            val response = api.streamChat(prompt)\n            response.collect { chunk ->\n                _messages.update { current ->\n                    current + Message(chunk.text)\n                }\n            }\n        }\n    }\n}\n\n// In Fragment:\noverride fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n    viewLifecycleOwner.lifecycleScope.launch {\n        viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {\n            viewModel.messages.collect { messages ->\n                adapter.submitList(messages)\n            }\n        }\n    }\n    if (savedInstanceState == null) {\n        viewModel.streamResponse(args.prompt)\n    }\n}",
+      "explanation": "Five bugs fixed: (1) GlobalScope replaced with viewModelScope — prevents coroutine leaks. (2) LiveData.value from background thread replaced with StateFlow.update (thread-safe). (3) Previous Job cancelled before starting new stream. (4) Collection wrapped in repeatOnLifecycle to stop collecting when UI not visible. (5) savedInstanceState null check prevents re-triggering on rotation.",
+      "hints": [
+        "Look at the scope — what happens when ViewModel is cleared?",
+        "LiveData.value has a threading requirement",
+        "What if the user calls streamResponse twice quickly?",
+        "lifecycleScope.launch collects even when the app is in background",
+        "onViewCreated is called again on rotation — is the API call idempotent?"
+      ]
+    },
+    {
+      "id": "milc-2",
+      "type": "write-code",
+      "title": "Implement Retry with Exponential Backoff",
+      "difficulty": "advanced",
+      "description": "Implement a <code>retryWithBackoff</code> suspend function that retries up to N times with exponential delay (1s, 2s, 4s...), reports attempt progress via a callback, and <b>properly handles CancellationException</b> (never catches it). <code>delay()</code> should be the suspension point that makes cancellation work.",
+      "starterCode": "suspend fun <T> retryWithBackoff(\n    maxRetries: Int = 3,\n    initialDelayMs: Long = 1000,\n    onAttempt: (attempt: Int, maxAttempts: Int) -> Unit = { _, _ -> },\n    block: suspend () -> T\n): T {\n    // TODO: Implement\n    // - Retry up to maxRetries times\n    // - Exponential delay: initialDelayMs, *2, *4...\n    // - Call onAttempt before each attempt\n    // - NEVER catch CancellationException\n    // - Let final attempt throw on failure\n}",
+      "checks": [
+        {
+          "pattern": "repeat|for|while",
+          "message": "Use a loop for retry attempts",
+          "required": true
+        },
+        {
+          "pattern": "delay",
+          "message": "Use delay() for cancellation-aware waiting between retries",
+          "required": true
+        },
+        {
+          "pattern": "CancellationException",
+          "message": "Explicitly handle CancellationException by re-throwing it",
+          "required": true
+        },
+        {
+          "pattern": "\\*=\\s*2|\\*\\s*2|shl",
+          "message": "Implement exponential backoff by doubling the delay",
+          "required": true
+        }
+      ],
+      "solution": "suspend fun <T> retryWithBackoff(\n    maxRetries: Int = 3,\n    initialDelayMs: Long = 1000,\n    onAttempt: (attempt: Int, maxAttempts: Int) -> Unit = { _, _ -> },\n    block: suspend () -> T\n): T {\n    var currentDelay = initialDelayMs\n    repeat(maxRetries - 1) { attempt ->\n        onAttempt(attempt + 1, maxRetries)\n        try {\n            return block()\n        } catch (e: CancellationException) {\n            throw e // NEVER swallow cancellation\n        } catch (e: Exception) {\n            delay(currentDelay) // Cancellation-aware wait\n            currentDelay *= 2\n        }\n    }\n    onAttempt(maxRetries, maxRetries)\n    return block() // Final attempt — let it throw\n}",
+      "explanation": "The key insight is CancellationException handling. Coroutine cancellation works by throwing CancellationException at suspension points (like delay()). If you catch Exception broadly, you'll accidentally catch CancellationException (it extends Exception in Kotlin), turning your coroutine into an unkillable zombie. Always re-throw it. The final block() call runs without try/catch so the caller sees the real error.",
+      "hints": [
+        "CancellationException extends Exception in Kotlin — a broad catch will swallow it",
+        "The last attempt should NOT be wrapped in try/catch",
+        "delay() is the cancellation checkpoint — the coroutine can be cancelled during the delay"
+      ]
+    },
+    {
+      "id": "milc-3",
+      "type": "what-does-this-do",
+      "title": "Configuration Change Survival",
+      "difficulty": "advanced",
+      "description": "Analyze each variable. What survives a <b>configuration change</b> (rotation)? What survives <b>process death</b>? What is <b>lost</b>?",
+      "code": "class NoteViewModel(\n    private val savedStateHandle: SavedStateHandle\n) : ViewModel() {\n    var draftText = \"\"                                  // A\n    val notes = MutableStateFlow(emptyList<Note>())      // B\n    val savedId: String? = savedStateHandle[\"noteId\"]    // C\n}\n\n@Composable\nfun NoteScreen(vm: NoteViewModel) {\n    var localDraft by remember { mutableStateOf(\"\") }            // D\n    var savedDraft by rememberSaveable { mutableStateOf(\"\") }   // E\n    val notes by vm.notes.collectAsState()                       // F\n}",
+      "options": [
+        "All survive rotation. Only C and E survive process death.",
+        "A, B, C, F survive rotation. D is LOST. C and E survive process death.",
+        "A and B survive rotation. Everything else is lost.",
+        "Everything survives both rotation and process death."
+      ],
+      "correctIndex": 1,
+      "explanation": "<b>A (draftText)</b>: ViewModel field — survives rotation, lost on process death.<br><b>B (notes)</b>: ViewModel StateFlow — survives rotation, lost on process death.<br><b>C (savedId)</b>: SavedStateHandle — survives BOTH rotation and process death (backed by Bundle).<br><b>D (localDraft)</b>: remember {} — LOST on rotation (Composition destroyed and recreated).<br><b>E (savedDraft)</b>: rememberSaveable {} — survives BOTH rotation and process death (backed by Bundle).<br><b>F (notes via collectAsState)</b>: Backed by ViewModel StateFlow — survives rotation (resubscribes to same StateFlow), lost on process death.",
+      "hints": [
+        "remember {} vs rememberSaveable {} — one uses the saved instance state Bundle, one does not",
+        "ViewModel survives configuration changes but NOT process death",
+        "SavedStateHandle is backed by the same Bundle mechanism as onSaveInstanceState"
+      ]
+    },
+    {
+      "id": "milc-4",
+      "type": "write-code",
+      "title": "Chunked File Download with Progress",
+      "difficulty": "advanced",
+      "description": "Design the coroutine architecture for a chunked file download: download a large file, process in chunks, show progress via StateFlow, and allow cancellation. Use <code>withContext(IO)</code> for download, <code>Flow</code> for progress, <code>ensureActive()</code> for cooperative cancellation, and <code>viewModelScope</code> for lifecycle.",
+      "starterCode": "class DownloadViewModel : ViewModel() {\n    sealed class DownloadState {\n        object Idle : DownloadState()\n        data class Downloading(val progress: Float) : DownloadState()\n        object Complete : DownloadState()\n        data class Error(val message: String) : DownloadState()\n    }\n\n    private val _state = MutableStateFlow<DownloadState>(DownloadState.Idle)\n    val state: StateFlow<DownloadState> = _state.asStateFlow()\n\n    fun startDownload(url: String) {\n        // TODO: Implement download with:\n        // - viewModelScope for lifecycle\n        // - withContext(Dispatchers.IO) for network\n        // - ensureActive() for cooperative cancellation\n        // - Progress updates via _state\n        // - Cancel previous download if active\n    }\n\n    fun cancel() {\n        // TODO: Cancel the active download\n    }\n}",
+      "checks": [
+        {
+          "pattern": "viewModelScope",
+          "message": "Use viewModelScope for lifecycle-bound coroutine",
+          "required": true
+        },
+        {
+          "pattern": "withContext.*Dispatchers\\.IO|Dispatchers\\.IO",
+          "message": "Use Dispatchers.IO for network I/O",
+          "required": true
+        },
+        {
+          "pattern": "ensureActive|isActive",
+          "message": "Use ensureActive() or isActive for cooperative cancellation checks",
+          "required": true
+        },
+        {
+          "pattern": "cancel",
+          "message": "Support cancellation of the download job",
+          "required": true
+        }
+      ],
+      "solution": "class DownloadViewModel : ViewModel() {\n    sealed class DownloadState {\n        object Idle : DownloadState()\n        data class Downloading(val progress: Float) : DownloadState()\n        object Complete : DownloadState()\n        data class Error(val message: String) : DownloadState()\n    }\n\n    private val _state = MutableStateFlow<DownloadState>(DownloadState.Idle)\n    val state: StateFlow<DownloadState> = _state.asStateFlow()\n    private var downloadJob: Job? = null\n\n    fun startDownload(url: String) {\n        downloadJob?.cancel()\n        downloadJob = viewModelScope.launch {\n            try {\n                _state.value = DownloadState.Downloading(0f)\n                withContext(Dispatchers.IO) {\n                    val connection = URL(url).openConnection()\n                    val totalBytes = connection.contentLengthLong\n                    val input = connection.getInputStream()\n                    val buffer = ByteArray(8192)\n                    var bytesRead = 0L\n                    while (true) {\n                        ensureActive()\n                        val read = input.read(buffer)\n                        if (read == -1) break\n                        bytesRead += read\n                        _state.value = DownloadState.Downloading(\n                            bytesRead.toFloat() / totalBytes\n                        )\n                    }\n                }\n                _state.value = DownloadState.Complete\n            } catch (e: CancellationException) {\n                _state.value = DownloadState.Idle\n                throw e\n            } catch (e: Exception) {\n                _state.value = DownloadState.Error(e.message ?: \"Failed\")\n            }\n        }\n    }\n\n    fun cancel() { downloadJob?.cancel() }\n}",
+      "explanation": "Key architecture: viewModelScope ties the download to the ViewModel lifecycle. withContext(IO) moves the blocking network read to the IO thread pool. ensureActive() checks for cancellation between chunk reads — without it, a tight read loop won't respond to cancel(). The downloadJob reference allows explicit cancellation. StateFlow provides thread-safe progress updates to the UI.",
+      "hints": [
+        "Track the Job so you can cancel it explicitly",
+        "ensureActive() throws CancellationException if the coroutine was cancelled",
+        "MutableStateFlow.value is thread-safe — can be set from any dispatcher",
+        "Re-throw CancellationException after cleanup"
+      ]
+    },
+    {
+      "id": "milc-5",
+      "type": "multiple-choice",
+      "title": "Coroutine Memory vs Thread Memory",
+      "difficulty": "intermediate",
+      "description": "You need 10,000 concurrent tasks that each wait for a network response. What's the approximate memory difference between using Java threads vs Kotlin coroutines?",
+      "options": [
+        "Threads: ~10GB, Coroutines: ~4MB — coroutines save state to heap instead of allocating OS stacks",
+        "About the same — coroutines still use threads underneath",
+        "Threads: ~100MB, Coroutines: ~100MB — the network buffer dominates",
+        "Threads: ~10MB, Coroutines: ~1MB — minor difference"
+      ],
+      "correctIndex": 0,
+      "explanation": "Each Java thread allocates a ~1MB OS stack, so 10,000 threads = ~10GB of stack memory alone (plus kernel thread descriptors). Each coroutine is a heap object of ~200-400 bytes (the Continuation holding a state label and captured locals), so 10,000 coroutines = ~4MB. The coroutines share a small pool of actual threads (e.g., 64 for Dispatchers.IO). When a coroutine suspends, its state is saved to the heap object and the thread is released to run other coroutines.",
+      "hints": [
+        "Each OS thread needs its own stack — typically 512KB to 1MB",
+        "A suspended coroutine is just a small heap object — no thread held"
+      ]
+    },
+    {
+      "id": "milc-6",
+      "type": "multiple-choice",
+      "title": "Mutex vs ReentrantLock",
+      "difficulty": "advanced",
+      "description": "What happens in this code?",
+      "code": "val mutex = Mutex()\n\nsuspend fun outerOperation() {\n    mutex.withLock {\n        // ... do work ...\n        innerOperation() // Calls another function that also locks\n    }\n}\n\nsuspend fun innerOperation() {\n    mutex.withLock {\n        // ... do more work ...\n    }\n}",
+      "options": [
+        "Works fine — Mutex is reentrant like ReentrantLock",
+        "DEADLOCK — Mutex is NOT reentrant; the same coroutine trying to lock twice will block forever",
+        "Throws IllegalStateException immediately",
+        "The inner lock is skipped silently"
+      ],
+      "correctIndex": 1,
+      "explanation": "Kotlin's <code>Mutex</code> is <b>NOT reentrant</b>. When <code>outerOperation</code> holds the lock and calls <code>innerOperation</code>, the inner <code>mutex.withLock</code> tries to acquire the same Mutex. Since it's already locked, the coroutine suspends waiting for it — but it's the same coroutine that holds the lock, creating a deadlock. Java's <code>ReentrantLock</code> tracks the owning thread and allows re-entry. This is a common interview gotcha.",
+      "hints": [
+        "Mutex suspends the coroutine when it can't acquire the lock",
+        "Think about what 'reentrant' means — can the same owner enter twice?"
+      ]
+    },
+    {
+      "id": "milc-7",
+      "type": "what-does-this-do",
+      "title": "The Compiled State Machine",
+      "difficulty": "advanced",
+      "description": "The Kotlin compiler transforms this suspend function into a state machine. What does the generated code look like conceptually?",
+      "code": "suspend fun loadProfile(id: String): Profile {\n    val user = fetchUser(id)        // suspension point 1\n    val avatar = fetchAvatar(user)  // suspension point 2\n    return Profile(user, avatar)\n}",
+      "options": [
+        "It creates a new thread for each suspension point and joins them at the end",
+        "It generates a when(label) state machine: label 0 calls fetchUser and saves state, label 1 resumes with the result and calls fetchAvatar, label 2 resumes and returns the Profile. The Continuation object stores the label and local variables between suspensions.",
+        "It wraps each call in a CompletableFuture and chains them with thenApply",
+        "It inlines the suspend calls and runs them synchronously on the calling thread"
+      ],
+      "correctIndex": 1,
+      "explanation": "The compiler transforms the function into a state machine with a <code>when(label)</code> switch. Each suspension point becomes a label (0, 1, 2). The function receives a <code>Continuation</code> parameter (the callback). On first call (label=0), it calls fetchUser passing itself as the continuation. When fetchUser completes, it calls <code>continuation.resumeWith(result)</code>, which re-enters the function at label=1 with the user result. Local variables (user, avatar) are saved as fields on the Continuation object between suspensions. This is CPS (Continuation Passing Style) — no threads, just callbacks disguised as sequential code.",
+      "hints": [
+        "Each suspension point needs a 'save point' to resume from later",
+        "The Continuation interface has resumeWith(result) — it's literally a callback",
+        "Local variables can't live on the stack between suspensions — where do they go?"
+      ]
+    },
+    {
+      "id": "milc-8",
+      "type": "trivia",
+      "title": "withContext Thread Switching",
+      "difficulty": "intermediate",
+      "description": "Explain when <code>withContext</code> actually causes a real thread switch vs when it's essentially a no-op. Why does this matter for performance?",
+      "keywords": [
+        "dispatcher",
+        "same",
+        "no-op",
+        "switch",
+        "thread",
+        "context",
+        "Main",
+        "IO",
+        "Default",
+        "overhead",
+        "unnecessary"
+      ],
+      "answer": "withContext only causes a real thread switch when the target dispatcher is different from the current one. If you're already on Dispatchers.Main and call withContext(Dispatchers.Main), no thread switch happens — the block runs inline. A real switch happens when changing dispatchers (e.g., Main to IO). This matters for performance because unnecessary withContext calls with the same dispatcher add overhead from context checking without any benefit. Also, Dispatchers.IO and Dispatchers.Default share threads — switching between them may not always involve a real thread switch either, just a dispatcher context change.",
+      "explanation": "Understanding this prevents unnecessary withContext wrapping. A common mistake is wrapping every suspend call in withContext(IO) \"just to be safe\" — if the suspend function already handles its own dispatching (as most Retrofit/Room calls do), the extra withContext is wasted overhead. Conversely, if you're calling a blocking Java API from Main, you MUST use withContext(IO) because the API doesn't suspend — it blocks.",
+      "hints": [
+        "What happens if you call withContext with the same dispatcher you're already on?",
+        "Do Dispatchers.IO and Dispatchers.Default share any threads?"
+      ]
+    },
+    {
+      "id": "milc-9",
+      "type": "multiple-choice",
+      "title": "Thread Pinning for Audio Processing",
+      "difficulty": "advanced",
+      "description": "You're processing audio buffers that use thread-local storage for state. Which dispatcher should you use?",
+      "code": "// Audio processing that uses thread-local state\nval audioProcessor = ThreadLocal<AudioState>()\n\nsuspend fun processAudioBuffer(buffer: ByteArray) {\n    withContext(/* which dispatcher? */) {\n        val state = audioProcessor.get() ?: AudioState().also { audioProcessor.set(it) }\n        state.process(buffer)\n    }\n}",
+      "options": [
+        "Dispatchers.Default — it's CPU-bound work",
+        "Dispatchers.IO — it's I/O-like processing",
+        "Dispatchers.Main — to avoid threading issues",
+        "newSingleThreadContext(\"AudioThread\") — guarantees thread affinity for thread-local storage"
+      ],
+      "correctIndex": 3,
+      "explanation": "<code>Dispatchers.Default</code> and <code>Dispatchers.IO</code> can migrate coroutines between threads. After a suspension point, the coroutine may resume on a different thread, which means <code>ThreadLocal</code> state would be lost or wrong. <code>newSingleThreadContext(\"AudioThread\")</code> creates a dedicated single thread — the coroutine ALWAYS runs on that specific thread, preserving thread-local storage. This is essential for native libraries, audio processing, or OpenGL contexts that have thread affinity requirements. Remember to call <code>.close()</code> on the dispatcher when done, as it owns the thread.",
+      "hints": [
+        "ThreadLocal storage is per-thread — what happens if the coroutine migrates?",
+        "Default and IO dispatchers use thread pools — no guarantee of same thread"
+      ]
+    },
+    {
+      "id": "milc-10",
+      "type": "fix-bug",
+      "title": "Lifecycle-Aware Flow Collection",
+      "difficulty": "intermediate",
+      "description": "This Compose screen collects a Flow but wastes resources when the app is in the background. The Flow is a location stream that fires every second. Fix it to only collect when the lifecycle is at least STARTED.",
+      "starterCode": "@Composable\nfun LocationScreen(viewModel: LocationViewModel) {\n    val location by viewModel.locationFlow.collectAsState(\n        initial = Location.Unknown\n    )\n\n    Text(\"Lat: ${location.lat}, Lng: ${location.lng}\")\n}",
+      "checks": [
+        {
+          "pattern": "collectAsStateWithLifecycle",
+          "message": "Use collectAsStateWithLifecycle() which is lifecycle-aware (stops collecting in background)",
+          "required": true
+        }
+      ],
+      "solution": "@Composable\nfun LocationScreen(viewModel: LocationViewModel) {\n    val location by viewModel.locationFlow.collectAsStateWithLifecycle(\n        initialValue = Location.Unknown\n    )\n\n    Text(\"Lat: ${location.lat}, Lng: ${location.lng}\")\n}",
+      "explanation": "<code>collectAsState()</code> collects the Flow regardless of lifecycle state — even when the app is in the background. For a location stream firing every second, this wastes battery and CPU. <code>collectAsStateWithLifecycle()</code> (from <code>androidx.lifecycle:lifecycle-runtime-compose</code>) automatically stops collection when the lifecycle falls below STARTED (app goes to background) and restarts when it comes back. It's the Compose equivalent of <code>repeatOnLifecycle(Lifecycle.State.STARTED)</code>.",
+      "hints": [
+        "collectAsState() doesn't know about the Android lifecycle",
+        "There's a lifecycle-aware variant designed specifically for this"
+      ]
+    }
+  ]
+}

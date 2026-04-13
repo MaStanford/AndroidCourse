@@ -320,6 +320,14 @@
     "category": "Interview Prep"
   },
   {
+    "id": "mock-interview-lifecycle-coroutines",
+    "title": "Mock Interview: Lifecycle & Coroutines",
+    "icon": "\ud83c\udfaf",
+    "description": "Simulated L6 Android interview covering lifecycle awareness, coroutine mastery, and architecture design",
+    "file": "mock-interview-lifecycle-coroutines.json",
+    "category": "Interview Prep"
+  },
+  {
     "id": "gemini-app",
     "title": "Build a Gemini App",
     "icon": "\u2728",
