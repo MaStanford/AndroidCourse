@@ -1,0 +1,244 @@
+{
+  "id": "graphics-pipeline",
+  "title": "Graphics Pipeline: Surface to Display",
+  "icon": "🖥️",
+  "category": "Android Internals",
+  "description": "The complete graphics pipeline from app drawing to pixels on screen: Canvas, RenderThread, Surface, BufferQueue, SurfaceFlinger, HWC, and NDK rendering",
+  "references": [
+    {
+      "title": "Android Graphics Architecture",
+      "url": "https://source.android.com/docs/core/graphics",
+      "type": "docs"
+    },
+    {
+      "title": "SurfaceFlinger and Hardware Composer",
+      "url": "https://source.android.com/docs/core/graphics/surfaceflinger-windowmanager",
+      "type": "docs"
+    },
+    {
+      "title": "BufferQueue and gralloc",
+      "url": "https://source.android.com/docs/core/graphics/arch-bq-gralloc",
+      "type": "docs"
+    },
+    {
+      "title": "Hardware Acceleration",
+      "url": "https://developer.android.com/topic/performance/hardware-accel",
+      "type": "docs"
+    },
+    {
+      "title": "ANativeWindow NDK Reference",
+      "url": "https://developer.android.com/ndk/reference/group/a-native-window",
+      "type": "docs"
+    }
+  ],
+  "lesson": "<h3>Section 1: The Big Picture — From Canvas to Photons</h3>\n<p>Every pixel you see on an Android screen travels through a multi-stage pipeline. Understanding this pipeline is essential for diagnosing jank, choosing between SurfaceView and TextureView, and knowing why Compose and Views both end up at the same place.</p>\n<div class=\"diagram\">The Complete Android Graphics Pipeline\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n  App Process                          System Process                  Hardware\n┌─────────────────────┐          ┌──────────────────────┐        ┌──────────────┐\n│  View.onDraw(Canvas)│          │                      │        │              │\n│  or Compose draw()  │          │   SurfaceFlinger      │        │   Display    │\n│         │           │          │         │             │        │   Controller │\n│         ▼           │          │         ▼             │        │      │       │\n│  DisplayList /      │          │   Acquire buffers     │        │      ▼       │\n│  RenderNode         │          │   from all apps       │        │  ┌────────┐  │\n│         │           │          │         │             │        │  │ Panel  │  │\n│         ▼           │   Buff   │         ▼             │        │  │ (LCD/  │  │\n│  RenderThread       │   Queue  │   HWC: can you handle │        │  │ OLED)  │  │\n│  (OpenGL/Vulkan)    │ ───────► │   these N layers?     │        │  └────────┘  │\n│         │           │          │     ╱         ╲       │        │              │\n│         ▼           │          │   YES          NO     │        │              │\n│  Surface (producer) │          │   (overlay)   (GPU    │        │              │\n│         │           │          │    planes)    compose) │        │              │\n│  dequeueBuffer()    │          │         ╲      ╱      │        │              │\n│  draw pixels        │          │          ▼    ▼       │        │              │\n│  queueBuffer()      │          │   Final framebuffer ──────────►│   VSYNC      │\n└─────────────────────┘          └──────────────────────┘        └──────────────┘</div>\n<p>Each stage exists for a reason:</p>\n<ul>\n<li><b>Canvas/RenderNode</b>: High-level drawing API so apps don't write raw GPU commands</li>\n<li><b>RenderThread</b>: Offloads GPU work from the main thread so UI stays responsive</li>\n<li><b>Surface + BufferQueue</b>: Decouples the app's drawing rate from the display's refresh rate</li>\n<li><b>SurfaceFlinger</b>: Composites all visible windows into one final image</li>\n<li><b>HWC</b>: Delegates composition to display hardware when possible (saves power)</li>\n</ul>\n\n<h4>Double and Triple Buffering</h4>\n<div class=\"diagram\">Double Buffering (2 buffers):\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nBuffer A: App draws frame N     ──►  Display shows frame N\nBuffer B: Display shows frame N-1    App draws frame N+1\n\nProblem: if app is slow, display has nothing new → stutter\n\nTriple Buffering (3 buffers):\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nBuffer A: Display shows frame N-1\nBuffer B: SurfaceFlinger composites frame N\nBuffer C: App draws frame N+1        ← app never waits!\n\nResult: app can always be drawing the NEXT frame,\neven while SurfaceFlinger and the display are busy</div>\n<div class=\"info-box\"><b>Why triple buffering?</b> With only 2 buffers, if the app misses a VSYNC deadline, it must wait an entire frame period (16.7ms at 60Hz) before it can start drawing again. Triple buffering adds one frame of latency but eliminates these stalls — the app always has a buffer to draw into.</div>\n\n<hr class=\"section-divider\">\n<h3>Section 2: View.draw() and the Canvas</h3>\n<p>When a View needs to render, the framework calls <code>onDraw(Canvas)</code>. The Canvas is the drawing API — it provides methods to draw shapes, text, bitmaps, and paths.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Custom View drawing</span>\nclass CustomChartView(context: Context, attrs: AttributeSet?) : View(context, attrs) {\n\n    private val paint = Paint().apply {\n        color = Color.BLUE\n        style = Paint.Style.FILL\n        strokeWidth = 4f\n        isAntiAlias = true            <span class=\"cmt\">// smooth edges</span>\n        shader = LinearGradient(...)  <span class=\"cmt\">// gradient fill</span>\n    }\n\n    override fun onDraw(canvas: Canvas) {\n        super.onDraw(canvas)\n        canvas.drawRect(10f, 10f, 200f, 100f, paint)   <span class=\"cmt\">// rectangle</span>\n        canvas.drawCircle(150f, 150f, 50f, paint)       <span class=\"cmt\">// circle</span>\n        canvas.drawPath(myPath, paint)                  <span class=\"cmt\">// arbitrary path</span>\n        canvas.drawText(\"Hello\", 50f, 250f, paint)      <span class=\"cmt\">// text</span>\n        canvas.drawBitmap(bitmap, 0f, 300f, paint)      <span class=\"cmt\">// bitmap</span>\n    }\n}</div>\n<p>The <code>Paint</code> object controls HOW things are drawn: color, fill vs stroke, line width, shader (gradients, bitmap tiling), PathEffect (dashed lines), color filters, blend modes, and anti-aliasing.</p>\n\n<h4>Hardware vs Software Rendering</h4>\n<div class=\"diagram\">Software Rendering (pre-API 14, or fallback):\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCanvas.drawRect()  →  writes pixels into a Bitmap (CPU)\n                       │\n                       ▼\n                   Bitmap copied to Surface\n                   (entirely CPU-based, slow)\n\nHardware Accelerated Rendering (API 14+, default):\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCanvas.drawRect()  →  records a \"DrawRect\" op into a DisplayList\n                       │\n                       ▼\n                   DisplayList stored in RenderNode\n                       │\n                       ▼\n                   RenderThread replays as OpenGL/Vulkan GPU commands\n                   (GPU-accelerated, fast)</div>\n<p>Since API 14 (and enabled by default since API 14+), Canvas operations are <b>not executed immediately</b>. Instead, they are <b>recorded</b> into a DisplayList — a list of drawing commands stored in a <code>RenderNode</code>. The actual GPU execution happens later on the RenderThread.</p>\n<div class=\"warn-box\"><b>Software fallback:</b> Certain Canvas operations are not hardware-accelerated and force a software rendering path. These include <code>drawBitmapMesh()</code>, some <code>PathEffect</code> types (like CornerPathEffect on complex paths), <code>drawPicture()</code>, and custom <code>Xfermode</code> subclasses. When these are used, the affected View is rendered to a Bitmap on the CPU first, then uploaded as a texture. Check <code>Canvas.isHardwareAccelerated()</code> to verify.</div>\n\n<h4>invalidate() vs postInvalidate()</h4>\n<p><code>invalidate()</code> marks the View's RenderNode as <b>dirty</b>, which tells the framework to re-record the DisplayList by calling <code>onDraw()</code> again. It must be called from the UI thread. <code>postInvalidate()</code> does the same thing but is safe to call from any thread — it posts the invalidation to the UI thread's message queue.</p>\n<div class=\"info-box\"><b>invalidate() vs requestLayout():</b><br>\n<code>invalidate()</code> → re-records the draw commands (calls onDraw). Use when appearance changes (color, content) but size stays the same.<br>\n<code>requestLayout()</code> → triggers measure → layout → draw. Use when size or position changes. Much more expensive because it can affect the entire View tree.</div>\n\n<hr class=\"section-divider\">\n<h3>Section 3: RenderThread — The GPU Worker</h3>\n<p>Introduced in Android 5.0 (Lollipop), the <b>RenderThread</b> is a dedicated thread that executes GPU commands. Before RenderThread, the main thread did everything — record AND execute. Now the work is split:</p>\n<div class=\"diagram\">Main Thread                              RenderThread\n───────────                              ────────────\nmeasure() ──► layout() ──► draw()        GPU command execution\n                              │\n                              ▼\n                         Record drawing\n                         commands into\n                         DisplayList / RenderNode\n                              │\n                              │  (hand off)\n                              └──────────────────► Replay DisplayList\n                                                   as OpenGL ES / Vulkan\n                                                   GPU commands\n                                                        │\n                                                        ▼\n                                                   Swap buffer to\n                                                   SurfaceFlinger</div>\n<p>This separation is why certain animations can run smoothly even when the main thread is busy:</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// These RenderNode properties can be animated by RenderThread directly,</span>\n<span class=\"cmt\">// WITHOUT involving the main thread at all:</span>\nview.alpha = 0.5f          <span class=\"cmt\">// RenderNode property: opacity</span>\nview.translationX = 100f   <span class=\"cmt\">// RenderNode property: horizontal offset</span>\nview.translationY = 50f    <span class=\"cmt\">// RenderNode property: vertical offset</span>\nview.rotation = 45f        <span class=\"cmt\">// RenderNode property: rotation</span>\nview.scaleX = 1.5f         <span class=\"cmt\">// RenderNode property: horizontal scale</span>\nview.scaleY = 1.5f         <span class=\"cmt\">// RenderNode property: vertical scale</span>\n\n<span class=\"cmt\">// ObjectAnimator on these properties → RenderThread handles it</span>\nObjectAnimator.ofFloat(view, \"translationX\", 0f, 300f).apply {\n    duration = 300\n    start()  <span class=\"cmt\">// Runs on RenderThread — smooth even if main thread is doing work</span>\n}</div>\n<div class=\"info-box\"><b>Why setTranslationX() is smooth under jank:</b> When you animate a RenderNode property (alpha, translationX, translationY, rotation, scaleX, scaleY), the RenderThread modifies the property directly on the RenderNode and re-renders the frame WITHOUT calling back to the main thread. The DisplayList doesn't need to be re-recorded — only the transform matrix changes. This is why these animations stay at 60fps even during heavy main-thread work like JSON parsing or database queries.</div>\n\n<hr class=\"section-divider\">\n<h3>Section 4: Surface and SurfaceControl</h3>\n<p>A <b>Surface</b> is the producer-side handle to a BufferQueue. Think of it as a \"window\" that the app draws into. Each Window (Activity, Dialog, Toast) gets exactly one Surface.</p>\n<div class=\"diagram\">ViewRootImpl.setView() is called when Activity becomes visible:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nWindowManager                 SurfaceFlinger\n    │                              │\n    │  addWindow()                 │\n    │─────────────────────────────►│\n    │                              │\n    │  Surface + SurfaceControl    │\n    │◄─────────────────────────────│\n    │                              │\n    ▼                              │\nViewRootImpl                       │\n    │                              │\n    ├── Surface: producer handle   │\n    │   (app draws into this)      │\n    │                              │\n    └── SurfaceControl: config     │\n        (position, z-order, size,  │\n         transform, crop)          │\n        Applied via Transaction    │\n        ─────────────────────────► applied atomically</div>\n\n<h4>SurfaceView vs TextureView</h4>\n<p>Both provide a separate rendering surface, but they work very differently:</p>\n<table>\n<tr><th></th><th>SurfaceView</th><th>TextureView</th></tr>\n<tr><td><b>Surface</b></td><td>Has its OWN Surface, separate from the Window</td><td>Renders into the Window's Surface (via SurfaceTexture)</td></tr>\n<tr><td><b>Composition</b></td><td>SurfaceFlinger composites it as a separate layer</td><td>Composited by the app's own RenderThread into the Window surface</td></tr>\n<tr><td><b>Z-ordering</b></td><td>Behind or in front of the Window surface (punch-through hole)</td><td>Part of the View tree — respects View transforms, alpha, clipping</td></tr>\n<tr><td><b>Performance</b></td><td>Better — dedicated layer, lower latency</td><td>Worse — extra GPU copy into Window surface</td></tr>\n<tr><td><b>Flexibility</b></td><td>Limited — no transforms, no alpha, no View animations</td><td>Full View integration — animate, rotate, alpha, clip</td></tr>\n<tr><td><b>Use cases</b></td><td>Video playback, camera preview, games, maps</td><td>Video with rounded corners, animated transitions, PiP</td></tr>\n</table>\n<div class=\"warn-box\"><b>SurfaceView creates a \"hole\" in the Window surface.</b> SurfaceFlinger places the SurfaceView's layer behind (or in front of) the Window layer. The Window surface is transparent in the SurfaceView's region, allowing the separate layer to show through. This is why SurfaceView content doesn't respect View alpha or transforms — it's a completely separate layer in SurfaceFlinger's composition stack.</div>\n\n<hr class=\"section-divider\">\n<h3>Section 5: BufferQueue — The Producer-Consumer Pipeline</h3>\n<p>The BufferQueue is the central data structure connecting the app (producer) to SurfaceFlinger (consumer). It manages a pool of graphic buffers and coordinates their lifecycle.</p>\n<div class=\"diagram\">Buffer Lifecycle in the BufferQueue:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n        App (Producer)                    SurfaceFlinger (Consumer)\n    ┌───────────────────┐             ┌───────────────────────────┐\n    │                   │             │                           │\n    │  1. dequeueBuffer │◄── FREE ────│  4. releaseBuffer         │\n    │     (get a buffer │             │     (done compositing,    │\n    │      to draw into)│             │      return to pool)      │\n    │         │         │             │           ▲               │\n    │         ▼         │             │           │               │\n    │  2. draw pixels   │             │  3. acquireBuffer         │\n    │     into buffer   │             │     (get next queued      │\n    │         │         │             │      frame to composite)  │\n    │         ▼         │             │           ▲               │\n    │  3. queueBuffer   │── QUEUED ──►│           │               │\n    │     (submit frame)│             │                           │\n    └───────────────────┘             └───────────────────────────┘\n\nBuffer States:\n┌──────┐  dequeue  ┌──────────┐  queue  ┌────────┐  acquire  ┌──────────┐  release\n│ FREE │──────────►│ DEQUEUED │────────►│ QUEUED │──────────►│ ACQUIRED │─────────►│ FREE │\n└──────┘           └──────────┘         └────────┘           └──────────┘          └──────┘\n   ▲                                                                                  │\n   └──────────────────────────────────────────────────────────────────────────────────┘</div>\n<div class=\"info-box\"><b>Triple buffering in action:</b><br>\n<b>Buffer A</b> — ACQUIRED by SurfaceFlinger, being composited for display<br>\n<b>Buffer B</b> — QUEUED, waiting for SurfaceFlinger to pick it up next VSYNC<br>\n<b>Buffer C</b> — DEQUEUED by app, currently being drawn into<br><br>\nThe app never blocks waiting for a buffer (as long as one is FREE). SurfaceFlinger always has the latest frame ready. The display always has something to show.</div>\n\n<hr class=\"section-divider\">\n<h3>Section 6: Shared Memory — Why Not Binder for Pixels</h3>\n<p>A full-screen 1080p frame is about 8 MB of pixel data (1920 x 1080 x 4 bytes RGBA). At 60fps, that's <b>480 MB/s</b> of raw pixel data. How does this data get from the app to SurfaceFlinger?</p>\n<div class=\"diagram\">Why shared memory is the ONLY option:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n❌ Unix Sockets:\n   8 MB × 60 fps = 480 MB/s through kernel socket buffers\n   Two copies: app → kernel buffer → SurfaceFlinger\n   Socket buffer default: 128 KB — would need 8 MB chunks\n   Catastrophically slow.\n\n❌ Binder:\n   Transaction limit: 1 MB per transaction\n   Frame size: ~8 MB per frame\n   Would need 8+ transactions per frame\n   Plus: copy into Parcel + copy out of Parcel = two copies\n   Impossible at 60fps.\n\n✅ Shared Memory (gralloc + mmap):\n   GraphicBuffer allocated by gralloc HAL\n   Physical memory mapped into BOTH processes\n   App writes pixels → SurfaceFlinger reads pixels\n   ZERO copies. Same physical pages.\n   Only the file descriptor (4 bytes) crosses Binder.</div>\n<p>The <b>GraphicBuffer</b> is backed by <code>gralloc</code> (the graphics memory allocator HAL). Gralloc allocates memory that is accessible by both the CPU and GPU — on some SoCs this is dedicated GPU VRAM, on unified-memory architectures (most mobile) it's regular RAM with GPU cache coherency.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// What actually crosses Binder (simplified):</span>\n\n<span class=\"cmt\">// 1. App asks for a buffer (small Binder call)</span>\nBufferQueue.dequeueBuffer()  <span class=\"cmt\">// returns: buffer slot index + fence fd</span>\n                             <span class=\"cmt\">// size: ~100 bytes via Binder</span>\n\n<span class=\"cmt\">// 2. App draws into shared memory (ZERO Binder involvement)</span>\ncanvas.drawRect(...)  <span class=\"cmt\">// writes directly to mmap'd GraphicBuffer</span>\n                      <span class=\"cmt\">// SurfaceFlinger can see these bytes</span>\n\n<span class=\"cmt\">// 3. App submits frame (small Binder call)</span>\nBufferQueue.queueBuffer()  <span class=\"cmt\">// sends: slot index + crop rect + timestamp</span>\n                           <span class=\"cmt\">// size: ~200 bytes via Binder</span>\n\n<span class=\"cmt\">// Total Binder data per frame: ~300 bytes</span>\n<span class=\"cmt\">// Total pixel data per frame: ~8,000,000 bytes (zero-copy via mmap)</span></div>\n<div class=\"info-box\"><b>Binder is the control plane, shared memory is the data plane.</b> Binder handles the coordination — \"give me a buffer\", \"I'm done with buffer #3\", \"here's the crop rect for this frame\". The actual pixel data never touches Binder. The file descriptor for the GraphicBuffer is passed via Binder once (when the buffer is first allocated), and both processes mmap the same physical pages.</div>\n\n<hr class=\"section-divider\">\n<h3>Section 7: SurfaceFlinger — The System Compositor</h3>\n<p>SurfaceFlinger is a native C++ system service (<code>/system/bin/surfaceflinger</code>) that runs in its own process. Its job: collect all visible Surfaces from all apps and composite them into the final frame that the display shows.</p>\n<div class=\"diagram\">SurfaceFlinger Composition Decision:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nEvery VSYNC, SurfaceFlinger:\n\n1. Collect all visible layers (surfaces)\n   ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐\n   │Status Bar│ │  App     │ │  Video   │ │Nav Bar   │\n   │  Layer   │ │  Layer   │ │  Layer   │ │  Layer   │\n   └──────────┘ └──────────┘ └──────────┘ └──────────┘\n\n2. Ask HWC: \"Can you handle these layers?\"\n   HWC checks its overlay plane capabilities:\n   ┌──────────────────────────────────────┐\n   │  Display Hardware (HWC HAL)          │\n   │  Overlay Plane 0: Status Bar  ✓     │\n   │  Overlay Plane 1: App         ✓     │\n   │  Overlay Plane 2: Video       ✓     │\n   │  Overlay Plane 3: Nav Bar     ✓     │\n   │                                      │\n   │  All 4 fit in hardware → NO GPU     │\n   │  needed! Maximum power savings.      │\n   └──────────────────────────────────────┘\n\n3a. If HWC accepts all layers: Hardware Composition\n    Display hardware blends layers directly → GPU idle → battery savings\n\n3b. If too many layers or unsupported formats:\n    SurfaceFlinger GPU-composites the excess layers\n    ┌──────────────────────────────┐\n    │ GPU composites layers 5-8   │\n    │ into a single framebuffer   │\n    │ texture                     │\n    └──────────────────────────────┘\n    Then HWC composites: overlay planes + GPU output = final frame</div>\n<p>Most modern mobile SoCs support 4-8 overlay planes in hardware. Simple screens (status bar + app + nav bar) are often fully hardware-composited, meaning the GPU is completely idle during composition — a significant power savings.</p>\n\n<h4>VSYNC Synchronization</h4>\n<p>SurfaceFlinger synchronizes everything to the display's VSYNC signal:</p>\n<div class=\"diagram\">VSYNC Timeline (60 Hz = 16.67ms per frame):\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nVSYNC 0          VSYNC 1          VSYNC 2          VSYNC 3\n  │                │                │                │\n  │ App draws      │ App draws      │ App draws      │\n  │ frame N        │ frame N+1      │ frame N+2      │\n  │                │                │                │\n  │    SF composes │    SF composes │    SF composes  │\n  │    frame N-1   │    frame N     │    frame N+1   │\n  │                │                │                │\n  │       Display  │       Display  │       Display  │\n  │       frame N-2│       frame N-1│       frame N  │\n  ▼                ▼                ▼                ▼</div>\n\n<hr class=\"section-divider\">\n<h3>Section 8: NDK — Drawing Directly to a Surface</h3>\n<p>The NDK provides <code>ANativeWindow</code>, the native equivalent of a Java Surface. Game engines, video players, and camera processors use this to draw directly without going through the View system.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Basic NDK software drawing (C code)</span>\n#include &lt;android/native_window.h&gt;\n#include &lt;android/native_window_jni.h&gt;\n\nvoid drawFrame(JNIEnv* env, jobject javaSurface) {\n    <span class=\"cmt\">// 1. Get native window from Java Surface</span>\n    ANativeWindow* window = ANativeWindow_fromSurface(env, javaSurface);\n\n    <span class=\"cmt\">// 2. Configure the buffer format</span>\n    ANativeWindow_setBuffersGeometry(window, 1920, 1080, AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM);\n\n    <span class=\"cmt\">// 3. Lock to get direct pixel buffer access</span>\n    ANativeWindow_Buffer buffer;\n    ANativeWindow_lock(window, &amp;buffer, NULL);\n\n    <span class=\"cmt\">// 4. Draw pixels directly (software rendering)</span>\n    uint32_t* pixels = (uint32_t*)buffer.bits;\n    for (int y = 0; y &lt; buffer.height; y++) {\n        for (int x = 0; x &lt; buffer.width; x++) {\n            pixels[y * buffer.stride + x] = 0xFF0000FF; <span class=\"cmt\">// solid blue</span>\n        }\n    }\n\n    <span class=\"cmt\">// 5. Unlock and post — submits the frame to BufferQueue</span>\n    ANativeWindow_unlockAndPost(window);\n\n    <span class=\"cmt\">// 6. Release the native window reference</span>\n    ANativeWindow_release(window);\n}</div>\n<p>For GPU-accelerated NDK rendering, you have two options:</p>\n<div class=\"diagram\">NDK GPU Rendering Options:\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nOpenGL ES (via EGL):                    Vulkan:\n─────────────────────                   ───────\nANativeWindow                           ANativeWindow\n    │                                       │\n    ▼                                       ▼\neglCreateWindowSurface()                vkCreateAndroidSurfaceKHR()\n    │                                       │\n    ▼                                       ▼\nEGLSurface                              VkSurfaceKHR → VkSwapchainKHR\n    │                                       │\n    ▼                                       ▼\nglDrawElements() etc.                   vkCmdDraw() etc.\n    │                                       │\n    ▼                                       ▼\neglSwapBuffers()                        vkQueuePresentKHR()\n    │                                       │\n    ▼                                       ▼\nFrame goes to BufferQueue              Frame goes to BufferQueue\n→ SurfaceFlinger → display              → SurfaceFlinger → display</div>\n<div class=\"info-box\"><b>NDK rendering use cases:</b><br>\n<b>Game engines</b> (Unity, Unreal, Godot): use EGL/Vulkan for full GPU control<br>\n<b>Video players</b> (ExoPlayer, VLC): decode + render to ANativeWindow surface<br>\n<b>Camera preview processing</b>: process camera frames in C/C++ before display<br>\n<b>Custom renderers</b>: Skia, Flutter, web browsers — all use ANativeWindow</div>\n\n<hr class=\"section-divider\">\n<h3>Section 9: Compose Rendering Path</h3>\n<p>Jetpack Compose does NOT have its own rendering pipeline. It plugs into the exact same pipeline as the View system — just with a different front-end.</p>\n<div class=\"diagram\">View System:                            Compose:\n────────────                            ────────\nView tree                               @Composable functions\n  │                                       │\n  ▼                                       ▼\nmeasure()/layout()                      LayoutNode tree\n  │                                     measure/layout/draw phases\n  ▼                                       │\nonDraw(Canvas)                            ▼\n  │                                     Canvas draw calls\n  ▼                                       │\nDisplayList / RenderNode  ◄───────────────┘   ← SAME from here down\n  │\n  ▼\nRenderThread (OpenGL/Vulkan)\n  │\n  ▼\nSurface → BufferQueue → SurfaceFlinger → HWC → Display</div>\n<p><code>AndroidComposeView</code> is a regular <code>View</code> subclass. It implements <code>onDraw()</code> and records Compose's drawing operations into a RenderNode, just like any other View. From that point forward, the rendering path is identical.</p>\n<div class=\"lesson-code\"><span class=\"cmt\">// Compose draw phase — same Canvas API as View system</span>\n@Composable\nfun CustomCircle() {\n    Canvas(modifier = Modifier.size(100.dp)) {\n        drawCircle(\n            color = Color.Blue,\n            radius = size.minDimension / 2f\n        )\n        <span class=\"cmt\">// This drawCircle() call records a DrawCircle op</span>\n        <span class=\"cmt\">// into a RenderNode's DisplayList — same as View.onDraw()</span>\n    }\n}\n\n<span class=\"cmt\">// Under the hood:</span>\n<span class=\"cmt\">// AndroidComposeView (a View) → onDraw(Canvas) →</span>\n<span class=\"cmt\">// dispatches to LayoutNode draw → Canvas.drawCircle() →</span>\n<span class=\"cmt\">// recorded into DisplayList → RenderThread → Surface → ...</span></div>\n<div class=\"warn-box\"><b>Common misconception:</b> Compose does NOT bypass SurfaceFlinger, does NOT have its own GPU pipeline, and does NOT render differently at the system level. The innovation is at the <i>top</i> of the pipeline — declarative UI, smart recomposition, LayoutNode tree — not at the bottom. The actual pixel rendering uses the same RenderNode → RenderThread → Surface → BufferQueue → SurfaceFlinger path as Views.</div>\n\n<hr class=\"section-divider\">\n<h3>Section 10: Things That Bypass the Compositor (Punch-Through)</h3>\n<p>In certain cases, content can partially or fully bypass the normal GPU composition path, going more directly to the display hardware. These \"punch-through\" paths exist for performance, power, or security reasons.</p>\n\n<h4>HWC Overlay Planes</h4>\n<p>The most common bypass: HWC places a Surface directly on a hardware overlay plane, skipping GPU composition entirely. The display controller blends the planes in hardware.</p>\n<div class=\"diagram\">Normal GPU Composition:            HWC Overlay (Punch-Through):\n───────────────────────            ────────────────────────────\nLayer A ──┐                        Layer A ──► Overlay Plane 0\nLayer B ──┤── GPU blends           Layer B ──► Overlay Plane 1\nLayer C ──┤   all layers           Layer C ──► Overlay Plane 2\nLayer D ──┘   into one             Layer D ──► Overlay Plane 3\n    │         framebuffer              │\n    ▼                                  ▼\nDisplay shows                      Display controller blends\nGPU output                         planes in hardware\n\nResult: GPU idle                   Result: GPU idle\n         ×                                  ✓\n(GPU was used to compose)          (hardware did it, GPU free)</div>\n\n<h4>Video Overlays</h4>\n<p>Some SoCs route video decoder output directly to a HWC overlay plane, bypassing both the app's Surface and GPU composition. The video frames go from decoder → HWC plane → display.</p>\n\n<h4>Protected Content (DRM)</h4>\n<p>DRM-protected content (Netflix, Disney+) uses Widevine L1 secure buffer paths. The decoded video frames are placed in <b>protected memory</b> that is inaccessible to the CPU and normal GPU paths. They can only be sent to the display through secure HWC overlay planes. This is why you see a black rectangle when screenshotting DRM content.</p>\n\n<h4>Direct Display (Android 13+)</h4>\n<p>Android 13 introduced features to reduce compositor latency for games and immersive apps. In \"game mode\" scenarios, SurfaceFlinger can reduce its involvement, letting the app's surface go more directly to the display with fewer intermediate steps.</p>\n\n<div class=\"info-box\"><b>Why punch-through matters:</b><br>\n<b>Lower latency:</b> Fewer stages between app and display = fewer frames of delay<br>\n<b>Lower power:</b> GPU stays idle when HWC handles composition in hardware<br>\n<b>Security:</b> DRM content never enters CPU-accessible memory<br><br>\n<b>Limitation:</b> Most displays support only 4-8 overlay planes. If there are more visible layers than planes, SurfaceFlinger must GPU-composite the excess layers before handing the result to HWC.</div>",
+  "questions": [
+    {
+      "id": "gp-1",
+      "type": "multiple-choice",
+      "title": "BufferQueue Lifecycle",
+      "difficulty": "intermediate",
+      "description": "What is the correct sequence of buffer states in the BufferQueue as a frame travels from the app to the display?",
+      "options": [
+        "QUEUED → DEQUEUED → ACQUIRED → FREE",
+        "FREE → DEQUEUED → QUEUED → ACQUIRED → FREE",
+        "DEQUEUED → FREE → QUEUED → ACQUIRED",
+        "FREE → ACQUIRED → DEQUEUED → QUEUED"
+      ],
+      "correctIndex": 1,
+      "explanation": "A buffer starts in the <b>FREE</b> state. The app calls <code>dequeueBuffer()</code> to move it to <b>DEQUEUED</b>, draws into it, then calls <code>queueBuffer()</code> to move it to <b>QUEUED</b>. SurfaceFlinger calls <code>acquireBuffer()</code> to move it to <b>ACQUIRED</b> for composition. After composition, <code>releaseBuffer()</code> returns it to <b>FREE</b>. This cycle repeats for every frame.",
+      "hints": [
+        "Think about who touches the buffer first — the app or SurfaceFlinger?",
+        "The app 'dequeues' a free buffer to draw into"
+      ]
+    },
+    {
+      "id": "gp-2",
+      "type": "trivia",
+      "title": "Why Shared Memory, Not Binder?",
+      "difficulty": "advanced",
+      "description": "Explain why Android uses shared memory (gralloc + mmap) instead of Binder to transfer pixel data from apps to SurfaceFlinger.",
+      "keywords": [
+        "shared memory",
+        "mmap",
+        "zero copy",
+        "Binder",
+        "1 MB",
+        "limit",
+        "8 MB",
+        "frame",
+        "gralloc",
+        "GraphicBuffer",
+        "file descriptor",
+        "480 MB",
+        "control plane",
+        "data plane"
+      ],
+      "answer": "A single 1080p RGBA frame is about 8 MB. At 60fps, that's 480 MB/s of pixel data. Binder has a 1 MB per-transaction limit, so a single frame would need 8+ transactions — far too slow at 60fps. Instead, Android uses shared memory: gralloc allocates a GraphicBuffer in GPU-accessible memory, and both the app and SurfaceFlinger mmap the same physical pages. The pixel data is ZERO-COPY — the app writes directly to memory that SurfaceFlinger reads. Only the buffer's file descriptor (a few bytes) is passed via Binder once. Binder serves as the control plane (dequeue/queue/acquire/release) while shared memory is the data plane.",
+      "explanation": "This is a fundamental design decision in Android's graphics architecture. Binder is excellent for small IPC messages (intents, service calls), but it was never designed for bulk data transfer. The shared memory approach means pixel data is never copied — the app and SurfaceFlinger literally read and write the same physical memory pages, coordinated by the BufferQueue's state machine.",
+      "hints": [
+        "How large is a single 1080p frame in bytes?",
+        "What is Binder's per-transaction size limit?"
+      ]
+    },
+    {
+      "id": "gp-3",
+      "type": "multiple-choice",
+      "title": "SurfaceView vs TextureView",
+      "difficulty": "intermediate",
+      "description": "A developer needs to display a camera preview with rounded corners and a fade-in animation. Which should they use and why?",
+      "options": [
+        "SurfaceView — it has better performance and supports all View transforms",
+        "TextureView — it renders into the Window's surface so it supports View transforms like rounded corners, alpha, and animations",
+        "Either works — they have the same capabilities",
+        "Neither — use a regular ImageView and update it per frame"
+      ],
+      "correctIndex": 1,
+      "explanation": "SurfaceView creates its own separate Surface that SurfaceFlinger composites as an independent layer. This means it does NOT respect View-level transforms like rounded corner clipping, alpha blending, or animations — it's just a rectangle at a fixed z-order. TextureView renders the content into the Window's own Surface via SurfaceTexture, making it part of the View tree. This means it supports all View transforms, but at the cost of an extra GPU copy. For rounded corners + fade animation, TextureView is required.",
+      "hints": [
+        "Think about where each one draws — same surface as the Window, or a separate surface?",
+        "If the content is on a separate SurfaceFlinger layer, can the View system clip it?"
+      ]
+    },
+    {
+      "id": "gp-4",
+      "type": "multiple-choice",
+      "title": "HWC vs GPU Composition",
+      "difficulty": "intermediate",
+      "description": "An Android phone displays 3 visible layers: status bar, app content, and navigation bar. The HWC has 4 overlay planes available. How does SurfaceFlinger compose the final frame?",
+      "options": [
+        "GPU composition — SurfaceFlinger always uses the GPU to blend layers",
+        "Hardware composition — all 3 layers fit in HWC overlay planes, so the GPU is idle and the display hardware blends them directly",
+        "Mixed — the status bar and nav bar are GPU-composited, the app uses a hardware overlay",
+        "The app composites all three layers itself before submitting to SurfaceFlinger"
+      ],
+      "correctIndex": 1,
+      "explanation": "SurfaceFlinger asks HWC: \"Can you handle these 3 layers?\" Since HWC has 4 overlay planes and only 3 are needed, HWC accepts all of them. Each layer is assigned to a hardware overlay plane, and the display controller blends them directly — no GPU involvement. This is the most power-efficient composition path. The GPU only gets involved when there are more layers than available overlay planes, or when a layer uses a format/transform that HWC doesn't support.",
+      "hints": [
+        "HWC has 4 planes and there are only 3 layers — do they all fit?",
+        "What is the power advantage of hardware composition?"
+      ]
+    },
+    {
+      "id": "gp-5",
+      "type": "multiple-choice",
+      "title": "RenderThread Role",
+      "difficulty": "intermediate",
+      "description": "What is the primary role of the RenderThread introduced in Android 5.0 (Lollipop)?",
+      "options": [
+        "It replaces the main thread for all UI work including measure and layout",
+        "It executes GPU commands (OpenGL/Vulkan) from recorded DisplayLists, freeing the main thread from GPU work",
+        "It handles touch events and input dispatch",
+        "It runs SurfaceFlinger's composition logic inside the app process"
+      ],
+      "correctIndex": 1,
+      "explanation": "The RenderThread takes the DisplayList (recorded by the main thread during <code>View.draw()</code>) and replays it as actual OpenGL ES or Vulkan GPU commands. This means the main thread only needs to record drawing operations, not wait for the GPU to execute them. The main thread is free to handle input, layout, and business logic while the RenderThread handles GPU submission. This is also why RenderNode property animations (alpha, translation, rotation, scale) can run at 60fps even when the main thread is janking — the RenderThread updates them directly.",
+      "hints": [
+        "What did the main thread have to do before RenderThread existed?",
+        "Think about which thread talks to the GPU"
+      ]
+    },
+    {
+      "id": "gp-6",
+      "type": "multiple-choice",
+      "title": "invalidate() vs requestLayout()",
+      "difficulty": "intermediate",
+      "description": "A View's background color changes but its size stays the same. Which method should be called, and why?",
+      "options": [
+        "requestLayout() — any visual change requires a full measure/layout/draw pass",
+        "invalidate() — it marks the RenderNode dirty and triggers only a re-draw (onDraw), skipping the expensive measure/layout passes",
+        "postInvalidate() — because invalidate() is deprecated",
+        "forceLayout() — it's the most efficient way to update appearance"
+      ],
+      "correctIndex": 1,
+      "explanation": "<code>invalidate()</code> marks the View's RenderNode as dirty, causing the framework to re-record its DisplayList by calling <code>onDraw()</code>. It does NOT trigger measure or layout. <code>requestLayout()</code> triggers the full measure → layout → draw pipeline, which is much more expensive because it can cascade through the entire View tree. Since only the color changed (not the size), <code>invalidate()</code> is correct — it redraws the View without re-measuring anything.",
+      "hints": [
+        "Does a color change affect the View's size or position?",
+        "Which call triggers onDraw() without triggering onMeasure() and onLayout()?"
+      ]
+    },
+    {
+      "id": "gp-7",
+      "type": "what-does-this-do",
+      "title": "NDK Drawing to a Surface",
+      "difficulty": "advanced",
+      "description": "What does this NDK code do, and where do the pixels end up?",
+      "code": "ANativeWindow* window = ANativeWindow_fromSurface(env, javaSurface);\nANativeWindow_Buffer buffer;\nANativeWindow_lock(window, &buffer, NULL);\nuint32_t* pixels = (uint32_t*)buffer.bits;\nfor (int y = 0; y < buffer.height; y++) {\n    for (int x = 0; x < buffer.width; x++) {\n        pixels[y * buffer.stride + x] = 0xFFFF0000;\n    }\n}\nANativeWindow_unlockAndPost(window);\nANativeWindow_release(window);",
+      "options": [
+        "It reads pixel data from the display into a buffer",
+        "It software-renders a solid red frame directly into a Surface's GraphicBuffer, then submits it to the BufferQueue for SurfaceFlinger to composite",
+        "It uploads a texture to the GPU via Vulkan",
+        "It copies a bitmap from Java to native memory"
+      ],
+      "correctIndex": 1,
+      "explanation": "This code: (1) gets a native window handle from a Java Surface, (2) locks a buffer to get direct CPU pixel access, (3) fills every pixel with 0xFFFF0000 (ARGB = fully opaque red), (4) unlocks and posts the buffer, which queues it in the BufferQueue. From there, SurfaceFlinger acquires the buffer and composites it with other visible layers onto the display. This is software rendering — the CPU writes pixels directly. For GPU rendering, you'd use EGL+OpenGL or Vulkan instead of lock/write/unlock.",
+      "hints": [
+        "0xFFFF0000 in ARGB format — what color is that?",
+        "ANativeWindow_unlockAndPost submits the buffer — to what?"
+      ]
+    },
+    {
+      "id": "gp-8",
+      "type": "trivia",
+      "title": "Triple Buffering Purpose",
+      "difficulty": "intermediate",
+      "description": "Explain why Android uses triple buffering instead of double buffering in the graphics pipeline. What problem does the third buffer solve?",
+      "keywords": [
+        "triple",
+        "buffer",
+        "stall",
+        "latency",
+        "VSYNC",
+        "frame",
+        "drawing",
+        "wait",
+        "pipeline",
+        "jank"
+      ],
+      "answer": "With double buffering, if the app misses a VSYNC deadline, it must wait an entire frame period (16.7ms at 60Hz) before it can start drawing the next frame, because both buffers are occupied — one is being displayed and the other was just submitted. Triple buffering adds a third buffer so the app always has a free buffer to draw into, even when it misses a deadline. This eliminates pipeline stalls at the cost of one additional frame of latency. The app draws frame N+1 into buffer C while SurfaceFlinger composites frame N from buffer B and the display shows frame N-1 from buffer A.",
+      "explanation": "Triple buffering is a classic throughput-vs-latency trade-off. It adds one frame of input-to-display latency (~16.7ms at 60Hz) but prevents cascading jank. Without it, one missed frame causes the app to wait, making it likely to miss the NEXT frame too — a jank cascade. With triple buffering, the app recovers immediately because there's always a buffer available.",
+      "hints": [
+        "What happens with double buffering if the app takes 20ms to draw a frame on a 60Hz display?",
+        "What does the app need to be doing while SurfaceFlinger is compositing?"
+      ]
+    },
+    {
+      "id": "gp-9",
+      "type": "multiple-choice",
+      "title": "Compose Rendering Path",
+      "difficulty": "intermediate",
+      "description": "Which statement about Jetpack Compose's rendering path is TRUE?",
+      "options": [
+        "Compose bypasses SurfaceFlinger and renders directly to the display",
+        "Compose has its own custom GPU pipeline separate from the View system",
+        "Compose records Canvas operations into RenderNodes and shares the same RenderThread → Surface → BufferQueue → SurfaceFlinger path as the View system",
+        "Compose uses software rendering because it doesn't support hardware acceleration"
+      ],
+      "correctIndex": 2,
+      "explanation": "Compose's innovation is at the top of the pipeline — declarative UI, smart recomposition, LayoutNode tree — not at the bottom. <code>AndroidComposeView</code> is a regular <code>View</code> subclass. During the draw phase, Compose issues Canvas drawing commands that are recorded into RenderNodes, exactly like the View system. From RenderNode onward, the path is identical: RenderThread replays GPU commands, submits to the Surface, BufferQueue delivers to SurfaceFlinger, and HWC puts pixels on the display. Compose does NOT have its own rendering backend.",
+      "hints": [
+        "AndroidComposeView extends which class?",
+        "Does Compose need its own SurfaceFlinger connection, or does it use the Window's existing Surface?"
+      ]
+    },
+    {
+      "id": "gp-10",
+      "type": "multiple-choice",
+      "title": "Protected Content and Overlay Bypass",
+      "difficulty": "advanced",
+      "description": "Why does screenshotting a Netflix video show a black rectangle instead of the video frame?",
+      "options": [
+        "Netflix uses a custom screenshot blocker API to prevent captures",
+        "The video is rendered with Widevine L1 DRM into protected memory accessible only through secure HWC overlay planes — screenshots read the normal framebuffer which doesn't contain the protected content",
+        "The app sets FLAG_SECURE on the Window, which blocks all screenshots",
+        "SurfaceFlinger intentionally replaces video frames with black in the screenshot buffer"
+      ],
+      "correctIndex": 1,
+      "explanation": "DRM-protected content (Widevine L1) uses a secure buffer path. The video decoder places decoded frames into <b>protected memory</b> that is inaccessible to the CPU and normal GPU composition paths. These frames can only be displayed through secure HWC overlay planes that route directly to the display controller. When you take a screenshot, Android reads the GPU-composited framebuffer — but the DRM content was never in that framebuffer (it went through a separate secure overlay). The result is a black rectangle where the video should be. This is by design — it prevents screen recording of protected content.",
+      "hints": [
+        "Think about WHERE the video pixels exist in memory — are they in the same framebuffer as everything else?",
+        "What does 'secure overlay plane' mean for screenshot tools?"
+      ]
+    }
+  ]
+}

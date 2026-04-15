@@ -2,7 +2,7 @@
   {
     "id": "android-fundamentals",
     "title": "Android Fundamentals",
-    "icon": "\ud83d\udcf1",
+    "icon": "📱",
     "description": "Core building blocks of Android applications",
     "file": "android-fundamentals.json",
     "category": "Foundations"
@@ -10,7 +10,7 @@
   {
     "id": "kotlin-essentials",
     "title": "Kotlin Essentials",
-    "icon": "\ud83c\udfaf",
+    "icon": "🎯",
     "description": "Kotlin language features essential for Android development",
     "file": "kotlin-essentials.json",
     "category": "Foundations"
@@ -18,7 +18,7 @@
   {
     "id": "kotlin-advanced",
     "title": "Advanced Kotlin",
-    "icon": "\ud83e\uddec",
+    "icon": "🧬",
     "description": "Generics variance, reified types, value classes, DSLs, contracts, and delegation",
     "file": "kotlin-advanced.json",
     "category": "Foundations"
@@ -26,7 +26,7 @@
   {
     "id": "android-internals",
     "title": "Android Internals & Process Model",
-    "icon": "\ud83d\udd2c",
+    "icon": "🔬",
     "description": "Zygote, process death, SavedStateHandle, memory management, threading models, and app startup",
     "file": "android-internals.json",
     "category": "Foundations"
@@ -34,7 +34,7 @@
   {
     "id": "permissions",
     "title": "Permissions Deep Dive",
-    "icon": "\ud83d\udd11",
+    "icon": "🔑",
     "description": "App-level runtime permissions, custom permission definitions, and system/OEM privileged permission infrastructure",
     "file": "permissions.json",
     "category": "Foundations"
@@ -42,7 +42,7 @@
   {
     "id": "android-manifest",
     "title": "The Android Manifest",
-    "icon": "\ud83d\udccb",
+    "icon": "📋",
     "description": "AndroidManifest.xml: component declarations, intent filters, permissions, manifest merging, and advanced features",
     "file": "android-manifest.json",
     "category": "Foundations"
@@ -50,7 +50,7 @@
   {
     "id": "handler-looper",
     "title": "Handler, Looper & MessageQueue",
-    "icon": "\ud83d\udce8",
+    "icon": "📨",
     "description": "The threading backbone of Android: Looper event loops, MessageQueue scheduling, Handler dispatch, and sync barriers",
     "file": "handler-looper.json",
     "category": "Threading & Concurrency"
@@ -58,15 +58,15 @@
   {
     "id": "async-evolution",
     "title": "The Async Evolution in Android",
-    "icon": "\u23f3",
-    "description": "Complete timeline of async mechanisms from Thread to Coroutines \u2014 why each existed, why it was replaced, and what to use today",
+    "icon": "⏳",
+    "description": "Complete timeline of async mechanisms from Thread to Coroutines — why each existed, why it was replaced, and what to use today",
     "file": "async-evolution.json",
     "category": "Threading & Concurrency"
   },
   {
     "id": "coroutines-deep-dive",
     "title": "Coroutines Deep Dive",
-    "icon": "\ud83d\udd04",
+    "icon": "🔄",
     "description": "Scopes, structured concurrency, exception handling, and advanced patterns",
     "file": "coroutines-deep-dive.json",
     "category": "Threading & Concurrency"
@@ -74,7 +74,7 @@
   {
     "id": "background-processing",
     "title": "Background Processing & WorkManager",
-    "icon": "\u2699\ufe0f",
+    "icon": "⚙️",
     "description": "WorkManager, foreground services, background execution limits, and choosing the right API",
     "file": "background-processing.json",
     "category": "Threading & Concurrency"
@@ -82,7 +82,7 @@
   {
     "id": "flow-stateflow",
     "title": "Flow & StateFlow",
-    "icon": "\ud83c\udf0a",
+    "icon": "🌊",
     "description": "Cold flows, hot flows, StateFlow, SharedFlow, operators, and testing",
     "file": "flow-stateflow.json",
     "category": "Reactive Data & State"
@@ -90,7 +90,7 @@
   {
     "id": "livedata-rxjava",
     "title": "LiveData & RxJava Deep Comparison",
-    "icon": "\ud83d\udce1",
+    "icon": "📡",
     "description": "RxJava types and patterns, LiveData lifecycle magic, full comparison, and migration to Flow/StateFlow",
     "file": "livedata-rxjava.json",
     "category": "Reactive Data & State"
@@ -98,7 +98,7 @@
   {
     "id": "message-bus-evolution",
     "title": "Message Bus Evolution",
-    "icon": "\ud83d\udce8",
+    "icon": "📨",
     "description": "The evolution of component communication in Android: from callbacks to SharedFlow",
     "file": "message-bus-evolution.json",
     "category": "Reactive Data & State"
@@ -106,7 +106,7 @@
   {
     "id": "hot-cold-threading",
     "title": "Hot vs Cold Streams & Threading",
-    "icon": "\ud83c\udf21\ufe0f",
+    "icon": "🌡️",
     "description": "Cold streams, hot streams, cold-to-hot conversion, threading models across RxJava/Flow/LiveData, backpressure, and Channel vs SharedFlow",
     "file": "hot-cold-threading.json",
     "category": "Reactive Data & State"
@@ -114,7 +114,7 @@
   {
     "id": "lifecycle-components",
     "title": "Lifecycle-Aware Components",
-    "icon": "\ud83d\udd01",
+    "icon": "🔁",
     "description": "Activity/Fragment lifecycle, LifecycleObserver, lifecycleScope, repeatOnLifecycle, and lifecycle-aware collection",
     "file": "lifecycle-components.json",
     "category": "Lifecycle & Architecture"
@@ -122,7 +122,7 @@
   {
     "id": "architecture",
     "title": "Architecture Patterns",
-    "icon": "\ud83c\udfd7\ufe0f",
+    "icon": "🏗️",
     "description": "MVVM, Repository pattern, UiState, and dependency injection",
     "file": "architecture.json",
     "category": "Lifecycle & Architecture"
@@ -130,7 +130,7 @@
   {
     "id": "dependency-injection",
     "title": "Dependency Injection Deep Dive",
-    "icon": "\ud83d\udc89",
+    "icon": "💉",
     "description": "Hilt component hierarchy, scoping, assisted inject, multi-module DI, and testing",
     "file": "dependency-injection.json",
     "category": "Lifecycle & Architecture"
@@ -138,7 +138,7 @@
   {
     "id": "offline-first",
     "title": "Offline-First Architecture",
-    "icon": "\ud83d\udcf4",
+    "icon": "📴",
     "description": "Room as single source of truth, sync with WorkManager, conflict resolution, and cache invalidation",
     "file": "offline-first.json",
     "category": "Lifecycle & Architecture"
@@ -146,7 +146,7 @@
   {
     "id": "compose-basics",
     "title": "Compose Basics",
-    "icon": "\ud83c\udfa8",
+    "icon": "🎨",
     "description": "Jetpack Compose fundamentals and state management",
     "file": "compose-basics.json",
     "category": "Jetpack Compose"
@@ -154,7 +154,7 @@
   {
     "id": "compose-advanced",
     "title": "Compose Advanced",
-    "icon": "\ud83d\ude80",
+    "icon": "🚀",
     "description": "LazyColumn, side effects, animations, and performance",
     "file": "compose-advanced.json",
     "category": "Jetpack Compose"
@@ -162,7 +162,7 @@
   {
     "id": "compose-state-mastery",
     "title": "Compose State Mastery",
-    "icon": "\ud83c\udf9b\ufe0f",
+    "icon": "🎛️",
     "description": "All state patterns: @Stable, @Immutable, SnapshotStateList, state hoisting, and when to use what",
     "file": "compose-state-mastery.json",
     "category": "Jetpack Compose"
@@ -170,7 +170,7 @@
   {
     "id": "interop-adaptive",
     "title": "View-Compose Interop & Adaptive Layouts",
-    "icon": "\ud83d\udd04",
+    "icon": "🔄",
     "description": "ComposeView, AndroidView, ViewCompositionStrategy, WindowSizeClass, foldables, and predictive back",
     "file": "interop-adaptive.json",
     "category": "Jetpack Compose"
@@ -178,7 +178,7 @@
   {
     "id": "themes-styles",
     "title": "Themes, Styles & Dark Mode",
-    "icon": "\ud83c\udfa8",
+    "icon": "🎨",
     "description": "View system theming, Compose MaterialTheme, custom design systems, dark mode, and Material You dynamic colors",
     "file": "themes-styles.json",
     "category": "Theming & Resources"
@@ -186,7 +186,7 @@
   {
     "id": "config-rro",
     "title": "Configuration Changes & RROs",
-    "icon": "\ud83d\udd27",
+    "icon": "🔧",
     "description": "Config change triggers, state preservation strategies, resource qualifiers, and Runtime Resource Overlays",
     "file": "config-rro.json",
     "category": "Theming & Resources"
@@ -194,7 +194,7 @@
   {
     "id": "navigation",
     "title": "Navigation",
-    "icon": "\ud83e\udded",
+    "icon": "🧭",
     "description": "Jetpack Navigation Compose, routes, and arguments",
     "file": "navigation.json",
     "category": "App Plumbing"
@@ -202,7 +202,7 @@
   {
     "id": "networking",
     "title": "Networking",
-    "icon": "\ud83c\udf10",
+    "icon": "🌐",
     "description": "Retrofit, OkHttp, serialization, and API patterns",
     "file": "networking.json",
     "category": "App Plumbing"
@@ -210,7 +210,7 @@
   {
     "id": "data-storage",
     "title": "Data & Storage",
-    "icon": "\ud83d\udcbe",
+    "icon": "💾",
     "description": "Room database, DataStore, and local persistence",
     "file": "data-storage.json",
     "category": "App Plumbing"
@@ -218,7 +218,7 @@
   {
     "id": "auth-security",
     "title": "Auth & Security",
-    "icon": "\ud83d\udd10",
+    "icon": "🔐",
     "description": "Authentication, token storage, and security best practices",
     "file": "auth-security.json",
     "category": "App Plumbing"
@@ -226,7 +226,7 @@
   {
     "id": "binder-ipc",
     "title": "Binder, Services & IPC",
-    "icon": "\ud83d\udd17",
+    "icon": "🔗",
     "description": "Binder driver architecture, AIDL, Parcel serialization, service binding, and PendingIntent security",
     "file": "binder-ipc.json",
     "category": "Android Internals"
@@ -234,15 +234,31 @@
   {
     "id": "tasks-intents-windows",
     "title": "Tasks, Intents & Window Management",
-    "icon": "\ud83e\ude9f",
+    "icon": "🪟",
     "description": "Task affinity, Intent flags, IntentFilter matching, ViewRootImpl, window insets, and edge-to-edge",
     "file": "tasks-intents-windows.json",
     "category": "Android Internals"
   },
   {
+    "id": "input-pipeline",
+    "title": "Advanced Input Pipeline",
+    "icon": "👆",
+    "description": "The complete input system from hardware interrupt to View.onTouchEvent: kernel, InputFlinger, IPC, and dispatch",
+    "file": "input-pipeline.json",
+    "category": "Android Internals"
+  },
+  {
+    "id": "graphics-pipeline",
+    "title": "Graphics Pipeline: Surface to Display",
+    "icon": "🖥️",
+    "description": "The complete graphics pipeline from app drawing to pixels on screen: Canvas, RenderThread, Surface, BufferQueue, SurfaceFlinger, HWC, and NDK rendering",
+    "file": "graphics-pipeline.json",
+    "category": "Android Internals"
+  },
+  {
     "id": "ui-responsiveness",
     "title": "UI Responsiveness & RecyclerView vs Compose",
-    "icon": "\ud83c\udfce\ufe0f",
+    "icon": "🏎️",
     "description": "Frame budgets, jank sources, layout performance, and RecyclerView pool-and-rebind vs LazyColumn compose-on-demand",
     "file": "ui-responsiveness.json",
     "category": "Performance & Debugging"
@@ -250,7 +266,7 @@
   {
     "id": "rendering-pipeline",
     "title": "Rendering Pipeline: Views & Compose",
-    "icon": "\ud83d\udd8c\ufe0f",
+    "icon": "🖌️",
     "description": "Measure/layout/draw, Choreographer, hardware acceleration, LayoutNode, Compose three phases, and Skia",
     "file": "rendering-pipeline.json",
     "category": "Performance & Debugging"
@@ -258,7 +274,7 @@
   {
     "id": "performance",
     "title": "Performance",
-    "icon": "\u26a1",
+    "icon": "⚡",
     "description": "Recomposition optimization, memory leaks, and profiling",
     "file": "performance.json",
     "category": "Performance & Debugging"
@@ -266,7 +282,7 @@
   {
     "id": "debugging-profiling",
     "title": "Debugging & Profiling Tools",
-    "icon": "\ud83d\udd0d",
+    "icon": "🔍",
     "description": "Perfetto, LeakCanary, Android Studio Profiler, StrictMode, Layout Inspector, and systematic debugging",
     "file": "debugging-profiling.json",
     "category": "Performance & Debugging"
@@ -274,7 +290,7 @@
   {
     "id": "battery-power",
     "title": "Battery & Power Management",
-    "icon": "\ud83d\udd0b",
+    "icon": "🔋",
     "description": "Doze mode, App Standby Buckets, background execution limits, foreground service types, and battery-efficient patterns",
     "file": "battery-power.json",
     "category": "Performance & Debugging"
@@ -282,7 +298,7 @@
   {
     "id": "testing",
     "title": "Testing",
-    "icon": "\ud83e\uddea",
+    "icon": "🧪",
     "description": "Unit tests, UI tests, and testing coroutines",
     "file": "testing.json",
     "category": "Quality & Shipping"
@@ -290,7 +306,7 @@
   {
     "id": "accessibility-quality",
     "title": "Accessibility & Quality",
-    "icon": "\u267f",
+    "icon": "♿",
     "description": "TalkBack, Compose semantics, touch targets, Android Vitals, staged rollouts, and release management",
     "file": "accessibility-quality.json",
     "category": "Quality & Shipping"
@@ -298,7 +314,7 @@
   {
     "id": "modularization-build",
     "title": "App Modularization & Build System",
-    "icon": "\ud83d\udce6",
+    "icon": "📦",
     "description": "Module types, dependency graphs, version catalogs, convention plugins, KSP, and build optimization",
     "file": "modularization-build.json",
     "category": "Quality & Shipping"
@@ -306,7 +322,7 @@
   {
     "id": "mobile-system-design",
     "title": "Mobile System Design",
-    "icon": "\ud83d\udcd0",
+    "icon": "📐",
     "description": "Design patterns for real-world mobile architecture: offline-first, image loading, feeds, and more",
     "file": "mobile-system-design.json",
     "category": "Interview Prep"
@@ -314,15 +330,15 @@
   {
     "id": "dsa-kotlin",
     "title": "DSA in Kotlin",
-    "icon": "\ud83e\uddee",
-    "description": "Algorithm problems in Kotlin \u2014 the patterns that come up in Android interviews at top firms",
+    "icon": "🧮",
+    "description": "Algorithm problems in Kotlin — the patterns that come up in Android interviews at top firms",
     "file": "dsa-kotlin.json",
     "category": "Interview Prep"
   },
   {
     "id": "mock-interview-lifecycle-coroutines",
     "title": "Mock Interview: Lifecycle & Coroutines",
-    "icon": "\ud83c\udfaf",
+    "icon": "🎯",
     "description": "Simulated L6 Android interview covering lifecycle awareness, coroutine mastery, and architecture design",
     "file": "mock-interview-lifecycle-coroutines.json",
     "category": "Interview Prep"
@@ -330,7 +346,7 @@
   {
     "id": "gemini-app",
     "title": "Build a Gemini App",
-    "icon": "\u2728",
+    "icon": "✨",
     "description": "Capstone: build an AI chat app with the Gemini API",
     "file": "gemini-app.json",
     "category": "Capstone Projects"
@@ -338,7 +354,7 @@
   {
     "id": "capstone-projects",
     "title": "Capstone Projects",
-    "icon": "\ud83c\udfc6",
+    "icon": "🏆",
     "description": "Four practical full-stack projects: Weather Dashboard, Offline-First Notes, Real-Time Chat, and Multi-Module Task Manager",
     "file": "capstone-projects.json",
     "category": "Capstone Projects"
