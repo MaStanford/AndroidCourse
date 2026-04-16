@@ -336,6 +336,14 @@
     "category": "Interview Prep"
   },
   {
+    "id": "practical-patterns",
+    "title": "Practical Patterns & Recipes",
+    "icon": "🧑‍🍳",
+    "description": "30 copy-pasteable Android recipes: power, networking, data, UI, lifecycle, Compose, architecture, and testing",
+    "file": "practical-patterns.json",
+    "category": "Interview Prep"
+  },
+  {
     "id": "mock-interview-lifecycle-coroutines",
     "title": "Mock Interview: Lifecycle & Coroutines",
     "icon": "🎯",
