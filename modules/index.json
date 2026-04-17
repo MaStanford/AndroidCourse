@@ -176,6 +176,14 @@
     "category": "Jetpack Compose"
   },
   {
+    "id": "ai-text-rendering",
+    "title": "AI Text Rendering & Streaming UI",
+    "icon": "\ud83d\udcdd",
+    "description": "Rendering large AI/LLM responses in Compose: streaming text, markdown, selection, and performance optimization",
+    "file": "ai-text-rendering.json",
+    "category": "Jetpack Compose"
+  },
+  {
     "id": "themes-styles",
     "title": "Themes, Styles & Dark Mode",
     "icon": "🎨",
@@ -349,6 +357,14 @@
     "icon": "🎯",
     "description": "Simulated L6 Android interview covering lifecycle awareness, coroutine mastery, and architecture design",
     "file": "mock-interview-lifecycle-coroutines.json",
+    "category": "Interview Prep"
+  },
+  {
+    "id": "enterprise-android",
+    "title": "Enterprise Android & Managed Devices",
+    "icon": "🏢",
+    "description": "Work profiles, managed configurations, DLP, compliance checks, and enterprise-specific Gemini considerations",
+    "file": "enterprise-android.json",
     "category": "Interview Prep"
   },
   {
