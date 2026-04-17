@@ -1,10 +1,12 @@
 # Android Study Guide
 
+**[Live Demo: mastanford.github.io/AndroidCourse](https://mastanford.github.io/AndroidCourse/)**
+
 An interactive, web-based study guide for mastering Android development — built for senior/staff engineer interviews at top tech companies.
 
-**40 modules, 373 questions, 725K+ characters of lesson content** covering everything from Compose basics to Binder IPC internals, with AI-powered feedback via the Claude API.
+**48 modules, 491 questions, 1.3M+ characters of lesson content** covering everything from Compose basics to Binder IPC internals, with AI-powered feedback via the Claude API.
 
-![modules](https://img.shields.io/badge/modules-40-blue) ![questions](https://img.shields.io/badge/questions-373-green) ![content](https://img.shields.io/badge/lesson%20content-725K%20chars-orange)
+![modules](https://img.shields.io/badge/modules-48-blue) ![questions](https://img.shields.io/badge/questions-491-green) ![content](https://img.shields.io/badge/lesson%20content-1.3M%20chars-orange)
 
 ## What's Covered
 
