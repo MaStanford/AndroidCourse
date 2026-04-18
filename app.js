@@ -230,6 +230,9 @@ function renderWelcome() {
 function selectModule(index) {
   state.currentModuleIndex=index; state.currentQuestionIndex=0; state.reviewMode=false;
   state.showingLesson=true;
+  // Close sidebar on mobile
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('visible');
   renderSidebar(); renderLesson();
 }
 
@@ -273,6 +276,11 @@ function renderLesson() {
 
   // Set up scroll spy for TOC highlighting
   if (tocEntries.length > 0) setupScrollSpy();
+  // Show/hide mobile TOC button
+  const tocBtn = document.getElementById('toc-mobile-btn');
+  if (tocBtn) tocBtn.style.display = tocEntries.length > 0 ? '' : 'none';
+  // Scroll to top of lesson
+  document.getElementById('main-content').scrollTop = 0;
   reapplyFontSize();
 }
 
@@ -324,6 +332,11 @@ function renderQuestion() {
 
   renderQuestionBody(q); renderActionBar(q);
   reapplyFontSize();
+  // Hide mobile TOC button on questions view
+  const tocBtn = document.getElementById('toc-mobile-btn');
+  if (tocBtn) tocBtn.style.display = 'none';
+  // Scroll to top
+  document.getElementById('main-content').scrollTop = 0;
 }
 
 function renderQuestionBody(q) {
@@ -665,6 +678,20 @@ function formatType(t){return{'multiple-choice':'Multiple Choice','fill-blank':'
 function smoothScrollTo(id) {
   const el = document.getElementById(id);
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // Close mobile TOC after clicking a link
+  const toc = document.querySelector('.lesson-toc');
+  if (toc) toc.classList.remove('mobile-open');
+  const overlay = document.getElementById('toc-overlay');
+  if (overlay) overlay.classList.remove('visible');
+}
+
+function toggleMobileToc() {
+  const toc = document.querySelector('.lesson-toc');
+  const overlay = document.getElementById('toc-overlay');
+  if (toc) {
+    toc.classList.toggle('mobile-open');
+    if (overlay) overlay.classList.toggle('visible', toc.classList.contains('mobile-open'));
+  }
 }
 
 function setupScrollSpy() {
